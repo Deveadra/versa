@@ -15,5 +15,19 @@ CREATE TABLE IF NOT EXISTS events (
     type TEXT NOT NULL DEFAULT 'event'
 );
 
+-- Extend facts table for embeddings
+-- When creating the table in sqlite.py (or wherever your DB schema lives), add an embedding column.
+
+self.conn.executescript("""
+CREATE TABLE IF NOT EXISTS facts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT,
+    value TEXT,
+    last_updated TEXT,
+    embedding BLOB
+);
+""")
+
+
 -- Optional: simple FTS for keyword fallback
 CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(content, content='events', content_rowid='id');

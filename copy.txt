@@ -1,1 +1,3 @@
 robocopy "\\wsl$\Ubuntu\home\devaedra\src\python_scripts\assistant" C:\Projects\personal\assistant /E
+
+Get-ChildItem -Recurse | Where-Object { $_.FullName -notlike "*.venv*" }

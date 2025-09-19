@@ -1,5 +1,6 @@
 
 from __future__ import annotations
+import openai
 
 from loguru import logger
 from assistant.config.config import settings
@@ -19,6 +20,11 @@ from ..kg.relations import RELATION_QUERY_HINTS
 from datetime import datetime, timedelta
 from ..calendar.store import CalendarStore
 from ..calendar.rrule_helpers import rrule_from_phrase
+from dateutil import parser as dateparser
+from ..utils.embeddings import get_embedding
+import numpy as np
+from ..utils.embeddings import get_embedding, cosine_similarity
+from ..utils.embeddings import get_embedding, cosine_similarity
 
 class Orchestrator:
     def __init__(self):
@@ -43,6 +49,40 @@ class Orchestrator:
         self.scheduler.start()
 
 
+    def add_fact(self, key: str, value: str, threshold: float = 0.85) -> str:
+        """
+        Add a fact to memory with semantic deduplication.
+        If a semantically similar fact exists, update it instead of duplicating.
+        """
+        new_text = f"{key} {value}"
+        new_emb = get_embedding(new_text)
+
+        # search for similar facts
+        cur = self.db.conn.execute("SELECT id, key, value, embedding FROM facts")
+        rows = cur.fetchall()
+
+        for r in rows:
+            old_emb = np.frombuffer(r["embedding"], dtype=np.float32)
+            score = cosine_similarity(new_emb, old_emb)
+
+            if score >= threshold:
+                # Update existing fact instead of duplicating
+                self.db.conn.execute(
+                    "UPDATE facts SET key=?, value=?, last_updated=?, embedding=? WHERE id=?",
+                    (key, value, datetime.utcnow().isoformat(), new_emb.tobytes(), r["id"])
+                )
+                self.db.conn.commit()
+                return f"Updated memory: {key} → {value} (replaced similar fact)."
+
+        # No duplicate found, insert new fact
+        self.db.conn.execute(
+            "INSERT INTO facts (key, value, last_updated, embedding) VALUES (?, ?, ?, ?)",
+            (key, value, datetime.utcnow().isoformat(), new_emb.tobytes())
+        )
+        self.db.conn.commit()
+        return f"Remembered: {key} → {value}"
+        
+        
 # ----- CALENDAR: create recurring event -----
     def create_recurring_event_from_phrase(
         self, title: str, phrase: str, starts_on_iso: str, duration_minutes: int = 60,
@@ -91,7 +131,104 @@ class Orchestrator:
         prompt = build_prompt(memories, user_text, extra_context=kg_context)
         reply = self.brain.complete(SYSTEM_PROMPT, prompt)
         return reply
-            
+    
+    def query_memory_context(self, user_text: str) -> str:
+        """
+        Semantic memory recall using embeddings.
+        Handles natural memory queries like:
+        - 'Do you remember what time I went to sleep last Friday?'
+        - 'What did I tell you about Alice’s favorite color?'
+        """
+        
+        # encode the query
+        query_vec = get_embedding(user_text)
+    
+        # For MVP, just do a simple search. Later: embeddings.
+        cur = self.db.conn.execute("SELECT key, value, last_updated, embedding FROM facts")
+        # cur = self.db.conn.execute(
+        #     "SELECT key, value, last_updated FROM facts ORDER BY last_updated DESC LIMIT 20"
+        # )
+        rows = cur.fetchall()
+        if not rows:
+            return "I don’t have any memory stored yet."
+
+        best = None
+        best_score = -1.0
+    
+        # naive keyword match
+        matches = []
+        for r in rows:
+            emb = np.frombuffer(r["embedding"], dtype=np.float32)
+            score = cosine_similarity(query_vec, emb)
+            if score > best_score:
+                best = r
+                best_score = score
+
+        if best and best_score > 0.75:  # threshold
+            return f"I remember: {best['key']} → {best['value']} (last updated {best['last_updated']})"
+        else:
+            return "I couldn’t find anything in memory that matches."
+        
+        # for r in rows:
+        #     if r["key"].lower() in user_text.lower():
+        #         matches.append(f"{r['key']} → {r['value']} (last updated {r['last_updated']})")
+
+        # if matches:
+        #     return "Here’s what I remember:\n" + "\n".join(matches)
+
+        # return "I couldn’t find anything in memory that matches."
+    
+    def add_event_from_natural(self, text: str) -> str:
+        """
+        Example: 'Add a weekly standup every Monday at 10am starting October 6th'
+        """
+        # Extract title
+        title_match = re.search(r"(?:add|schedule) (.+?) (every|weekly|daily|monthly)", text.lower())
+        title = title_match.group(1).title() if title_match else "Untitled Event"
+
+        # Extract recurrence phrase
+        recur_match = re.search(r"(every .+|daily .+|weekly .+|monthly .+)", text.lower())
+        phrase = recur_match.group(1) if recur_match else None
+
+        # Extract start date/time
+        start_match = re.search(r"(starting|on|beginning) (.+)", text.lower())
+        if start_match:
+            try:
+                dt = dateparser.parse(start_match.group(2), fuzzy=True)
+                start_iso = dt.isoformat()
+            except Exception:
+                return "I couldn’t understand the start date."
+        else:
+            start_iso = datetime.utcnow().isoformat()
+
+        if phrase:
+            event_id = self.create_recurring_event_from_phrase(title, phrase, start_iso)
+            return f"Recurring event '{title}' created (id={event_id})."
+        else:
+            return "I couldn’t detect the recurrence pattern (e.g. 'every Monday at 10am')."
+    
+    def control_device_from_natural(self, text: str) -> str:
+        """
+        Stub for smart home commands like:
+        - 'Turn on the kitchen lights'
+        - 'Set the thermostat to 72 degrees'
+        """
+        if "light" in text.lower():
+            if "off" in text.lower():
+                return "Okay, I’ve turned off the lights."
+            elif "on" in text.lower():
+                return "Okay, I’ve turned on the lights."
+            else:
+                return "Should I turn the lights on or off?"
+
+        if "thermostat" in text.lower() or "temperature" in text.lower():
+            m = re.search(r"(\d{2})", text)
+            if m:
+                return f"Okay, thermostat set to {m.group(1)}°."
+            return "What temperature should I set?"
+
+        return "Device control not yet implemented for that command."
+        
     def query_kg_context(self, user_text: str) -> str:
         tokens = user_text.lower().split()
         now = datetime.utcnow().isoformat()
@@ -182,7 +319,39 @@ class Orchestrator:
 
         return ""
 
-    
+    def forget_memory(self, user_text: str) -> str:
+        """
+        Handles 'forget that Alice likes pizza' or 'erase my old address'.
+        """
+        words = user_text.split()
+        target = None
+        for w in words:
+            if w.istitle():  # naive entity grab
+                target = w
+                break
+
+        if not target:
+            return "What should I forget?"
+
+        self.db.conn.execute("DELETE FROM facts WHERE key LIKE ?", (f"%{target}%",))
+        self.db.conn.commit()
+        return f"I’ve forgotten what I knew about {target}."
+
+    def chat_brain(self, text: str) -> str:
+        """
+        Fallback to ChatGPT when no module matches.
+        """
+        try:
+            resp = openai.ChatCompletion.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are Ultron, a helpful assistant."},
+                    {"role": "user", "content": text},
+                ]
+            )
+            return resp["choices"][0]["message"]["content"].strip()
+        except Exception as e:
+            return f"[ChatGPT Fallback Error] {e}"  
 
     def shutdown(self):
         self.scheduler.stop()

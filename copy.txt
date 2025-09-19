@@ -1,0 +1,1 @@
+robocopy "\\wsl$\Ubuntu\home\devaedra\src\python_scripts\assistant" C:\Projects\personal\assistant /E

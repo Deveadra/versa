@@ -26,6 +26,13 @@ import numpy as np
 from ..utils.embeddings import get_embedding, cosine_similarity
 from ..utils.embeddings import get_embedding, cosine_similarity
 
+from base.llm.prompt_composer import compose_prompt
+from base.llm.retriever import Retriever
+from base.learning.feedback import Feedback
+from base.learning.policy_store import write_policy_assignment, read_policy_assignment
+from base.learning.sentiment import quick_polarity
+from base.personality.tone_adapter import ToneAdapter
+
 class Orchestrator:
     def __init__(self):
         self.db = SQLiteConn(settings.db_path)
@@ -36,6 +43,21 @@ class Orchestrator:
         backend = FAISSBackend(self.embedder, dim=384) if self.embedder else None
         self.retriever = Retriever(self.store, backend)
         self.brain = Brain()
+        # learning & feedback components (inserted)
+        try:
+            self.feedback = Feedback(self.db)
+        except Exception:
+            self.feedback = None
+        try:
+            profile = {}
+        except Exception:
+            profile = {}
+        try:
+            self.tone_adapter = ToneAdapter(profile)
+        except Exception:
+            self.tone_adapter = None
+        self.policy_by_usage_id = {}
+
         self.consolidator = Consolidator(self.store, self.brain)
         self.calendar = CalendarStore(self.db)
 
@@ -129,7 +151,45 @@ class Orchestrator:
 
         # Build prompt with KG facts included
         prompt = build_prompt(memories, user_text, extra_context=kg_context)
+        # select tone policy (if available) and record it so we can attribute feedback later
+        try:
+            policy = self.tone_adapter.choose_policy() if getattr(self, "tone_adapter", None) else None
+            policy_id = policy["id"] if policy else None
+            # stash last policy for immediate use (and mapping by usage_id later)
+            self.last_policy_id = policy_id
+        except Exception:
+            policy = None
+            policy_id = None
+            self.last_policy_id = None
+
+        # compose final prompt using the composer (persona + memories + extra_context)
+        prompt = compose_prompt(SYSTEM_PROMPT, user_text, persona_text=persona_text, memories=memories, extra_context=kg_context, top_k_memories=3)
+        # optionally: you may inject policy instructions into SYSTEM_PROMPT or extra_context based on policy here
         reply = self.brain.complete(SYSTEM_PROMPT, prompt)
+
+        # if we logged a usage for this outgoing reply, attach mapping usage_id -> policy_id so feedback can credit the bandit
+        # if we logged a usage for this outgoing reply, attach mapping usage_id -> policy_id so feedback can credit the bandit
+        try:
+            if hasattr(self, "last_usage_id") and getattr(self, "last_usage_id", None):
+                uid = self.last_usage_id
+                if policy_id:
+                    try:
+                        # keep in-memory mapping (fast)
+                        self.policy_by_usage_id[uid] = policy_id
+                    except Exception:
+                        pass
+                    # persist durable mapping to DB (robust across restarts/workers)
+                    try:
+                        write_policy_assignment(self.db, uid, policy_id)
+                    except Exception:
+                        try:
+                            logger.exception("Failed to persist policy_assignment")
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+
         return reply
     
     def query_memory_context(self, user_text: str) -> str:
@@ -318,6 +378,64 @@ class Orchestrator:
                     return "Knowledge Graph Reasoning:\n" + "\n".join(formatted)
 
         return ""
+
+    def ask_confirmation_if_unsure(self, suggestion: str, confidence: float, usage_id: int = None):
+        """Return a confirmation prompt if confidence is low; caller sends it to user UI/REPL."""
+        try:
+            if confidence is None:
+                return None
+            THRESH = 0.60
+            if confidence < THRESH:
+                q = f"I can {suggestion}. Did I get that right?"
+                return {"ask_user": q, "usage_id": usage_id}
+            return None
+        except Exception:
+            logger.exception("ask_confirmation_if_unsure")
+            return None
+
+    def record_user_feedback(self, usage_id: int, text: str):
+        pid = None
+        if hasattr(self, 'policy_by_usage_id') and usage_id in self.policy_by_usage_id:
+            pid = self.policy_by_usage_id.get(usage_id)
+
+        # fallback to DB lookup if not found in memory (this makes the mapping durable)
+        if not pid:
+            try:
+                pid = read_policy_assignment(self.db, usage_id)
+            except Exception:
+                pid = None
+
+        # fallback to last_policy_id if still nothing
+        if not pid:
+            pid = getattr(self, 'last_policy_id', None)
+
+        """Record feedback, update events, reward the tone bandit, and optionally reinforce habits/facts."""
+        try:
+            # 1) polarity
+            score = quick_polarity(text)   # [-1,1]
+            kind = "confirm" if score > 0.2 else "dislike" if score < -0.2 else "note"
+
+            # 2) record in DB
+            if getattr(self, "feedback", None):
+                try:
+                    self.feedback.record(usage_id, kind, text)
+                except Exception:
+                    logger.exception("feedback.record failed")
+
+            # 3) reward tone adapter (map to [0,1])
+            if getattr(self, "tone_adapter", None):
+                policy_id = getattr(self, "last_policy_id", None)
+                if policy_id:
+                    try:
+                        self.tone_adapter.reward(policy_id, score)
+                    except Exception:
+                        logger.exception("tone_adapter.reward failed")
+
+            # 4) optionally: bump fact confidence / reinforce habit
+            #   (You can implement a separate small routine that increments fact.confidence or habit counts.)
+        except Exception:
+            logger.exception("record_user_feedback failed")
+            
 
     def forget_memory(self, user_text: str) -> str:
         """

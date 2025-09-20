@@ -3,6 +3,9 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+.github/
+.vscode/
+pyrightconfig.json
 
 tests/
 base/agents/orchestrator1.py

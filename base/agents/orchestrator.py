@@ -102,6 +102,7 @@ class Orchestrator:
             except Exception:
                 pass
 
+
     def ask_confirmation_if_unsure(self, suggestion: str, confidence: float, usage_id: int):
         if confidence < 0.6:
             q = f"I can {suggestion}. Did I get that right?"

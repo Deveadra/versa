@@ -112,6 +112,35 @@ print(kg.query_relations("Alice"))
 ### Reverse Traversal
 - KG traversal now works in **both directions**.
 
+## Learning & Personality Layer (v1)
+
+--- 
+---
+---
+
+### Data flow
+1. Every user interaction/action is appended to `usage_log`.
+2. `HabitMiner.update_from_usage()` scans recent usage and updates `habits` with exponential‑decay scores (half‑life 30d).
+3. `ProfileEnricher.run()` derives `preferred_player`, `favorite_music`, `greeting_style`, and `sleep_time` from top habits, updating `user_profile.json`.
+4. Orchestrator uses profile defaults for contextual shortcuts (e.g., `play music` → service=preferred_player, genre=favorite_music).
+5. When uncertain, orchestrator asks the user to confirm. Feedback is recorded in `feedback_events` and used to tune tone policy via a small bandit.
+
+### Extending habits
+Add new key builders in `HabitMiner.update_from_usage()` to track additional domains:
+- `home.lights=bright|dim`
+- `calendar.reminder_minutes=10|30|60`
+- `email.signature=short|detailed`
+
+### Confidence maintenance for facts
+Facts are kept fresh by periodically bumping `confidence` and `last_reinforced` when feedback affirms them; they decay implicitly with time unless reaffirmed.
+
+### Migration
+Place `0002_learning.sql` next to `0001_init.sql`. Ensure orchestrator runs both on startup.
+
+--- 
+---
+---
+
 
 ## Summary
 - Cron schedule now configurable via `.env`.

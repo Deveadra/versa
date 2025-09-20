@@ -1,30 +1,40 @@
 
 from __future__ import annotations
+import numpy as np
 import openai
+import re
 
-from loguru import logger
 from assistant.config.config import settings
 from database.sqlite import SQLiteConn
+from datetime import datetime, timedelta
+from dateutil import parser as dateparser
+from loguru import logger
+
+from base.core.profile_manager import ProfileManager
+from base.learning.feedback import Feedback
+from base.learning.habits import HabitMiner
+from base.learning.profile_enrichment import ProfileEnricher
+from base.learning.sentiment import quick_polarity
+from base.learning.usage_log import UsageLogger, UsageEvent
 from base.memory.store import MemoryStore
 from base.memory.store import maybe_store_text
-from ..memory.retrieval import Retriever
+
+from .scheduler import UltronScheduler
 from ..embeddings.provider import Embeddings
+from ..memory.retrieval import Retriever
 from ..llm.brain import Brain
-from ..memory.faiss_backend import FAISSBackend
 from ..llm.prompts import SYSTEM_PROMPT, build_prompt
 from ..memory.consolidation import Consolidator
-from .scheduler import UltronScheduler
-from ..kg.store import KGStore
+from ..memory.faiss_backend import FAISSBackend
 from ..kg.integration import KGIntegrator
 from ..kg.relations import RELATION_QUERY_HINTS
-from datetime import datetime, timedelta
-from ..calendar.store import CalendarStore
+from ..kg.store import KGStore
 from ..calendar.rrule_helpers import rrule_from_phrase
-from dateutil import parser as dateparser
+from ..calendar.store import CalendarStore
 from ..utils.embeddings import get_embedding
-import numpy as np
 from ..utils.embeddings import get_embedding, cosine_similarity
 from ..utils.embeddings import get_embedding, cosine_similarity
+
 
 class Orchestrator:
     def __init__(self):
@@ -38,6 +48,22 @@ class Orchestrator:
         self.brain = Brain()
         self.consolidator = Consolidator(self.store, self.brain)
         self.calendar = CalendarStore(self.db)
+            
+        # Learning & Personality components
+        try:
+            self.usage_logger = UsageLogger(self.db)
+            self.miner = HabitMiner(self.db)
+            self.profile_mgr = ProfileManager()
+            self.enricher = ProfileEnricher(self.profile_mgr, self.miner)
+            self.primer = PersonaPrimer(self.profile_mgr, self.miner, self.db)
+        except Exception:
+            # non-fatal if learning modules are not available
+            logger.exception("Learning components not initialized")
+            self.usage_logger = None
+            self.miner = None
+            self.profile_mgr = None
+            self.enricher = None
+            self.primer = None
 
         # Scheduler (configurable via .env)
         self.scheduler = UltronScheduler()
@@ -49,6 +75,46 @@ class Orchestrator:
         self.scheduler.start()
 
 
+    def _run_action(self, user_text, intent, action, params):
+        import time
+        t0 = time.time()
+        success = None
+        try:
+            result = self._dispatch(action, params)  # existing action runner
+            success = True
+            return result
+        except Exception as e:
+            success = False
+            raise
+        finally:
+            usage_id = self.logger.log(UsageEvent(
+                user_text=user_text,
+                normalized_intent=intent,
+                resolved_action=action,
+                params=params,
+                success=success,
+                latency_ms=int((time.time()-t0)*1000),
+            ))
+            # lightweight background maintenance
+            try:
+                self.miner.update_from_usage()
+                self.enricher.run()
+            except Exception:
+                pass
+
+    def ask_confirmation_if_unsure(self, suggestion: str, confidence: float, usage_id: int):
+        if confidence < 0.6:
+            q = f"I can {suggestion}. Did I get that right?"
+            # send to REPL/UX
+            return {"ask_user": q, "usage_id": usage_id}
+
+    def record_user_feedback(self, usage_id: int, text: str):
+        s = quick_polarity(text)
+        kind = "confirm" if s > 0.2 else "dislike" if s < -0.2 else "note"
+        self.feedback.record(usage_id, kind, text)
+        # update personality bandit via ToneAdapter outside (when crafting replies)
+        
+        
     def add_fact(self, key: str, value: str, threshold: float = 0.85) -> str:
         """
         Add a fact to memory with semantic deduplication.
@@ -129,6 +195,13 @@ class Orchestrator:
 
         # Build prompt with KG facts included
         prompt = build_prompt(memories, user_text, extra_context=kg_context)
+        # Insert persona primer into prompt extra context (if available)
+        try:
+            persona_text = self.primer.build(user_text) if self.primer else ''
+            if persona_text:
+                prompt = build_prompt(memories, user_text, extra_context=kg_context + '\nPersona: ' + persona_text)
+        except Exception:
+            prompt = build_prompt(memories, user_text, extra_context=kg_context)
         reply = self.brain.complete(SYSTEM_PROMPT, prompt)
         return reply
     

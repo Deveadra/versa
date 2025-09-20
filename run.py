@@ -12,7 +12,7 @@ if __name__ == "__main__":
     print("Ultron ready. Type 'exit' to quit. Commands: facts, forget <topic>, kg <entity>")
     try:
         launch_interface(orch)
-    elseif:
+    except:
         while True:
             msg = input("You: ").strip()
             if msg.lower() in {"exit", "quit"}:
@@ -35,9 +35,11 @@ if __name__ == "__main__":
             if msg.lower().startswith("kg "):
                 entity = msg.split(" ", 1)[1]
                 relations = orch.kg_store.query_relations(entity)
-                if relations:
-                    for src, rel, tgt in relations:
-                        print(f"Ultron KG: {src} —[{rel}]→ {tgt}")
+                lines = []
+                for src, rel, tgt, _a, _b, _c in relations:
+                    lines.append(f"Ultron KG: {src} —[{rel}]→ {tgt}")
+                if lines:
+                    print("\n".join(lines))
                 else:
                     print(f"Ultron KG: no relations found for '{entity}'.")
                 continue

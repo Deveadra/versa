@@ -3,6 +3,10 @@ import random
 import fnmatch
 import subprocess
 
+from base.apps.file_manager_prompts import ASK_FILE_ACTION_VARIANTS, CONFIRM_FILE_VARIANTS, CANCEL_FILE_VARIANTS, CHOOSE_FILE_VARIANTS
+
+
+
 file_state = {"query": None, "action": None, "confirm": False, "candidates": [], "chosen": None}
 
 

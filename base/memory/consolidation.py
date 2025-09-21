@@ -2,7 +2,7 @@
 from __future__ import annotations
 from datetime import datetime, timedelta
 from loguru import logger
-from assistant.config import settings
+from config.config import settings
 
 
 class Consolidator:

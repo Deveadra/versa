@@ -1,0 +1,10 @@
+{
+  "root": "/mnt/data/codebase_scan/assistant - Copy",
+  "total_files": 319,
+  "python_files": 100,
+  "textlike_files": 120,
+  "compile_errors": 4,
+  "grep_hits": 52,
+  "missing_inits": 2,
+  "style_issues": 18
+}

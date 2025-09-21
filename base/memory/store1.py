@@ -3,23 +3,20 @@
 from __future__ import annotations
 
 import sqlite3
-from pathlib import Path
 from datetime import datetime, timedelta
-from typing import List, Tuple, Optional
+from typing import Iterable, List, Tuple, Any, Optional
+
 from loguru import logger
 
-from base.database.sqlite import SQLiteConn
-from base.memory.scoring import assess_importance
+# your project imports
 from config.config import settings
-
-
-DB_PATH = Path("memory.db")
-
+from base.database.sqlite import SQLiteConn           # ✅ correct path
+from .scoring import assess_importance
 
 class MemoryStore:
     """
-    Persistent memory store using SQLite.
-    Supports key/value facts, events with importance, and retrieval (FTS if available).
+    Lightweight event/fact store on SQLite.
+    Accepts either an SQLiteConn wrapper (with .conn) or a raw sqlite3.Connection.
     """
 
     def __init__(self, db: SQLiteConn | sqlite3.Connection):
@@ -43,19 +40,6 @@ class MemoryStore:
             )
             """
         )
-        
-        # Memories (general)
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS memories (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT,
-                type TEXT,
-                content TEXT,
-                response TEXT
-            )
-            """
-        )
 
         # Events (memories)
         cur.execute(
@@ -66,7 +50,7 @@ class MemoryStore:
                 ts TEXT NOT NULL,
                 importance REAL NOT NULL DEFAULT 0.0,
                 type TEXT NOT NULL DEFAULT 'event'
-            );
+            )
             """
         )
 
@@ -80,6 +64,7 @@ class MemoryStore:
             )
             self._fts_enabled = True
         except sqlite3.OperationalError:
+            # FTS not available; we’ll fall back to LIKE queries
             self._fts_enabled = False
 
         self.conn.commit()
@@ -102,8 +87,8 @@ class MemoryStore:
         cur = self.conn.execute("SELECT key, value FROM facts ORDER BY key")
         return [(r["key"], r["value"]) for r in cur.fetchall()]
 
+    # Delete facts containing topic, and events whose content matches topic.
     def forget(self, topic: str) -> int:
-        """Delete facts and events containing the given topic string."""
         n1 = self.conn.execute(
             "DELETE FROM facts WHERE key LIKE ? OR value LIKE ?",
             (f"%{topic}%", f"%{topic}%"),
@@ -115,7 +100,7 @@ class MemoryStore:
         self.conn.commit()
         return n1 + n2
 
-    # ---------- events ----------
+    # EVENTS
     def add_event(self, content: str, importance: float = 0.0, type_: str = "event") -> int:
         ts = datetime.utcnow().isoformat()
         cur = self.conn.execute(
@@ -130,6 +115,7 @@ class MemoryStore:
                     (rowid, content),
                 )
             except sqlite3.OperationalError:
+                # If FTS table isn't available after all, just ignore
                 self._fts_enabled = False
         self.conn.commit()
         rowid = cur.lastrowid
@@ -145,7 +131,6 @@ class MemoryStore:
         return True
 
     def prune_events(self) -> int:
-        """Prune old, low-importance events according to TTL."""
         ttl = timedelta(days=settings.memory_ttl_days)
         cutoff = (datetime.utcnow() - ttl).isoformat()
         cur = self.conn.execute(
@@ -169,40 +154,3 @@ class MemoryStore:
             (f"%{query}%", limit),
         )
         return [r[0] for r in cur.fetchall()]
-
-
-
-# Outside of class for legacy compatibility
-
-def _connect_for_compat() -> sqlite3.Connection:
-    # use your main DB so everything stays in one file
-    return sqlite3.connect(settings.db_path, check_same_thread=False)
-
-def init_db() -> None:
-    """
-    Legacy initializer: create schema if needed.
-    """
-    with _connect_for_compat() as conn:
-        # constructing MemoryStore ensures schema
-        MemoryStore(conn)  # __init__ calls _ensure_schema()
-        # nothing else to do
-
-def save_memory(memory: dict) -> None:
-    """
-    Legacy saver used by decide_memory(). Expects keys:
-      - timestamp (optional, ISO string)
-      - type
-      - content
-      - response
-    """
-    ts = memory.get("timestamp") or datetime.utcnow().isoformat()
-    typ = memory.get("type", "event")
-    content = memory.get("content", "")
-    response = memory.get("response", "")
-
-    with _connect_for_compat() as conn:
-        conn.execute(
-            "INSERT INTO memories(timestamp, type, content, response) VALUES(?, ?, ?, ?)",
-            (ts, typ, content, response),
-        )
-        conn.commit()

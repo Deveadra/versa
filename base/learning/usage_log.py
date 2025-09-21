@@ -36,7 +36,7 @@ class UsageLogger:
             ),
         )
         self.conn.conn.commit()
-        usage_id = c.lastrowid
+        usage_id = int(c.lastrowid or 0)
         logger.debug(f"usage_log inserted id={usage_id}")
         return usage_id
 

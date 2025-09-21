@@ -2,9 +2,9 @@ import re
 import random
 from base.core.context import set_context, get_context, clear_context
 from base.plugins.gmail import send_email  # your real Gmail module
-from personal.assistant.base.apps import email_prompts as prompts
+from base.apps import email_prompts as prompts
 from base.core.profile import get_pref
-from base.plugins.gmail_api import send_email, get_unread_emails
+from base.plugins.gmail import send_email, get_unread_emails
 
 
 def parse_quick_email(text: str):
@@ -86,10 +86,20 @@ def handle_email_command(text):
     default_email = get_pref("default_email", None)
 
     if "unread" in text.lower():
-        unread = get_unread_emails(n=5, account=default_email)
+        unread = get_unread_emails(n=5) # account=default_email)
         if not unread:
             return "No unread emails.", "You have no unread messages."
-        spoken = f"You have {len(unread)} unread. Latest from {unread[0]['from']} about {unread[0]['subject']}."
+
+        first = unread[0]
+        if isinstance(first, dict):
+            sender = str(first.get("from", "someone"))
+            subj = str(first.get("subject", "(no subject)"))
+        else:
+            # fallbacks if your gmail helper returns strings/objects
+            sender = str(first)
+            subj = ""
+
+        spoken = f"You have {len(unread)} unread. Latest from {sender}" + (f" about {subj}." if subj else ".")
         return None, spoken
 
     if "send" in text.lower():

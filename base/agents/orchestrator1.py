@@ -7,36 +7,29 @@ from datetime import datetime, timedelta
 
 from loguru import logger
 from config.config import settings
-from database.sqlite import SQLiteConn
-from base.memory.store import MemoryStore
-from ..memory.retrieval import Retriever
-from ..embeddings.provider import Embeddings
-from ..llm.brain import Brain
-from ..memory.faiss_backend import FAISSBackend
-from ..llm.prompts import SYSTEM_PROMPT, build_prompt
-from ..memory.consolidation import Consolidator
-from .scheduler import UltronScheduler
-from ..kg.store import KGStore
-from ..kg.integration import KGIntegrator
-from ..kg.relations import RELATION_QUERY_HINTS
-from datetime import datetime, timedelta
-from base.calendar.store import CalendarStore
-from ..calendar.rrule_helpers import rrule_from_phrase
-from base.utils.timeparse import extract_time_from_text
-from dateutil import parser as dateparser
-from base.utils.embeddings import get_embedder
-from base.memory.faiss_backend import FAISSBackend
 
+from base.database.sqlite import SQLiteConn
+from base.memory.store import MemoryStore
+from base.memory.faiss_backend import FAISSBackend
+from base.memory.retrieval import Retriever
+from base.memory.consolidation import Consolidator
+
+from base.llm.brain import Brain
+from base.llm.prompts import SYSTEM_PROMPT, build_prompt
+
+from base.kg.store import KGStore
+from base.kg.integration import KGIntegrator
+from base.kg.relations import RELATION_QUERY_HINTS
+
+from base.calendar.store import CalendarStore
+from base.calendar.rrule_helpers import rrule_from_phrase
+
+from base.utils.timeparse import extract_time_from_text
 from base.utils.embeddings import get_embedder
 
 from .scheduler import UltronScheduler
 from openai import OpenAI
 
-
-conn = sqlite3.connect(settings.db_path, check_same_thread=False)
-store = MemoryStore(conn)
-embedder, dim = get_embedder()
-vdb = FAISSBackend(embedder, dim=dim, normalize=True)
 
 def _cosine(a: np.ndarray, b: np.ndarray) -> float:
     # robust cosine for 1-D vectors
@@ -136,7 +129,6 @@ class Orchestrator:
             attendees=attendees,
         )
 
-    # ----- CALENDAR: query window -----
     def query_upcoming_events(self, window_days: int = 14) -> list[dict]:
         now = datetime.utcnow()
         start = now.isoformat()
@@ -208,6 +200,7 @@ class Orchestrator:
             return f"Recurring event '{title}' created (id={event_id})."
         return "I couldn’t detect the recurrence pattern (e.g. 'every Monday at 10am')."
 
+    # ---------- KG context ----------
     # ---------- KG context ----------
     def query_kg_context(self, user_text: str) -> str:
         tokens = user_text.lower().split()

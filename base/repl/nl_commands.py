@@ -2,7 +2,7 @@
 import re
 from datetime import datetime
 from dateutil import parser as dateparser
-from ..agent.orchestrator import Orchestrator
+from ..agents.orchestrator import Orchestrator
 from ..calendar.rrule_helpers import rrule_from_phrase
 
 orch = Orchestrator()
@@ -76,7 +76,7 @@ def handle_nl_command(cmd: str) -> str:
     # DEVICES (stub)
     # -------------------
     if any(x in cmd_low for x in ["turn on", "turn off", "switch on", "switch off", "dim", "set temperature"]):
-        return orch.control_device_from_natural(cmd)
+        return orch.control_device_from_natural(cmd) # type: ignore[attr-defined]
 
     # -------------------
     # Past tense detection

@@ -1,0 +1,12 @@
+{
+  "venvPath": "C:\\Projects\\personal\\assistant",
+  "venv": ".venv",
+  "typeCheckingMode": "basic",
+  "reportMissingTypeStubs": false
+}
+
+// {
+//   "venvPath": ".",
+//   "venv": ".venv",
+//   "reportMissingTypeStubs": false
+// }

@@ -3,7 +3,7 @@ from __future__ import annotations
 import openai
 
 from openai import OpenAI
-from assistant.config.config import settings
+from config.config import settings
 
 class Brain:
     def __init__(self):
@@ -17,4 +17,4 @@ class Brain:
             temperature=0.6,
             max_tokens=max_tokens,
         )
-        return resp.choices[0].message.content.strip()
+        return (resp.choices[0].message.content or "").strip()

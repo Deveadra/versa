@@ -19,7 +19,7 @@
 # from ..memory.faiss_backend import FAISSBackend
 # from ..llm.prompts import SYSTEM_PROMPT, build_prompt
 # from ..memory.consolidation import Consolidator
-# from .scheduler import UltronScheduler
+# from .scheduler import Scheduler
 # from ..kg.store import KGStore
 # from ..kg.integration import KGIntegrator
 # from ..kg.relations import RELATION_QUERY_HINTS
@@ -62,7 +62,7 @@
 
 
 #         # Scheduler (configurable via .env)
-#         self.scheduler = UltronScheduler()
+#         self.scheduler = Scheduler()
 #         self.scheduler.add_daily(
 #             self.consolidator.summarize_old_events,
 #             hour=settings.cron_hour,

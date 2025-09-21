@@ -1,7 +1,18 @@
 
 from pathlib import Path
 from dotenv import load_dotenv
-import os
+import os, shutil
+try:
+    import imageio_ffmpeg as iio_ffmpeg  # downloads/caches a static ffmpeg on first import
+
+    # If ffmpeg isn't already on PATH, prepend imageio's dir so tools find it.
+    if shutil.which("ffmpeg") is None:
+        ffmpeg_exe = iio_ffmpeg.get_ffmpeg_exe()
+        ffmpeg_dir = os.path.dirname(ffmpeg_exe)
+        os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
+except Exception:
+    # Keep going; you'll catch it in the preflight check below.
+    pass
 
 from base.memory import decider
 

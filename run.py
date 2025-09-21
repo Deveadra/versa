@@ -12,6 +12,10 @@ if __name__ == "__main__":
     print("Ultron ready. Type 'exit' to quit. Commands: facts, forget <topic>, kg <entity>")
     try:
         launch_interface(orch)
+<<<<<<< HEAD
+    except:
+=======
+>>>>>>> d32adef7e91e5de16a6dd3e1b7ca2d053081636f
         while True:
                 msg = input("You: ").strip()
                 if msg.lower() in {"exit", "quit"}:
@@ -30,6 +34,20 @@ if __name__ == "__main__":
                     print(f"Ultron: forgot {n} entries containing '{topic}'.")
                     continue
 
+<<<<<<< HEAD
+            # Knowledge Graph query
+            if msg.lower().startswith("kg "):
+                entity = msg.split(" ", 1)[1]
+                relations = orch.kg_store.query_relations(entity)
+                lines = []
+                for src, rel, tgt, _a, _b, _c in relations:
+                    lines.append(f"Ultron KG: {src} —[{rel}]→ {tgt}")
+                if lines:
+                    print("\n".join(lines))
+                else:
+                    print(f"Ultron KG: no relations found for '{entity}'.")
+                continue
+=======
                 # Knowledge Graph query
                 if msg.lower().startswith("kg "):
                     entity = msg.split(" ", 1)[1]
@@ -40,6 +58,7 @@ if __name__ == "__main__":
                     else:
                         print(f"Ultron KG: no relations found for '{entity}'.")
                     continue
+>>>>>>> d32adef7e91e5de16a6dd3e1b7ca2d053081636f
 
                 # Default flow (chat)
                 reply = orch.handle_user(msg)

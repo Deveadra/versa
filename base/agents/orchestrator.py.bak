@@ -320,16 +320,87 @@ class Orchestrator:
         return ""
 
     def ask_confirmation_if_unsure(self, suggestion: str, confidence: float, usage_id: int = None):
+<<<<<<< HEAD
+        \"\"\"Return a short confirmation prompt dict if confidence is below threshold.
+        Caller should send this to the user via the REPL/UI and then call record_user_feedback with the response.
+        \"\"\"
+        try:
+            if confidence is None:
+                return None
+            threshold = 0.60
+            if confidence < threshold:
+=======
         """Return a confirmation prompt if confidence is low; caller sends it to user UI/REPL."""
         try:
             if confidence is None:
                 return None
             THRESH = 0.60
             if confidence < THRESH:
+>>>>>>> d32adef7e91e5de16a6dd3e1b7ca2d053081636f
                 q = f"I can {suggestion}. Did I get that right?"
                 return {"ask_user": q, "usage_id": usage_id}
             return None
         except Exception:
+<<<<<<< HEAD
+            try:
+                logger.exception("ask_confirmation_if_unsure failed")
+            except Exception:
+                pass
+            return None
+
+    def record_user_feedback(self, usage_id: int, text: str):
+        \"\"\"Record user feedback for a given usage_id, update feedback_events, and reward the tone adapter.\"\"\"
+        try:
+            s = quick_polarity(text)
+            kind = "confirm" if s > 0.2 else "dislike" if s < -0.2 else "note"
+            if getattr(self, 'feedback', None):
+                try:
+                    self.feedback.record(usage_id, kind, text)
+                except Exception:
+                    try:
+                        logger.exception("Failed to record feedback")
+                    except Exception:
+                        pass
+            # reward tone adapter via stored mapping (policy_by_usage_id)
+            try:
+                pid = None
+                if hasattr(self, 'policy_by_usage_id') and usage_id in self.policy_by_usage_id:
+                    pid = self.policy_by_usage_id.get(usage_id)
+                # fallback to last_policy_id if nothing stored
+                if not pid:
+                    pid = getattr(self, 'last_policy_id', None)
+                if getattr(self, 'tone_adapter', None) and pid is not None:
+                    try:
+                        self.tone_adapter.reward(pid, s)
+                    except Exception:
+                        try:
+                            logger.exception("Failed to reward tone adapter")
+                        except Exception:
+                            pass
+            except Exception:
+                try:
+                    logger.exception("Error while rewarding tone_adapter")
+                except Exception:
+                    pass
+        except Exception:
+            try:
+                logger.exception("record_user_feedback failed")
+            except Exception:
+                pass
+
+"""
+        txt = txt[:insert_pos] + methods + txt[insert_pos:]
+        print("Inserted ask_confirmation_if_unsure and record_user_feedback methods.")
+    else:
+        print("Could not locate Orchestrator.__init__; manual insertion required for methods.")
+else:
+    print("Methods already present; skipping insertion.")
+
+# Write back file
+TARGET.write_text(txt, encoding="utf-8")
+print("Patched file written:", TARGET)
+print("Done. Please run your tests and verify changes. If anything looks off, restore backup:", bak)
+=======
             logger.exception("ask_confirmation_if_unsure")
             return None
 
@@ -360,6 +431,7 @@ class Orchestrator:
             #   (You can implement a separate small routine that increments fact.confidence or habit counts.)
         except Exception:
             logger.exception("record_user_feedback failed")
+>>>>>>> d32adef7e91e5de16a6dd3e1b7ca2d053081636f
             
 
     def forget_memory(self, user_text: str) -> str:

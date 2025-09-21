@@ -1,26 +1,39 @@
 from __future__ import annotations
+import numpy as np
 
 import re
 import sqlite3
 import numpy as np
 from datetime import datetime, timedelta
+import re
 
 from loguru import logger
 from config.config import settings
 from database.sqlite import SQLiteConn
+import shutil
+import sys
+from datetime import datetime, timedelta
+from dateutil import parser as dateparser
+from loguru import logger
+
+from base.core.profile_manager import ProfileManager
+from base.learning.feedback import Feedback
+from base.learning.habits import HabitMiner
+from base.learning.profile_enrichment import ProfileEnricher
+from base.learning.sentiment import quick_polarity
+from base.learning.usage_log import UsageLogger, UsageEvent
 from base.memory.store import MemoryStore
 from ..memory.retrieval import Retriever
 from ..embeddings.provider import Embeddings
+from ..memory.retrieval import Retriever
 from ..llm.brain import Brain
-from ..memory.faiss_backend import FAISSBackend
 from ..llm.prompts import SYSTEM_PROMPT, build_prompt
 from ..memory.consolidation import Consolidator
 from .scheduler import Scheduler
 from ..kg.store import KGStore
 from ..kg.integration import KGIntegrator
 from ..kg.relations import RELATION_QUERY_HINTS
-from datetime import datetime, timedelta
-from base.calendar.store import CalendarStore
+from base.kg.store import KGStore
 from ..calendar.rrule_helpers import rrule_from_phrase
 from base.utils.timeparse import extract_time_from_text
 from dateutil import parser as dateparser
@@ -32,12 +45,15 @@ from base.memory.decider import Decider
 
 from .scheduler import Scheduler
 from openai import OpenAI
+from pathlib import Path
 
 
 conn = sqlite3.connect(settings.db_path, check_same_thread=False)
 store = MemoryStore(conn)
 embedder, dim = get_embedder()
 vdb = FAISSBackend(embedder, dim=dim, normalize=True)
+
+
 
 def _cosine(a: np.ndarray, b: np.ndarray) -> float:
     # robust cosine for 1-D vectors
@@ -54,7 +70,144 @@ def _parse_dt_or_none(s: str | None):
     except Exception:
         return None
 
+ROOT = Path(".")
+TARGET = ROOT / "base" / "agents" / "orchestrator.py"
+if not TARGET.exists():
+    print("ERROR: orchestrator.py not found at:", TARGET)
+    sys.exit(1)
 
+bak = TARGET.with_suffix(".py.bak")
+shutil.copy2(TARGET, bak)
+print("Backup created:", bak)
+
+txt = TARGET.read_text(encoding="utf-8", errors="ignore")
+
+# 1) Add imports for Feedback, quick_polarity, ToneAdapter after existing composer/retriever import if present
+if "from base.learning.feedback import Feedback" not in txt:
+    anchor = "from base.llm.prompt_composer import compose_prompt"
+    insert = ("from base.llm.prompt_composer import compose_prompt\n"
+              "from base.llm.retriever import Retriever\n"
+              "from base.learning.feedback import Feedback\n"
+              "from base.learning.sentiment import quick_polarity\n"
+              "from base.personality.tone_adapter import ToneAdapter\n")
+    if anchor in txt:
+        txt = txt.replace(anchor, insert, 1)
+        print("Inserted imports after composer anchor.")
+    else:
+        # try alternate anchor
+        anchor2 = "from base.llm.retriever import Retriever"
+        if anchor2 in txt:
+            txt = txt.replace(anchor2, insert, 1)
+            print("Inserted imports after retriever anchor.")
+        else:
+            # fallback: put near top after module docstring or first import block
+            m = re.search(r'(^\s*(?:import |from ).+\n)+', txt, flags=re.M)
+            if m:
+                pos = m.end()
+                txt = txt[:pos] + "\n" + insert + txt[pos:]
+                print("Inserted imports after top import block.")
+            else:
+                txt = insert + txt
+                print("Prepended imports at file start (fallback).")
+
+# 2) Enhance __init__ block: attempt to find existing block where PersonaPrimer is instantiated
+if "self.primer = PersonaPrimer" in txt and "self.policy_by_usage_id" not in txt:
+    # Insert the feedback/tone initialization after the line that sets self.primer
+    txt = txt.replace(
+        "self.primer = PersonaPrimer(self.profile_mgr, self.miner, self.db)",
+        "self.primer = PersonaPrimer(self.profile_mgr, self.miner, self.db)\n"
+        "            # optional feedback / tone components\n"
+        "            try:\n"
+        "                self.feedback = Feedback(self.db)\n"
+        "            except Exception:\n"
+        "                self.feedback = None\n"
+        "            try:\n"
+        "                profile = self.profile_mgr.load_profile() if self.profile_mgr else {}\n"
+        "            except Exception:\n"
+        "                profile = {}\n"
+        "            try:\n"
+        "                self.tone_adapter = ToneAdapter(profile)\n"
+        "            except Exception:\n"
+        "                self.tone_adapter = None\n"
+        "            # mapping usage_id -> policy_id for async feedback attribution\n"
+        "            self.policy_by_usage_id = {}\n"
+    )
+    print("Patched __init__ after PersonaPrimer instantiation.")
+else:
+    # fallback: try to insert near a previously added initial block 'self.primer = None' or after 'self.brain = Brain()'
+    if "self.primer = None" in txt and "self.policy_by_usage_id" not in txt:
+        txt = txt.replace("self.primer = None",
+                          "self.primer = None\n            self.feedback = None\n            self.tone_adapter = None\n            self.policy_by_usage_id = {}\n")
+        print("Patched fallback __init__ area (primer None).")
+    elif "self.brain = Brain()" in txt and "self.policy_by_usage_id" not in txt:
+        txt = txt.replace("self.brain = Brain()", "self.brain = Brain()\n" +
+                          "        # learning & feedback components (inserted)\n" +
+                          "        try:\n" +
+                          "            self.feedback = Feedback(self.db)\n" +
+                          "        except Exception:\n" +
+                          "            self.feedback = None\n" +
+                          "        try:\n" +
+                          "            profile = {}\n" +
+                          "        except Exception:\n" +
+                          "            profile = {}\n" +
+                          "        try:\n" +
+                          "            self.tone_adapter = ToneAdapter(profile)\n" +
+                          "        except Exception:\n" +
+                          "            self.tone_adapter = None\n" +
+                          "        self.policy_by_usage_id = {}\n")
+        print("Inserted feedback init after self.brain = Brain() (fallback).")
+    else:
+        print("Warning: could not find suitable __init__ insertion point - you will need to add initialization manually.")
+        # continue; we'll still try the other edits
+
+# 3) Replace the call to LLM: detect a call to self.brain.complete(...prompt...) and replace it with policy selection + composer + mapping
+if "reply = self.brain.complete(SYSTEM_PROMPT, prompt)" in txt and "self.policy_by_usage_id" in txt:
+    replacement = (
+        "# select tone policy (if available) and record it so we can attribute feedback later\n"
+        "        try:\n"
+        "            policy = self.tone_adapter.choose_policy() if getattr(self, \"tone_adapter\", None) else None\n"
+        "            policy_id = policy[\"id\"] if policy else None\n"
+        "            # stash last policy for immediate use (and mapping by usage_id later)\n"
+        "            self.last_policy_id = policy_id\n"
+        "        except Exception:\n"
+        "            policy = None\n"
+        "            policy_id = None\n"
+        "            self.last_policy_id = None\n\n"
+        "        # compose final prompt using the composer (persona + memories + extra_context)\n"
+        "        prompt = compose_prompt(SYSTEM_PROMPT, user_text, persona_text=persona_text, memories=memories, extra_context=kg_context, top_k_memories=3)\n"
+        "        # optionally: you may inject policy instructions into SYSTEM_PROMPT or extra_context based on policy here\n"
+        "        reply = self.brain.complete(SYSTEM_PROMPT, prompt)\n\n"
+        "        # if we logged a usage for this outgoing reply, attach mapping usage_id -> policy_id so feedback can credit the bandit\n"
+        "        try:\n"
+        "            if hasattr(self, \"last_usage_id\") and getattr(self, \"last_usage_id\", None):\n"
+        "                uid = self.last_usage_id\n"
+        "                if policy_id:\n"
+        "                    try:\n"
+        "                        self.policy_by_usage_id[uid] = policy_id\n"
+        "                    except Exception:\n"
+        "                        pass\n"
+        "        except Exception:\n"
+        "            pass\n"
+    )
+    txt = txt.replace("reply = self.brain.complete(SYSTEM_PROMPT, prompt)", replacement)
+    print("Replaced LLM call with policy selection + composer + mapping.")
+else:
+    print("Warning: did not find exact 'reply = self.brain.complete(SYSTEM_PROMPT, prompt)' string; you may need to edit manually to integrate policy selection.")
+
+# 4) Insert the two methods after __init__ end. Find insertion point: after def __init__ block (look for next 'def ' after it)
+if "def ask_confirmation_if_unsure" not in txt:
+    m = re.search(r"class\s+Orchestrator\b.*?def\s+__init__\s*\([^)]*\)\s*:\s*", txt, flags=re.S)
+    if m:
+        # locate end of __init__ by finding the next "\n\s*def\s" after m.end()
+        rest = txt[m.end():]
+        m2 = re.search(r"\n\s*def\s+", rest)
+        if m2:
+            insert_pos = m.end() + m2.start()
+        else:
+            # fallback: insert near the end of the class header region
+            insert_pos = m.end()
+        methods = ""
+        
 class Orchestrator:
     def __init__(self):
         # DBs / stores
@@ -78,6 +231,22 @@ class Orchestrator:
         
         # Calendar
         self.calendar = CalendarStore(self.db)
+            
+        # Learning & Personality components
+        try:
+            self.usage_logger = UsageLogger(self.db)
+            self.miner = HabitMiner(self.db)
+            self.profile_mgr = ProfileManager()
+            self.enricher = ProfileEnricher(self.profile_mgr, self.miner)
+            self.primer = PersonaPrimer(self.profile_mgr, self.miner, self.db)
+        except Exception:
+            # non-fatal if learning modules are not available
+            logger.exception("Learning components not initialized")
+            self.usage_logger = None
+            self.miner = None
+            self.profile_mgr = None
+            self.enricher = None
+            self.primer = None
 
         # OpenAI v1 client for fallback chat
         self.oai = OpenAI(api_key=settings.openai_api_key)
@@ -91,7 +260,48 @@ class Orchestrator:
         )
         self.scheduler.start()
 
-    # ---------- Facts (semantic dedupe) ----------
+
+    def _run_action(self, user_text, intent, action, params):
+        import time
+        t0 = time.time()
+        success = None
+        try:
+            result = self._dispatch(action, params)  # existing action runner
+            success = True
+            return result
+        except Exception as e:
+            success = False
+            raise
+        finally:
+            usage_id = self.logger.log(UsageEvent(
+                user_text=user_text,
+                normalized_intent=intent,
+                resolved_action=action,
+                params=params,
+                success=success,
+                latency_ms=int((time.time()-t0)*1000),
+            ))
+            # lightweight background maintenance
+            try:
+                self.miner.update_from_usage()
+                self.enricher.run()
+            except Exception:
+                pass
+
+
+    def ask_confirmation_if_unsure(self, suggestion: str, confidence: float, usage_id: int):
+        if confidence < 0.6:
+            q = f"I can {suggestion}. Did I get that right?"
+            # send to REPL/UX
+            return {"ask_user": q, "usage_id": usage_id}
+
+    def record_user_feedback(self, usage_id: int, text: str):
+        s = quick_polarity(text)
+        kind = "confirm" if s > 0.2 else "dislike" if s < -0.2 else "note"
+        self.feedback.record(usage_id, kind, text)
+        # update personality bandit via ToneAdapter outside (when crafting replies)
+        
+            # ---------- Facts (semantic dedupe) ----------
     def add_fact(self, key: str, value: str, threshold: float = 0.85) -> str:
         new_text = f"{key} {value}"
         new_vec = self.embedder.encode([new_text]).astype("float32")[0]
@@ -165,6 +375,13 @@ class Orchestrator:
         kg_context = self.query_kg_context(user_text)
 
         prompt = build_prompt(memories, user_text, extra_context=kg_context)
+        # Insert persona primer into prompt extra context (if available)
+        try:
+            persona_text = self.primer.build(user_text) if self.primer else ''
+            if persona_text:
+                prompt = build_prompt(memories, user_text, extra_context=kg_context + '\nPersona: ' + persona_text)
+        except Exception:
+            prompt = build_prompt(memories, user_text, extra_context=kg_context)
         reply = self.brain.complete(SYSTEM_PROMPT, prompt)
         return reply
 

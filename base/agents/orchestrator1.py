@@ -27,7 +27,7 @@ from base.calendar.rrule_helpers import rrule_from_phrase
 from base.utils.timeparse import extract_time_from_text
 from base.utils.embeddings import get_embedder
 
-from .scheduler import UltronScheduler
+from .scheduler import Scheduler
 from openai import OpenAI
 
 
@@ -70,7 +70,7 @@ class Orchestrator:
         self.oai = OpenAI(api_key=settings.openai_api_key)
 
         # Scheduler (use settings.consolidation_* names)
-        self.scheduler = UltronScheduler()
+        self.scheduler = Scheduler()
         self.scheduler.add_daily(
             self.consolidator.summarize_old_events,
             hour=settings.consolidation_hour,

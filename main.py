@@ -39,8 +39,7 @@ from personalities.loader import load_personality
 from base.plugins import email_flow_original
 from base.core.profile import get_profile
 from base.core.profile import get_pref
-from base.core import memory, context
-from base.memory.decider import decide_memory
+from base.memory.decider import Decider
 from base.memory.store import init_db, save_memory
 from base.memory.recall import recall_relevant, format_memories
 from base.memory.store import MemoryStore
@@ -205,7 +204,8 @@ while True:
             if reply:
                 print(f"{BASE_PERSONALITY.capitalize()}: {reply}")
                 stream_speak(reply)
-                
-            memory = decide_memory(text, reply)
+
+            decider = Decider()
+            memory = decider.decide_memory(text, reply)
             if memory:
                 store.add_event(f"{memory['content']} || {memory.get('response','')}", importance=0.0, type_="chat")

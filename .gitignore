@@ -7,5 +7,8 @@ __pycache__/
 .vscode/
 pyrightconfig.json
 
+base/agents/orchestrator.py.bak
+base/agents/orchestrator1.py
+base/agents/orchestrator2.py
 tests/
 base/agents/orchestrator1.py

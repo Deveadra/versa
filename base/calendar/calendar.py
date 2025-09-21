@@ -2,6 +2,8 @@ import datetime
 import dateparser
 import os
 
+from typing import List, Dict
+
 try:
     from googleapiclient.discovery import build
     from google_auth_oauthlib.flow import InstalledAppFlow
@@ -11,12 +13,12 @@ try:
 except ImportError:
     GAPI_AVAILABLE = False
 
-mock_calendar = []  # In-memory list of events (fallback)
+mock_calendar: List[Dict] = []  # In-memory list of events (fallback)
 _pending = None  # shape: {"summary": str|None, "time": datetime|None}
 
 SCOPES = [
     "https://www.googleapis.com/auth/calendar",
-    "https://www.googleapis.com/auth/gmail.modify"
+    "https://www.googleapis.com/auth/gmail.modify",
 ]
 
 _service = None
@@ -48,36 +50,66 @@ def calendar_has_pending():
     return _pending is not None
 
 
-def get_upcoming_events(n=5):
-    """Return upcoming events from Google Calendar if available, else mock."""
+def get_upcoming_events(calendar_id: str = "primary", n: int = 5) -> List[Dict[str, str]]:
+    """
+    Return the next n events as a list of dicts with keys:
+      - 'summary': str
+      - 'start'  : str (ISO datetime or YYYY-MM-DD)
+    Always returns a list (possibly empty). No strings.
+    """
     if _service:
-        events_result = _service.events().list(
-          calendarId='primary', maxResults=n, singleEvents=True,
-          orderBy='startTime').execute()
-        events = events_result.get('items', [])
-        if not events:
-            return "No events found."
-        return "\n".join([f"{e['start'].get('dateTime', e['start'].get('date'))} - {e['summary']}" for e in events])
+        # NOTE: Google API param is 'calendarId' (camelCase), not 'calendar_id'
+        events_result = (
+            _service.events()
+            .list(calendarId=calendar_id, maxResults=n, singleEvents=True, orderBy="startTime")
+            .execute()
+        )
+        items = events_result.get("items", [])
+        result: List[Dict[str, str]] = []
+        for e in items:
+            start = e.get("start", {})
+            when = start.get("dateTime") or start.get("date") or ""
+            result.append({"summary": e.get("summary", ""), "start": when})
+        return result
     else:
         if not mock_calendar:
-            return "No events scheduled."
-        events = sorted(mock_calendar, key=lambda e: e["time"])
-        return "\n".join([f"{e['time'].strftime('%Y-%m-%d %H:%M')} - {e['summary']}" for e in events[:n]])
+            return []
+        events = sorted(mock_calendar, key=lambda e: e["time"])[:n]
+        return [
+            {"summary": e["summary"], "start": e["time"].strftime("%Y-%m-%d %H:%M")}
+            for e in events
+        ]
 
 
 def _extract_summary(natural_text: str) -> str:
     summary = natural_text
-    for token in ["add", "event", "schedule", "on", "at", "for", "tomorrow", "today", "next", "this", "coming", "me", "to", "a", "an"]:
+    for token in [
+        "add",
+        "event",
+        "schedule",
+        "on",
+        "at",
+        "for",
+        "tomorrow",
+        "today",
+        "next",
+        "this",
+        "coming",
+        "me",
+        "to",
+        "a",
+        "an",
+    ]:
         summary = summary.replace(token, "")
     summary = " ".join(summary.split())
     return summary.title()
 
 
-def add_event(natural_text: str):
+def add_event(natural_text: str, calendar_id: str = "primary") -> str:
     """Parse a natural language request and add an event."""
     global _pending
 
-    parsed_time = dateparser.parse(natural_text, settings={'PREFER_DATES_FROM': 'future'})
+    parsed_time = dateparser.parse(natural_text, settings={"PREFER_DATES_FROM": "future"})
     summary = _extract_summary(natural_text)
 
     if not parsed_time or not summary:
@@ -85,12 +117,17 @@ def add_event(natural_text: str):
 
     if _service:
         event_body = {
-            'summary': summary,
-            'start': {'dateTime': parsed_time.isoformat(), 'timeZone': 'UTC'},
-            'end': {'dateTime': (parsed_time + datetime.timedelta(hours=1)).isoformat(), 'timeZone': 'UTC'},
+            "summary": summary,
+            "start": {"dateTime": parsed_time.isoformat(), "timeZone": "UTC"},
+            "end": {
+                "dateTime": (parsed_time + datetime.timedelta(hours=1)).isoformat(),
+                "timeZone": "UTC",
+            },
         }
-        event = _service.events().insert(calendarId='primary', body=event_body).execute()
-        return f"Event '{event['summary']}' created at {event['start']['dateTime']}"
+        # NOTE: camelCase here too
+        event = _service.events().insert(calendarId=calendar_id, body=event_body).execute()
+        when = event["start"].get("dateTime") or event["start"].get("date")
+        return f"Event '{event['summary']}' created at {when}"
     else:
         event = {"summary": summary, "time": parsed_time}
         mock_calendar.append(event)

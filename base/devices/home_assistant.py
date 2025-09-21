@@ -1,73 +1,95 @@
 
 from __future__ import annotations
+import asyncio
 import httpx
-import os
-import requests
+from typing import Optional, Dict, Any, cast
 
-from assistant.config.config import settings
+from config.config import settings
 
-HA_URL = os.getenv("HA_URL")
-HA_TOKEN = os.getenv("HA_TOKEN")
 
-headers = {
-    "Authorization": f"Bearer {HA_TOKEN}",
-    "Content-Type": "application/json"
-}
+class HomeAssistantError(Exception):
+    """Custom exception for Home Assistant API errors."""
 
 
 class HomeAssistant:
-    def __init__(self, base="http://localhost:8123", token=""):
-        self.base = base.rstrip("/")
-        self.h = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-        if not settings.ha_base_url or not settings.ha_token:
-            raise RuntimeError("Home Assistant not configured")
-        self.base = settings.ha_base_url.rstrip("/")
-        self.headers = {"Authorization": f"Bearer {settings.ha_token}", "Content-Type": "application/json"}
+    def __init__(self, base_url: Optional[str] = None, token: Optional[str] = None, timeout: int = 10):
+        if not (settings.ha_base_url and settings.ha_token) and not (base_url and token):
+            raise RuntimeError("Home Assistant not configured: missing URL or token")
 
-        
-    def health(self):
-        r = requests.get(f"{self.base}/api/", headers=self.h, timeout=10)
-        r.raise_for_status()
-        return r.text  # "API running."
+        self.base_url = cast(str, (base_url or settings.ha_base_url or "")).rstrip("/")
+        self.token = cast(str, (token or settings.ha_token or ""))
+        self.headers = {"Authorization": f"Bearer {self.token}", 
+                        "Content-Type": "application/json"}
+        self.timeout = timeout
+        self._client: Optional[httpx.AsyncClient] = None
 
-    # def get_state(self, entity_id):
-    #     r = requests.get(f"{self.base}/api/states/{entity_id}", headers=self.h, timeout=10)
-    #     r.raise_for_status()
-    #     return r.json()
+    async def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None:
+            self._client = httpx.AsyncClient(base_url=self.base_url, headers=self.headers, timeout=self.timeout)
+        return self._client
 
-    def call_service(self, domain, service, data):
-        r = requests.post(f"{self.base}/api/services/{domain}/{service}",
-                          headers=self.h, json=data, timeout=10)
-        r.raise_for_status()
-        return r.json() if r.content else True
+    async def validate_connection(self) -> bool:
+        """Check if HA API is reachable."""
+        client = await self._get_client()
+        try:
+            r = await client.get("/api/")
+            r.raise_for_status()
+            return "API" in r.text
+        except Exception as e:
+            raise HomeAssistantError(f"Failed to connect to Home Assistant: {e}")
 
-    def toggle(self, entity_id):
-        return self.call_service("homeassistant", "toggle", {"entity_id": entity_id})
-    
-  
-    # # def call_service(domain, service, data=None):
-    # async def call_service(self, domain: str, service: str, data: dict) -> dict:
-    #     """
-    #     Generic HA service call.
-    #     Example: call_service("media_player", "turn_on", {"entity_id": "media_player.living_room_tv"})
-    #     """
-    #     # url = f"{self.base}/api/services/{domain}/{service}"
-    #     url = f"{HA_URL}/services/{domain}/{service}"
-    #     async with httpx.AsyncClient(timeout=10) as client:
-    #         r = await client.post(url, headers=self.headers, json=data)
-    #         # r = requests.post(url, headers=headers, json=data or {})
-    #         r.raise_for_status()
-            
-    #         # if r.status_code not in [200, 201]:
-    #         #     return False, f"Error calling {domain}.{service}: {r.text}"
-    #         # return True, "OK"
-        
-    #         return r.json()
-        
-            
-    def get_state(entity_id):
-        url = f"{HA_URL}/states/{entity_id}"
-        r = requests.get(url, headers=headers)
-        if r.status_code == 200:
-            return r.json()["state"]
-        return None
+    async def call_service(self, domain: str, service: str, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Call a Home Assistant service.
+        Example: await call_service("light", "turn_on", {"entity_id": "light.living_room"})
+        """
+        client = await self._get_client()
+        try:
+            r = await client.post(f"/api/services/{domain}/{service}", json=data or {})
+            r.raise_for_status()
+            return r.json() if r.content else {}
+        except Exception as e:
+            raise HomeAssistantError(f"Service call {domain}.{service} failed: {e}")
+
+    async def get_state(self, entity_id: str) -> Dict[str, Any]:
+        """Fetch the current state of an entity."""
+        client = await self._get_client()
+        try:
+            r = await client.get(f"/api/states/{entity_id}")
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            raise HomeAssistantError(f"Failed to get state for {entity_id}: {e}")
+
+    async def set_state(self, entity_id: str, state: str, attributes: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Manually override entity state (not common, but supported)."""
+        client = await self._get_client()
+        try:
+            payload = {"state": state, "attributes": attributes or {}}
+            r = await client.post(f"/api/states/{entity_id}", json=payload)
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            raise HomeAssistantError(f"Failed to set state for {entity_id}: {e}")
+
+    async def close(self):
+        """Cleanly close the HTTP session."""
+        if self._client:
+            await self._client.aclose()
+            self._client = None
+
+
+# --- Example usage ---
+async def _demo():
+    ha = HomeAssistant()
+    ok = await ha.validate_connection()
+    print("HA Connected:", ok)
+
+    state = await ha.get_state("light.living_room")
+    print("Light state:", state["state"])
+
+    await ha.call_service("light", "turn_on", {"entity_id": "light.living_room"})
+
+# Run demo manually if needed
+if __name__ == "__main__":
+    asyncio.run(_demo())

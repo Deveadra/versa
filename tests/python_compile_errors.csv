@@ -1,0 +1,8 @@
+file,line,offset,msg,text,encoding
+base/io/run_voice.py,39,41,unexpected character after line continuation character,"reply = ""; "".join(f\""{src} {rel} {tgt}\"" for src, rel, tgt in relations)",utf-8
+FIX: The problem is caused by the use of incorrect escape characters (\") for string literals; you should use regular double quotes (") or single quotes (') for f-strings in Python.
+reply = "; ".join(f"{src} {rel} {tgt}" for src, rel, tgt in relations)      
+          
+base/memory/milvus_backend.py,11,1,expected an indented block after class definition on line 10,"def __init__(self, client):",utf-8
+base/memory/weaviate_backend.py,11,1,expected an indented block after class definition on line 10,"def __init__(self, client):",utf-8
+run.py,15,5,expected 'except' or 'finally' block,elseif:,utf-8

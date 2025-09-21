@@ -22,7 +22,7 @@ TTS==0.22.0
 
 # Embeddings (local-first, optional)
 numpy==1.26.4
-sentence-transformers==3.0.1
+sentence-transformers==3.0.1 # 2.7.0
 
 # ElevenLabs (optional voice)
 elevenlabs==2.15.1

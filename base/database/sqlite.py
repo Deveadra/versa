@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 from loguru import logger
-from . import migrations
+# from base.database import migrations
 
 class SQLiteConn:
     def __init__(self, path: str):

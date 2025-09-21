@@ -1,0 +1,6 @@
+config_file
+pyproject.toml
+requirements.txt
+config/.env
+Dockerfile
+docker-compose.yml

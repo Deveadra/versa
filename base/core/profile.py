@@ -32,3 +32,20 @@ def get_pref(key: str, default=None):
     """
     profile = get_profile()
     return profile.get(key, default)
+
+def set_pref(key: str, value):
+    """
+    Set a single preference and persist it to disk.
+    Returns the updated profile dict.
+    """
+    if not isinstance(key, str) or not key:
+        raise ValueError("Preference key must be a non-empty string.")
+
+    # (Optional) ensure it's JSON-serializable early
+    try:
+        json.dumps({key: value})
+    except TypeError as e:
+        raise TypeError(f"Preference value for '{key}' must be JSON-serializable: {e}")
+
+    return update_profile({key: value})
+

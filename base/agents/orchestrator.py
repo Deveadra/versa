@@ -1,6 +1,7 @@
 from __future__ import annotations
 import numpy as np
 
+import hashlib
 import re
 import sqlite3
 import numpy as np
@@ -41,11 +42,15 @@ from base.utils.embeddings import get_embedder
 from base.memory.faiss_backend import FAISSBackend
 from base.learning.habit_miner import HabitMiner
 from base.utils.embeddings import get_embedder
-from base.memory.decider import Decider
+from base.core.decider import Decider
 
 from .scheduler import Scheduler
 from openai import OpenAI
+<<<<<<< Updated upstream
 from pathlib import Path
+=======
+from typing import Tuple, Optional, Dict, Any
+>>>>>>> Stashed changes
 
 
 conn = sqlite3.connect(settings.db_path, check_same_thread=False)
@@ -224,6 +229,12 @@ class Orchestrator:
         self.brain = Brain()
         self.consolidator = Consolidator(self.store, self.brain)
 
+        # Decider for memory/habit scoring
+        self.decider = Decider()
+        self.interaction_count = 0
+        self.mining_threshold = 25  # every 25 user interactions
+        self.memory_store = self.store  # alias for clarity
+        
         # Learning
         self.miner = HabitMiner(self.db)
         self.interaction_count = 0
@@ -521,27 +532,60 @@ class Orchestrator:
     
     # ---------- User interaction & learning ----------
     def handle_user_message(self, text: str) -> str:
-        """
-        Main entrypoint for processing user input.
-        """
-        reply = self.llm.generate(text)
-        maybe = decider.decide_memory(text, reply)
+        # 1) score the message (for memory/habits)
+        score, meta = self.decider.decide(text)
+
+        # 2) generate the reply via your LLM pipeline
+        reply = self.chat_brain(text)  # or whatever method you use
+
+        # 3) optional: structured fact extraction
+        fact = self.decider.extract_structured_fact(text)
+        if fact:
+            key, value = fact
+            self.memory_store.upsert_fact(key, value)
+
+        # 4) decide if the exchange should be remembered as an event
+        maybe = self.decider.decide_memory(text, reply)
         if maybe:
-            self.store.save_memory(maybe)
-            return reply
-        
-        # ✅ Count interaction
+            # adapt to your MemoryStore API
+            self.memory_store.add_event(
+                content=f"{maybe['type']}: {maybe['content']} | reply: {maybe['response']}",
+                importance=float(score),
+                type_=maybe["type"],
+            )
+
+        # 5) trigger habit miner occasionally
         self.interaction_count += 1
         if self.interaction_count >= self.mining_threshold:
             try:
-                logger.info("Triggering HabitMiner (interaction threshold reached)")
                 self.miner.mine()
-            except Exception as e:
-                logger.error(f"HabitMiner mining failed: {e}")
             finally:
-                self.interaction_count = 0  # reset
+                self.interaction_count = 0
 
         return reply
+    
+    # def handle_user_message(self, text: str) -> str:
+    #     """
+    #     Main entrypoint for processing user input.
+    #     """
+    #     reply = self.llm.generate(text)
+    #     maybe = decider.decide_memory(text, reply)
+    #     if maybe:
+    #         self.store.save_memory(maybe)
+    #         return reply
+        
+    #     # ✅ Count interaction
+    #     self.interaction_count += 1
+    #     if self.interaction_count >= self.mining_threshold:
+    #         try:
+    #             logger.info("Triggering HabitMiner (interaction threshold reached)")
+    #             self.miner.mine()
+    #         except Exception as e:
+    #             logger.error(f"HabitMiner mining failed: {e}")
+    #         finally:
+    #             self.interaction_count = 0  # reset
+
+    #     return reply
 
     # ---------- Misc ----------
     def forget_memory(self, user_text: str) -> str:

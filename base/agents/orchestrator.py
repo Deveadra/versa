@@ -15,7 +15,7 @@ from ..llm.brain import Brain
 from ..memory.faiss_backend import FAISSBackend
 from ..llm.prompts import SYSTEM_PROMPT, build_prompt
 from ..memory.consolidation import Consolidator
-from .scheduler import UltronScheduler
+from .scheduler import Scheduler
 from ..kg.store import KGStore
 from ..kg.integration import KGIntegrator
 from ..kg.relations import RELATION_QUERY_HINTS
@@ -26,10 +26,11 @@ from base.utils.timeparse import extract_time_from_text
 from dateutil import parser as dateparser
 from base.utils.embeddings import get_embedder
 from base.memory.faiss_backend import FAISSBackend
-
+from base.learning.habit_miner import HabitMiner
 from base.utils.embeddings import get_embedder
+from base.memory.decider import Decider
 
-from .scheduler import UltronScheduler
+from .scheduler import Scheduler
 from openai import OpenAI
 
 
@@ -70,6 +71,11 @@ class Orchestrator:
         self.brain = Brain()
         self.consolidator = Consolidator(self.store, self.brain)
 
+        # Learning
+        self.miner = HabitMiner(self.db)
+        self.interaction_count = 0
+        self.mining_threshold = 25  # every 25 user interactions
+        
         # Calendar
         self.calendar = CalendarStore(self.db)
 
@@ -77,7 +83,7 @@ class Orchestrator:
         self.oai = OpenAI(api_key=settings.openai_api_key)
 
         # Scheduler (use settings.consolidation_* names)
-        self.scheduler = UltronScheduler()
+        self.scheduler = Scheduler(self.db)
         self.scheduler.add_daily(
             self.consolidator.summarize_old_events,
             hour=settings.consolidation_hour,
@@ -295,6 +301,30 @@ class Orchestrator:
                     return "Knowledge Graph Reasoning:\n" + "\n".join(formatted)
 
         return ""
+    
+    # ---------- User interaction & learning ----------
+    def handle_user_message(self, text: str) -> str:
+        """
+        Main entrypoint for processing user input.
+        """
+        reply = self.llm.generate(text)
+        maybe = decider.decide_memory(text, reply)
+        if maybe:
+            self.store.save_memory(maybe)
+            return reply
+        
+        # ✅ Count interaction
+        self.interaction_count += 1
+        if self.interaction_count >= self.mining_threshold:
+            try:
+                logger.info("Triggering HabitMiner (interaction threshold reached)")
+                self.miner.mine()
+            except Exception as e:
+                logger.error(f"HabitMiner mining failed: {e}")
+            finally:
+                self.interaction_count = 0  # reset
+
+        return reply
 
     # ---------- Misc ----------
     def forget_memory(self, user_text: str) -> str:

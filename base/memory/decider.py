@@ -4,7 +4,7 @@ import hashlib
 
 from typing import Tuple
 from base.core import memory, context
-from personal.assistant.base.memory import decider
+from base.memory import decider
 from datetime import datetime
 
 # Configurable weights
@@ -95,13 +95,13 @@ def handle_user_text(text, plugin_hint=None):
     session_repeat_counter[norm] = session_repeat_counter.get(norm, 0) + 1
 
     # run cheap classifier to get score + meta
-    score, meta = decider.score_text(text, plugin_hint=plugin_hint, repeat_count=session_repeat_counter[norm]-1)
+    score, meta = decider.score_text(text, plugin_hint=(plugin_hint or ""), repeat_count=session_repeat_counter[norm]-1)
 
     # store if above threshold or explicit_remember
     STORE_THRESHOLD = 60  # tuneable
     if score >= STORE_THRESHOLD or "explicit_remember" in meta.get("reason", []):
         # create a key and value — for simple facts use a short value
-        key = decider.make_fact_key(text, hint=meta.get("category"))
+        key = decider.make_fact_key(text, hint=(meta.get("category") or ""))
         # Deduplicate/update: only remember if new or different
         existing = memory.recall_fact(key)
         if existing is None:
@@ -119,7 +119,7 @@ def handle_user_text(text, plugin_hint=None):
     memory.add_history(text)
 
         
-def score_text(text: str, plugin_hint: str = None, repeat_count: int = 0) -> Tuple[int, dict]:
+def score_text(text: str, plugin_hint: str = "", repeat_count: int = 0) -> Tuple[int, dict]:
     """
     Compute importance score and suggested memory metadata.
     plugin_hint: optional (e.g., 'calendar', 'email') to boost priority.
@@ -177,6 +177,6 @@ def score_text(text: str, plugin_hint: str = None, repeat_count: int = 0) -> Tup
     return score, meta
 
 # Helper to create a stable fact key
-def make_fact_key(text: str, hint: str = None) -> str:
+def make_fact_key(text: str, hint: str = "") -> str:
     base = (hint or "") + "|" + text.strip().lower()
     return hashlib.sha256(base.encode("utf-8")).hexdigest()

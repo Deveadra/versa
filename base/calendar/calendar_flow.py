@@ -1,35 +1,25 @@
-import random
-from base.plugins import calendar
+
 from base.core.stylizer import stylize_response
 from base.core.profile import get_pref
-from base.plugins.calendar import get_upcoming_events, add_event
+from calendar.calendar import get_upcoming_events, add_event
 
 # Structured state for calendar event creation
 event_state = {"title": None, "date": None, "time": None, "confirm": False}
 
-
 def has_pending():
     return any(v is None for k, v in event_state.items() if k != "confirm") or event_state["confirm"]
-
 
 def is_calendar_command(text: str) -> bool:
     return "add event" in text.lower() or "new event" in text.lower() or "calendar" in text.lower()
 
-
 def handle_calendar_command(text):
-    """
-    Handle calendar-related requests.
-    """
-    
-    default_calendar = get_pref("default_calendar", "primary")
-    
+    default_calendar = get_pref("default_calendar", "primary") or "primary"
 
     if "add" in text.lower() or "create" in text.lower():
-        # parse event text -> title, date/time (using dateparser as before)
         return None, f"Which calendar should I use? Default is {default_calendar}."
 
     if "show" in text.lower() or "upcoming" in text.lower():
-        events = get_upcoming_events(calendar_id=default_calendar, n=5)
+        events = get_upcoming_events(calendar_id=str(default_calendar), n=5)
         if not events:
             return "No upcoming events.", "You have no events scheduled."
         spoken = ", ".join([f"{e['summary']} on {e['start']}" for e in events])

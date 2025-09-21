@@ -1,0 +1,6 @@
+# types.py
+from typing import Protocol, Any, Iterable
+
+class ConnLike(Protocol):
+    def execute(self, sql: str, params: Iterable[Any] = ...) -> Any: ...
+    def commit(self) -> None: ...

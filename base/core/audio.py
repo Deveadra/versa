@@ -1,6 +1,7 @@
 import struct, tempfile, threading, sounddevice as sd, soundfile as sf
 import os
 import pvporcupine
+import time
 
 from playsound import playsound
 from pvporcupine import create

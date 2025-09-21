@@ -14,7 +14,7 @@ except Exception:
     # Keep going; you'll catch it in the preflight check below.
     pass
 
-from personal.assistant.base.memory import decider
+from base.memory import decider
 
 # Always resolve path relative to this file (main.py)
 dotenv_path = Path(__file__).parent / "config" / ".env"
@@ -24,12 +24,14 @@ import random
 import threading
 import time
 import requests
+import sqlite3
 
 
 from base.core.core import JarvisState, reset_session, SLEEP_WORDS, STOP_WORDS
 from base.core.audio import listen_for_wake_word, listen_until_silence, stream_speak, interrupt
-from personal.assistant.base.llm.brain import ask_jarvis_stream
-from base.plugins import system, calendar_flow, file_manager, media_smart_home #profile_manager
+from base.llm.brain import ask_jarvis_stream
+from base.calendar import calendar_flow
+from base.plugins import system, file_manager, media_smart_home #profile_manager
 from base.core.plugin_manager import PluginManager
 from personalities.loader import load_personality
 from base.core.mode_classifier import classify_mode
@@ -41,6 +43,8 @@ from base.core import memory, context
 from base.memory.decider import decide_memory
 from base.memory.store import init_db, save_memory
 from base.memory.recall import recall_relevant, format_memories
+from base.memory.store import MemoryStore
+from config.config import settings
 
 init_db()
 
@@ -66,6 +70,8 @@ manager.register("media_smart_home", media_smart_home, keywords=["light", "music
 
 
 state = JarvisState.IDLE
+conn = sqlite3.connect(settings.db_path, check_same_thread=False)
+store = MemoryStore(conn)
 
 print(f"[Jarvis initialized with base personality: {BASE_PERSONALITY}, mode: {MODE}]")
 print(os.getenv("PICOVOICE_API_KEY"))
@@ -202,4 +208,4 @@ while True:
                 
             memory = decide_memory(text, reply)
             if memory:
-                save_memory(memory)
+                store.add_event(f"{memory['content']} || {memory.get('response','')}", importance=0.0, type_="chat")

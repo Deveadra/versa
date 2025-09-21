@@ -5,7 +5,7 @@ import time
 
 from base.core.profile import get_pref
 from base.core.audio import stream_speak
-from base.devices.home_assistant import call_service, get_state
+# from base.devices.home_assistant import call_service, get_state
 from base.apps.media_smart_home_prompts import ASK_DEVICE_VARIANTS, ASK_ACTION_VARIANTS, CONFIRM_VARIANTS, CANCEL_VARIANTS
 
 

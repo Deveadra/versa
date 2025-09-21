@@ -14,7 +14,7 @@ except Exception:
     # Keep going; you'll catch it in the preflight check below.
     pass
 
-from base.memory import decider
+from base.core import decider
 
 # Always resolve path relative to this file (main.py)
 dotenv_path = Path(__file__).parent / "config" / ".env"
@@ -39,7 +39,7 @@ from personalities.loader import load_personality
 from base.plugins import email_flow_original
 from base.core.profile import get_profile
 from base.core.profile import get_pref
-from base.memory.decider import Decider
+from base.core.decider import Decider
 from base.memory.store import init_db, save_memory
 from base.memory.recall import recall_relevant, format_memories
 from base.memory.store import MemoryStore

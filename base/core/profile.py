@@ -14,6 +14,24 @@ def get_profile():
         return {}
     except json.JSONDecodeError:
         return {}
+    
+def get_persona(profile: dict) -> str:
+    """
+    Extract a persona description from the profile.
+    """
+    name = profile.get("name", "User")
+    profession = profile.get("profession", "a professional")
+    traits = profile.get("traits", [])
+    interests = profile.get("interests", [])
+    
+    traits_str = ", ".join(traits) if traits else "no specific traits"
+    interests_str = ", ".join(interests) if interests else "no specific interests"
+    
+    persona = (
+        f"{name} is {profession} with {traits_str}. "
+        f"They are interested in {interests_str}."
+    )
+    return persona
 
 def update_profile(updates: dict):
     """

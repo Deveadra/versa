@@ -44,6 +44,22 @@ from base.memory.store import init_db, save_memory
 from base.memory.recall import recall_relevant, format_memories
 from base.memory.store import MemoryStore
 from config.config import settings
+from base.learning.engagement_manager import EngagementManager
+from base.learning.habit_miner import HabitMiner
+from base.core.profile_manager import ProfileManager
+from base.policy.policy_store import PolicyStore
+from base.core.commands import handle_policy_command
+from base.database.sqlite import SQLiteConn
+from base.agents.scheduler import Scheduler
+from base.voice.tts_elevenlabs import Voice
+
+# Choose your TTS engine here:
+# from base.voice.tts_elevenlabs import speak_blocking as speak
+# OR
+from base.voice.tts_elevenlabs import speak_async as speak, stop_speaking
+
+
+last_user_input = None  # track last input globally
 
 init_db()
 
@@ -68,6 +84,10 @@ manager.register("media_smart_home", media_smart_home, keywords=["light", "music
 # manager.register("profile", profile_manager, keywords=["profile", "preferences", "settings"], flow=True)
 
 
+habit_miner = HabitMiner(db)
+profile_mgr = ProfileManager()
+engagement_mgr = EngagementManager(habit_miner, profile_mgr)
+scheduler = Scheduler()
 state = JarvisState.IDLE
 conn = sqlite3.connect(settings.db_path, check_same_thread=False)
 store = MemoryStore(conn)
@@ -82,6 +102,19 @@ HA_TOKEN = os.getenv("HA_TOKEN")
 HA_ENTITY = os.getenv("HA_PRESENCE_ENTITY", "device_tracker.your_phone")
 
 headers = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
+
+
+# ===================== Scheduler Tasks =====================
+def engagement_task():
+    msg = engagement_mgr.check_for_engagement()
+    if msg:
+        print(f"[Engagement] {msg}")
+        speak(msg)
+        # later this could be routed through Ultron’s voice/text output
+
+# Run every 3600s = 1 hour
+scheduler.add_task("engagement_check", interval=3600, func=engagement_task)
+scheduler.start()
 
 def check_presence(entity=HA_ENTITY):
     try:
@@ -128,6 +161,8 @@ while True:
 
         while state == JarvisState.ACTIVE:
             text = listen_until_silence()
+            print(f"You: {text}")
+            last_user_input = text
             if not text:
                 state = JarvisState.IDLE
                 reset_session()
@@ -154,7 +189,43 @@ while True:
                 break
 
             if any(w in text.lower() for w in STOP_WORDS):
-                interrupt()
+                interrupt()       # cut TTS
+                stop_speaking()   # stop audio playback (if using blocking TTS)
+
+                # Pull an acknowledgment line from personality if available
+                ack = None
+                if "interrupt_ack" in CURRENT_PERSONALITY:
+                    ack = random.choice(CURRENT_PERSONALITY["interrupt_ack"])
+                else:
+                    ack = "Alright, go ahead."
+
+                stream_speak(ack)
+
+                # Immediately capture clarification
+                correction = listen_until_silence()
+                if correction:
+                    print(f"You (clarification): {correction}")
+
+                    # Merge original input + correction for GPT
+                    revised_input = (
+                        f"Original question: {last_user_input}\n"
+                        f"User clarification: {correction}"
+                    )
+
+                    reply = ask_jarvis_stream(revised_input)
+                    if reply:
+                        print(f"{BASE_PERSONALITY.capitalize()}: {reply}")
+                        stream_speak(reply)
+
+                        # Store in memory as a clarified exchange
+                        decider = Decider()
+                        memory = decider.decide_memory(revised_input, reply)
+                        if memory:
+                            store.add_event(
+                                f"{memory['content']} || {memory.get('response','')}",
+                                importance=0.0,
+                                type_="chat"
+                            )
                 continue
 
             # (Optional) manual overrides
@@ -209,3 +280,7 @@ while True:
             memory = decider.decide_memory(text, reply)
             if memory:
                 store.add_event(f"{memory['content']} || {memory.get('response','')}", importance=0.0, type_="chat")
+
+            for t, pol in [("stretch","principled"), ("sleep","principled"), ("hydration","principled"),
+                 ("ai_superiority","advocate")]:
+            policy.upsert_topic(t, pol)

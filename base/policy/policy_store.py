@@ -1,10 +1,15 @@
 # assistant/base/policy/policy_store.py
 from __future__ import annotations
+import sqlite3
+
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, Tuple
 from datetime import datetime, timedelta
 from loguru import logger
-import sqlite3
+
+from base.policy.context_manager import ContextManager
+
+
 
 POLICIES = ("principled", "advocate", "adaptive")
 OVERRIDE_TYPES = ("hard", "soft", "preference")
@@ -18,6 +23,8 @@ class Topic:
 class PolicyStore:
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
+        self.ctx_mgr = ContextManager(self.conn)
+
 
     # ---------- CRUD ----------
     def get_topic(self, topic_id: str) -> Optional[Topic]:
@@ -103,7 +110,10 @@ class PolicyStore:
         return dict(row) if row else {"topic_id": topic_id, "ignore_count": 0, "escalation_count": 0, "last_mentioned": None}
 
     # ---------- evaluation ----------
-    def should_speak(self, topic_id: str, context_signals: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+    def should_speak(self, topic_id: str, context_signals: Optional[Dict[str,Any]] = None):
+        if context_signals is None:
+            # load all signals + derived
+            context_signals = {**self.ctx_mgr.all_signals(), **self.ctx_mgr.eval_derived_signals()}
         """
         Decide whether to speak on a topic now, with what tone.
         """

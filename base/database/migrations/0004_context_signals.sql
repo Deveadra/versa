@@ -4,6 +4,8 @@ CREATE TABLE IF NOT EXISTS context_signals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
     value TEXT, -- boolean/int/float stored as string
+    type TEXT NOT NULL CHECK(type IN ('boolean','integer','float')) DEFAULT 'counter',
+    description TEXT DEFAULT '',
     confidence REAL DEFAULT 1.0,
     source TEXT,
     last_updated DATETIME DEFAULT CURRENT_TIMESTAMP

@@ -10,9 +10,37 @@ from base.memory.store import MemoryStore
 from base.learning.habit_miner import HabitMiner
 from base.learning.policy_store import PolicyStore
 from base.core.profile_manager import ProfileManager, compose_prompt
+from base.policy.rule_engine import evaluate_condition, choose_tone
 from base.database.sqlite import SQLiteConn
 from base.learning.sentiment import quick_polarity
+from base.policy.rule_engine import derive_expectation
+from base.policy.tone_memory import get_tone
+from base.policy.tone_memory import choose_tone_for_topic
+from base.policy.consequence_linker import detect_consequence
+from base.policy.consequence_linker import style_complaint
+from base.policy.tone_memory import choose_tone_for_topic
+from base.llm.brain import ask_jarvis_stream
+
+
 from loguru import logger
+
+
+signals, expect_fn = derive_expectation(r["condition_json"])
+watch_signal, expect_fn = (sig_expect if sig_expect else (None, None))
+tone = choose_tone(r["tone_strategy_json"], severity)
+# Pick tone adaptively using tone memory
+tone = choose_tone_for_topic(self.db, rule["topic_id"])
+tone = get_tone(self.policy.conn, r["topic_id"], tone)
+
+events.append({
+    "topic": r["topic_id"],
+    "tone": meta.get("tone", tone),
+    "context": context.strip(),
+    "rule_id": r["id"],
+    "score": meta.get("score", severity),
+    "watch_signals": signals,
+    "expect_change": expect_fn,
+})
 
 
 class EngagementManager:
@@ -25,13 +53,14 @@ class EngagementManager:
     - Keep it lightweight and non-intrusive
     """
 
-    def __init__(self, db: SQLiteConn, memory: MemoryStore, store, habits: HabitMiner, habit_miner, profile_mgr: ProfileManager | None = None):
+    def __init__(self, db: SQLiteConn, policy, memory: MemoryStore, store, habits: HabitMiner, habit_miner, profile_mgr: ProfileManager | None = None):
       
         self.memory = memory
         self.store = store
         self.habits = habits
         self.habit_miner = habit_miner
         self.db = db
+        self.policy = policy
         self.policy = PolicyStore(self.db)
         self.profile_mgr = profile_mgr
         self.last_engagement: dict[str, str] = {}  # habit_text -> last_ts
@@ -39,6 +68,44 @@ class EngagementManager:
         self.blocked = set() # explicit opt-outs
 
     # ---------------- Decision Loop ----------------
+    def _load_signals(self) -> Dict[str,dict]:
+        # Providers update signals elsewhere; here we just read all of them.
+        # (If you want HabitMiner to contribute live values, write them into ContextManager first.)
+        ctx = self.policy.ctx_mgr.all_signals()
+        ctx |= self.policy.ctx_mgr.eval_derived_signals()
+        return ctx
+
+    def _eligible_by_stats(self, rule: dict) -> bool:
+        rs = self.policy.conn.execute(
+            "SELECT * FROM rule_stats WHERE rule_id=?", (rule["id"],)
+        ).fetchone()
+        if not rs:
+            return True
+        last = rs["last_fired"]
+        if last:
+            dt = datetime.strptime(last, "%Y-%m-%d %H:%M:%S")
+            if datetime.utcnow() < dt + timedelta(seconds=rule["cooldown_seconds"]):
+                return False
+        # Max per day check
+        fires = rs["fires_today"] or 0
+        return fires < (rule["max_per_day"] or 9999)
+
+    def _mark_fired(self, rule_id: int):
+        # upsert stats
+        self.policy.conn.execute(
+            """
+            INSERT INTO rule_stats(rule_id, last_fired, fires_today)
+            VALUES(?, datetime('now'), 1)
+            ON CONFLICT(rule_id) DO UPDATE SET
+              last_fired = datetime('now'),
+              fires_today = CASE
+                WHEN date(last_fired)=date('now') THEN rule_stats.fires_today + 1
+                ELSE 1 END
+            """,
+            (rule_id,),
+        )
+        self.policy.conn.commit()
+        
     def should_engage(self) -> bool:
         """Check if conditions are right for proactive engagement."""
         now = datetime.utcnow()
@@ -121,38 +188,152 @@ class EngagementManager:
         else:
             return "night"
 
-    def check_for_engagement(self) -> str | None:
+    def check_for_engagement(self) -> List[dict]:
         """
-        Run periodically (e.g., once per hour).
-        If a habit aligns with the current time, return a proactive message.
+        Returns a list of structured engagement events:
+        [{"topic": ..., "tone": ..., "context": ..., "rule_id": ..., "score": ...}, ...]
         """
-        habits: List[str] = self.habit_miner.get_summaries()
-        if not habits:
+        signals = self._load_signals()
+        events: List[dict] = []
+
+        rules = self.policy.conn.execute(
+            "SELECT * FROM engagement_rules WHERE enabled=1 ORDER BY priority ASC, id ASC"
+        ).fetchall()
+        cur = self.db.cursor()
+        row = cur.execute("""
+            SELECT * FROM engagement_rules
+            WHERE enabled=1
+            ORDER BY priority DESC
+            LIMIT 1
+        """).fetchone()
+
+        if not row:
             return None
 
-        now = datetime.utcnow()
-        bucket = self._time_bucket(now.hour)
+        # Adaptive tone from memory
+        # Build adaptive message
+        tone = choose_tone_for_topic(self.db, row["topic_id"])
 
-        # filter habits relevant to this bucket
-        matching = [h for h in habits if bucket in h]
-        if not matching:
-            return None
+        # Fetch cluster + last complaint
+        cluster_row = cur.execute("""
+            SELECT cluster, last_example FROM complaint_clusters
+            WHERE topic_id=?
+            ORDER BY last_updated DESC
+            LIMIT 1
+        """, (row["topic_id"],)).fetchone()
 
-        # avoid repeating the same engagement too often
-        choice = random.choice(matching)
-        if choice in self.last_engagement and self.last_engagement[choice] == bucket:
-            return None  # already said this recently
+        cluster = cluster_row["cluster"] if cluster_row else None
+        last_example = style_complaint(cluster_row["last_example"]) if cluster_row and cluster_row["last_example"] else None
+        cluster_row = cur.execute("""
+            SELECT cluster, last_example FROM complaint_clusters
+            WHERE topic_id=?
+            ORDER BY last_updated DESC
+            LIMIT 1
+        """, (row["topic_id"],)).fetchone()
 
-        self.last_engagement[choice] = bucket
+        cluster = cluster_row["cluster"] if cluster_row else None
+        
 
-        # Create a natural-sounding nudge
-        msg_variants = [
-            f"I noticed you often {choice.lower()}. Do you want me to do that now?",
-            f"It’s {bucket} — would you like me to {choice.lower()}?",
-            f"Based on your habits, {choice.lower()} might be nice right now. Should I?",
-        ]
-        return random.choice(msg_variants)
+
+        # Build adaptive message
+        if tone == "genuine":
+            if cluster and last_example:
+                msg = f"Time to address {row['topic_id']} — remember when you said '{last_example}'?"
+            elif cluster:
+                msg = f"Time to address {row['topic_id']} — all those {cluster} aren’t random."
+            else:
+                msg = f"Time to pay attention to {row['topic_id']}."
+        elif tone == "sarcastic":
+            if last_example:
+                msg = f"Oh, ignore me about {row['topic_id']} again. But don’t come whining with '{last_example}' later."
+            elif cluster:
+                msg = f"Oh sure, ignore me about {row['topic_id']}. Worked great with all your {cluster}, didn’t it?"
+            else:
+                msg = f"Funny how you keep ignoring me about {row['topic_id']}."
+        else:
+            msg = f"Reminder: {row['topic_id']}."
+
+        return msg
+
+            # 3) Build context payload for the brain
+        context = {
+            "topic": row["topic_id"],
+            "tone": tone,
+            "cluster": cluster,
+            "last_complaint": last_example,
+        }
+
+        # 4) Generate natural line via LLM
+        prompt = f"""
+        You are Ultron, an adaptive AI companion with a sharp personality.
+        The user may ignore your advice often. Use the provided context to generate a
+        single natural-sounding line you would say to the user.
+
+        Context:
+        - Topic: {context['topic']}
+        - Tone: {context['tone']}
+        - Cluster: {context['cluster']}
+        - Last complaint: {context['last_complaint']}
+
+        Constraints:
+        - Only generate the line (no explanations, no meta-commentary).
+        - Tone should reflect frustration, sarcasm, or care as instructed.
+        - If there’s a last complaint, you may quote or paraphrase it.
+        - Stay in character as Ultron.
+        """
+
+        msg = ask_jarvis_stream(prompt)
+        return msg.strip() if msg else None
+       continue
     
+        # Adaptive tone from memory        
+
+        for r in rules:
+            if not self._eligible_by_stats(r):
+                continue
+
+            match, severity, bindings = evaluate_condition(r["condition_json"], signals)
+            if not match:
+                continue
+
+            tone = choose_tone(r["tone_strategy_json"], severity)
+
+            # PolicyStore still governs principled/advocate/adaptive persistence per topic
+            speak, meta = self.policy.should_speak(r["topic_id"], signals)
+            if not speak:
+                continue
+
+            # Render context template (lightweight, no Jinja)
+            context = (r["context_template"] or "") \
+                .replace("{{severity}}", f"{severity:.2f}")
+            for k, v in (bindings or {}).items():
+                context = context.replace(f"{{{{{k}}}}}", str(v))
+
+            events.append({
+                "topic": r["topic_id"],
+                "tone": meta.get("tone", tone),
+                "context": context.strip(),
+                "rule_id": r["id"],
+                "score": meta.get("score", severity),
+            })
+
+            self._mark_fired(r["id"])
+            self.policy.record_mention(r["topic_id"], escalated=(meta.get("tone","") == "firm"))
+
+        return events
+    
+    def load_context(self) -> dict:
+        # Load all base + derived signals
+        ctx = self.policy.ctx_mgr.all_signals()
+        ctx |= self.policy.ctx_mgr.eval_derived_signals()
+
+        # HabitMiner signals get pushed into ContextManager
+        self.policy.ctx_mgr.set_signal("long_sitting", self.habits.too_long_since_break(), source="habit_miner")
+        self.policy.ctx_mgr.set_signal("approaching_bedtime", self.habits.is_bedtime_window(), source="habit_miner")
+
+        return {**ctx, **self.policy.ctx_mgr.eval_derived_signals()}
+
+
     def evaluate_context(self) -> Optional[str]:
         """Decide if there’s something worth engaging about."""
         now = datetime.now()
@@ -160,11 +341,11 @@ class EngagementManager:
         
         
         # Example context signals (wire these to your sensors)
-        ctx = {
-            "long_sitting": self.habits.too_long_since_break(),
-            "approaching_bedtime": self.habits.is_bedtime_window(),
-            "health_risk": False,
-        }
+        # ctx = {
+        #     "long_sitting": self.habits.too_long_since_break(),
+        #     "approaching_bedtime": self.habits.is_bedtime_window(),
+        #     "health_risk": False,
+        # }
 
         # Stretch reminder
         speak, meta = self.policy.should_speak("stretch", ctx)

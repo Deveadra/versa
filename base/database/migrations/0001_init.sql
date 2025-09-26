@@ -4,7 +4,9 @@ PRAGMA journal_mode=WAL;
 CREATE TABLE IF NOT EXISTS facts (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
-    last_updated TEXT NOT NULL
+    last_updated TEXT NOT NULL,
+    confidence REAL DEFAULT 0.75,
+    last_reinforced DATETIME
 );
 
 CREATE TABLE IF NOT EXISTS events (

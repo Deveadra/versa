@@ -9,9 +9,24 @@ from config.config import settings
 from ..core.core import messages, reset_session, JARVIS_PROMPT, CURRENT_PERSONALITY, PERSONALITIES
 from base.core.audio import stream_speak
 from base.plugins import PLUGINS
+from base.llm.brain import ask_jarvis_stream
+
 
 _client = OpenAI(api_key=settings.openai_api_key)
 _MODEL = settings.openai_model or "gpt-4o-mini"
+prompt = f"""
+You are Ultron, an adaptive AI companion.
+User has a {context['topic']} issue.
+Tone to use: {context['tone']}.
+Recent complaint (if any): {context['last_complaint']}.
+Relevant cluster: {context['cluster']}.
+
+Generate a single natural-sounding line you would say,
+reflecting your personality. No explanations, just the line.
+"""
+
+msg = ask_jarvis_stream(prompt)
+
 
 class Brain:
     def __init__(self):

@@ -4,26 +4,32 @@ from textwrap import dedent
 from typing import List, Dict, Any, Optional
 
 import datetime
+import os
+
+from datetime import datetime
+from base.core.profile_manager import ProfileManager
+from base.memory.store import MemoryStore
+from base.learning.habit_miner import HabitMiner
+from base.learning.sentiment import quick_polarity
+from base.personality.tone_adapter import ToneAdapter
+
 
 
 def _format_timestamp(ts: Optional[str]) -> str:
     if not ts:
         return "unknown time"
     try:
-        dt = datetime.datetime.fromisoformat(ts)
-        return dt.strftime("%Y-%m-%d")
+        return datetime.fromisoformat(ts).strftime("%Y-%m-%d")
     except Exception:
-        return ts.split("T")[0] if "T" in ts else ts.split(" ")[0]
+        return ts.split("T")[0] if "T" in ts else ts
+
 
 def justify_memory(mem: Dict[str, Any]) -> str:
     if not mem:
         return ""
-    if mem.get("reason"):
-        return mem["reason"]
     parts = []
-    src = mem.get("source")
-    if src:
-        parts.append(f"from {src}")
+    if mem.get("source"):
+        parts.append(f"from {mem['source']}")
     if mem.get("score") is not None:
         try:
             parts.append(f"score={float(mem['score']):.2f}")
@@ -31,24 +37,8 @@ def justify_memory(mem: Dict[str, Any]) -> str:
             parts.append(f"score={mem.get('score')}")
     ts = mem.get("last_used") or mem.get("created_at") or mem.get("timestamp")
     if ts:
-        parts.append(f"recent={_format_timestamp(ts)}")
-    if parts:
-        return ", ".join(parts)
-    return "relevant memory"
-
-# def compose_persona_block(profile_mgr: ProfileManager) -> str:
-#     """
-#     Build the personality + tone block.
-#     This evolves as Ultron learns from HabitMiner and profile enrichment.
-#     """
-#     persona = profile_mgr.get_current_persona()
-#     lines = [
-#         f"Ultron Personality: {persona.get('name', 'Ultron')}",
-#         f"Style: {persona.get('style', 'formal but warm')}",
-#         f"Tone Weights: {persona.get('tone_weights', {})}",
-#         f"Known User Prefs: {persona.get('user_prefs', {})}"
-#     ]
-#     return "\n".join(lines)
+        parts.append(f"as of {_format_timestamp(ts)}")
+    return ", ".join(parts) if parts else "relevant memory"
 
 def compose_persona_block(persona_text: Optional[str]) -> str:
     if not persona_text:
@@ -57,6 +47,20 @@ def compose_persona_block(persona_text: Optional[str]) -> str:
     if not lines:
         return ""
     return "Persona:\\n" + "\\n".join(lines) + "\\n"
+
+def compose_habit_block(habits: list[str], top_k: int = 3) -> str:
+    """
+    Turn a list of habit summaries into a compact prompt block.
+    Example habit: "User usually plays lo-fi music at night"
+    """
+    if not habits:
+        return ""
+    # keep top habits (e.g. most frequent / most recent)
+    selected = habits[:top_k]
+    lines = ["Observed habits:"]
+    for i, h in enumerate(selected, start=1):
+        lines.append(f"{i}. {h}")
+    return "\n".join(lines) + "\n"
 
 def compose_retrieval_block(memories: List[Dict[str, Any]], top_k: int = 3) -> str:
     if not memories:
@@ -74,20 +78,6 @@ def compose_retrieval_block(memories: List[Dict[str, Any]], top_k: int = 3) -> s
         lines.append(f"{i}. {summary}  ({justification})")
     return "\\n".join(lines) + "\\n"
 
-# def compose_retrieval_block(memories: List[str], facts: List[str]) -> str:
-#     """
-#     Include relevant memories and facts for grounding the model’s reply.
-#     """
-#     block = ["--- Contextual Memory ---"]
-#     if facts:
-#         block.append("Facts:")
-#         for f in facts:
-#             block.append(f" - {f}")
-#     if memories:
-#         block.append("Recent Memories:")
-#         for m in memories:
-#             block.append(f" - {m}")
-#     return "\n".join(block)
 
 def synthesize_memories(memories: List[Dict[str, Any]], top_k: int = 3) -> str:
     """
@@ -104,9 +94,7 @@ def synthesize_memories(memories: List[Dict[str, Any]], top_k: int = 3) -> str:
     lines = []
     for m in selected:
         summary = m.get("summary") or m.get("text") or "<no summary>"
-        ts = m.get("last_used") or m.get("created_at") or m.get("timestamp")
-        when = _format_timestamp(ts)
-        lines.append(f"- {summary} (as of {when})")
+        lines.append(f"- {summary} ({justify_memory(m)})")
 
     return "You recall the following about the user:\n" + "\n".join(lines) + "\n"
 
@@ -114,17 +102,28 @@ def synthesize_memories(memories: List[Dict[str, Any]], top_k: int = 3) -> str:
 def compose_prompt(
     system_prompt: str,
     user_text: str,
-    persona_text: Optional[str] = None,
-    memories: Optional[List[Dict[str, Any]]] = None,
-    extra_context: Optional[str] = None,
-    tone_hint: Optional[str] = None,
+    profile_mgr: ProfileManager,
+    memory_store: MemoryStore,
+    habit_miner: HabitMiner,
+    persona_text: str | None = None,
+    memories: list[dict[str, any]] | None = None,
+    habits: list[str] | None = None,
+    extra_context: str | None = None,
     top_k_memories: int = 3,
+    top_k_habits: int = 3,
+    channel: str = "text",         # NEW
+    include_kg: bool = True,       # optional future hook
 ) -> str:
     """
-    Compose the full LLM prompt with persona, memory, and user context.
+    Compose a dynamic prompt that fuses:
+    - Ultron's evolving persona
+    - Habits and preferences
+    - Relevant memories
+    - Sentiment/tone analysis
     """
-    parts: List[str] = []
+    parts: list[str] = []
 
+    # Core system rules
     if system_prompt:
         parts.append(f"SYSTEM:\n{system_prompt.strip()}\n")
 
@@ -132,51 +131,118 @@ def compose_prompt(
     if persona_text:
         parts.append(f"You are Ultron. {persona_text.strip()}\n")
 
-    # Learned habits / memories
-    if memories:
-        parts.append(synthesize_memories(memories, top_k=top_k_memories))
+    persona_block = compose_persona_block(persona_text)
+    if persona_block:
+        parts.append(persona_block)
 
-    # Extra context (session-level cues, e.g. "user seems tired")
+    # # Habits / preferences (auto-mined)
+    # habits = habit_miner.export_summary()
+    if habits:
+        parts.append(compose_habit_block(habits, top_k=top_k_habits))
+
+    if memories:
+        parts.append(compose_retrieval_block(memories, top_k=top_k_memories))
+
     if extra_context:
         parts.append("Context:\n" + extra_context.strip() + "\n")
 
-    # Tone hint (from sentiment analysis or personality adapters)
-    if tone_hint:
+    # Memory synthesis (recent & relevant)
+    mems = memory_store.keyword_search(user_text, limit=top_k_memories)
+    if mems:
+        mem_dicts = [{"text": m} for m in mems]
+        parts.append(synthesize_memories(mem_dicts, top_k=top_k_memories))
+
+    # NEW: style plan (sentiment + bandit + channel + habits)
+    style_plan = compose_style_plan(user_text, profile_mgr, habit_miner, channel=channel)
+    parts.append(render_style_instructions(style_plan))
+
+    # Sentiment analysis
+    polarity = quick_polarity(user_text)
+    if polarity:
+        tone_hint = ToneAdapter.adapt(polarity)
         parts.append(f"Adjust your tone: {tone_hint}\n")
 
-    # User input (always last)
-    parts.append("User:\n" + (user_text or "").strip() + "\n")
+    # Extra session context
+    if extra_context:
+        parts.append("Context:\n" + extra_context.strip() + "\n")
+
+    # User input
+    parts.append("User:\n" + (user_text or '').strip() + "\n")
 
     return "\n".join(parts)
 
 
-# def compose_prompt(
-#     user_text: str,
-#     profile_mgr: ProfileManager,
-#     memory_store: MemoryStore,
-#     retrieved: Optional[Dict[str, List[str]]] = None,
-# ) -> str:
-#     """
-#     Assemble the full LLM prompt:
-#     - Persona
-#     - Contextual retrieval (facts + memories)
-#     - User input
-#     """
-#     persona_block = compose_persona_block(profile_mgr)
+def compose_style_plan(
+    user_text: str,
+    profile_mgr: ProfileManager,
+    habit_miner: HabitMiner,
+    channel: str = "text",  # "voice" or "text"
+) -> Dict[str, Any]:
+    """
+    Produce a concrete style plan Ultron follows for *this* response.
+    Combines: sentiment, policy bandit, habits, and channel.
+    """
+    profile = profile_mgr.load_profile()  # assume it returns dict
+    polarity = quick_polarity(user_text)  # 'positive'|'neutral'|'negative'
+    bandit = ToneAdapter(profile)
+    policy = bandit.choose_policy()  # e.g., {'id':'succinct', 'max_words':60}
 
-#     facts = [f"{k}: {v}" for (k, v) in memory_store.list_facts()]
-#     memories = []
-#     if retrieved and "events" in retrieved:
-#         memories = retrieved["events"]
+    # basic time-of-day vibe
+    hour = datetime.now().hour
+    tod = "morning" if 5 <= hour < 12 else "afternoon" if hour < 18 else "evening"
 
-#     retrieval_block = compose_retrieval_block(memories, facts)
+    # defaults
+    plan = {
+        "tone_hint": ToneAdapter.adapt(polarity),  # empathetic when negative, etc.
+        "style_id": policy["id"],                  # casual/formal/playful/succinct
+        "max_words": policy["max_words"],
+        "formality": "casual" if policy["id"] in ("casual", "playful") else "neutral",
+        "humor": policy["id"] == "playful",
+        "brevity": policy["id"] == "succinct",
+        "channel": channel,
+        "time_of_day": tod,
+        "tts": {"wpm": 170, "pause_ms": 120, "filler_ok": False},
+    }
 
-#     return dedent(f"""
-#     {persona_block}
+    # adapt for sentiment
+    if polarity == "negative":
+        plan["humor"] = False
+        plan["formality"] = "warm"
+        plan["tts"]["wpm"] = 150
+        plan["tts"]["pause_ms"] = 160
+    elif polarity == "positive":
+        plan["tts"]["wpm"] = 185
+        plan["tts"]["pause_ms"] = 100
 
-#     {retrieval_block}
+    # adapt for channel (voice vs text)
+    if channel == "voice":
+        # very light disfluency is more natural in voice; keep it optional
+        plan["tts"]["filler_ok"] = True
+        # cap length harder in voice mode
+        plan["max_words"] = min(plan["max_words"], 100)
 
-#     --- Conversation ---
-#     User: {user_text}
-#     Ultron:
-#     """).strip()
+    # adapt for habits/preferences if present
+    habits = habit_miner.export_summary()
+    if "Dislikes long answers" in (habits or ""):
+        plan["brevity"] = True
+        plan["max_words"] = min(plan["max_words"], 90)
+
+    return plan
+
+
+def render_style_instructions(plan: Dict[str, Any]) -> str:
+    """
+    Turn the style plan into explicit, LLM-friendly instructions.
+    """
+    bullets = [
+        f"Tone guide: {plan['tone_hint']}",
+        f"Style: {plan['style_id']} (formality={plan['formality']}, humor={'on' if plan['humor'] else 'off'}, brevity={'on' if plan['brevity'] else 'off'})",
+        f"Max words: {plan['max_words']}",
+        f"Channel: {plan['channel']} (time_of_day={plan['time_of_day']})",
+    ]
+    if plan["channel"] == "voice":
+        tts = plan["tts"]
+        bullets.append(f"TTS: ~{tts['wpm']} wpm, pause≈{tts['pause_ms']}ms, filler_ok={'yes' if tts['filler_ok'] else 'no'}")
+        bullets.append("If voice: keep sentences shorter, use natural pauses instead of lists when possible.")
+
+    return "Style plan:\n- " + "\n- ".join(bullets) + "\n"

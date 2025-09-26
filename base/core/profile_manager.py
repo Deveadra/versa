@@ -6,6 +6,7 @@ import os
 # reuse your existing helpers
 from base.core.profile import (
     get_profile,
+    get_persona,
     update_profile,
     get_pref,
     set_pref,
@@ -53,6 +54,10 @@ class ProfileManager:
             os.environ["USER_PROFILE_PATH"] = profile_path  # used by base.core.profile
 
     # high-level API used by ProfileEnricher
+    def get_persona(self) -> str:
+        profile = self.load_profile()
+        return get_persona(profile)
+    
     def load_profile(self) -> Dict[str, Any]:
         return get_profile()
 

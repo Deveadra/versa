@@ -14,7 +14,13 @@ class SQLiteConn:
 
     def _init_db(self):
         logger.info("Running migrations if needed")
+        mig_dir = Path(__file__).parent / "migrations"
+        files = sorted(p for p in mig_dir.glob("*.sql"))
         sql = (Path(__file__).parent / "migrations" / "0001_init.sql").read_text(encoding="utf-8")
+
+        for p in files:
+            sql = p.read_text(encoding="utf-8")
+            self.conn.executescript(sql)
         self.conn.executescript(sql)
         self.conn.commit()
 

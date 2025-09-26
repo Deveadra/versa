@@ -5,6 +5,13 @@ import os
 
 from elevenlabs import ElevenLabs
 from config.config import settings
+import simpleaudio as sa
+import threading
+
+
+_voice = None
+_currently_playing = None
+_lock = threading.Lock()
 
 BytesLike = Union[bytes, bytearray, memoryview]
 
@@ -19,6 +26,76 @@ class Voice:
         self.model_id = model_id or os.getenv("ELEVENLABS_MODEL", "eleven_multilingual_v2")
         self.output_format = output_format or os.getenv("ELEVENLABS_OUTPUT", "pcm_16000")
 
+    # Ultron can keep running tasks while speaking.
+    def speak_async(text: str) -> None:
+        """
+        Synthesize and play audio asynchronously (non-blocking).
+        Ultron can keep running while speaking.
+        """
+        global _voice, _current_playback
+        if _voice is None:
+            _voice = Voice()
+
+        audio_bytes = _voice.synth(text)
+
+        def _play():
+            global _current_playback
+            try:
+                with _lock:
+                    _current_playback = sa.play_buffer(audio_bytes, 1, 2, 16000)
+                _current_playback.wait_done()  # runs in background thread
+            except Exception as e:
+                print(f"[TTS Async] Failed to play audio: {e}")
+            finally:
+                with _lock:
+                    _current_playback = None
+
+        threading.Thread(target=_play, daemon=True).start()
+
+    def stop_speaking() -> None:
+        """
+        Interrupt current speech playback (if any).
+        """
+        global _current_playback
+        with _lock:
+            if _current_playback:
+                _current_playback.stop()
+                _current_playback = None
+                
+    # Ultron waits fully until playback finishes before continuing.
+    def speak_blocking(text: str) -> None:
+        """
+        Synthesize and play audio synchronously.
+        Ultron waits until playback finishes before continuing.
+        """
+        global _voice
+        if _voice is None:
+            _voice = Voice()
+
+        audio_bytes = _voice.synth(text)
+        try:
+            play_obj = sa.play_buffer(audio_bytes, 1, 2, 16000)
+            play_obj.wait_done()  # blocks until finished
+        except Exception as e:
+            print(f"[TTS Blocking] Failed to play audio: {e}")
+            
+    def speak(text: str) -> None:
+        """
+        Convenience wrapper: synthesize and play speech immediately.
+        Uses ElevenLabs TTS under the hood.
+        """
+        global _voice
+        if _voice is None:
+            _voice = Voice()
+        audio_bytes = _voice.synth(text)
+
+        try:
+            # play raw PCM 16kHz (since default output_format = pcm_16000)
+            play_obj = sa.play_buffer(audio_bytes, 1, 2, 16000)
+            play_obj.wait_done()
+        except Exception as e:
+            print(f"[TTS] Failed to play audio: {e}")
+            
     def synth(self, text: str) -> bytes:
         """
         Synthesize to a single bytes object (always). If the SDK returns an iterator,

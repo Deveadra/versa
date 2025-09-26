@@ -1,0 +1,2 @@
+- add a voice interrupt manager that can cut off simpleaudio playback on command
+- Mood Engine: mood-driven recall strategies

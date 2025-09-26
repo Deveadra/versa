@@ -43,20 +43,27 @@ from base.memory.faiss_backend import FAISSBackend
 from base.learning.habit_miner import HabitMiner
 from base.utils.embeddings import get_embedder
 from base.core.decider import Decider
+from base.personality.tone_adapter import ToneAdapter
+from base.memory.store import MemoryStore
 
 from .scheduler import Scheduler
 from openai import OpenAI
-<<<<<<< Updated upstream
 from pathlib import Path
-=======
 from typing import Tuple, Optional, Dict, Any
->>>>>>> Stashed changes
+from loguru import logger
+
+
 
 
 conn = sqlite3.connect(settings.db_path, check_same_thread=False)
 store = MemoryStore(conn)
 embedder, dim = get_embedder()
 vdb = FAISSBackend(embedder, dim=dim, normalize=True)
+memory = MemoryStore(db_conn)
+habits = HabitMiner(memory)
+
+memory.subscribe(lambda **kwargs: habits.learn(kwargs["content"], kwargs["ts"]))
+
 
 
 
@@ -231,7 +238,7 @@ class Orchestrator:
 
         # Decider for memory/habit scoring
         self.decider = Decider()
-        self.interaction_count = 0
+        # self.interaction_count = 0
         self.mining_threshold = 25  # every 25 user interactions
         self.memory_store = self.store  # alias for clarity
         
@@ -531,61 +538,83 @@ class Orchestrator:
         return ""
     
     # ---------- User interaction & learning ----------
-    def handle_user_message(self, text: str) -> str:
-        # 1) score the message (for memory/habits)
+    def handle_user_message(self, text: str, system_prompt: str = "You are Ultron.") -> str:
+        logger.info(f"Handling user input: {text}")
+        
+        # 1. Score with Decider
         score, meta = self.decider.decide(text)
 
-        # 2) generate the reply via your LLM pipeline
-        reply = self.chat_brain(text)  # or whatever method you use
+        # 2. Periodic habit mining
+        self.interaction_count += 1
+        if self.interaction_count >= self.mining_threshold:
+            try:
+                logger.info("Triggering HabitMiner (threshold reached)")
+                self.miner.mine()
+            except Exception as e:
+                logger.error(f"HabitMiner mining failed: {e}")
+            finally:
+                self.interaction_count = 0
 
-        # 3) optional: structured fact extraction
+        # 3. Build adaptive prompt
+        persona_text = self.profile_mgr.get_persona_text()
+        if self.miner.profile.get("persona_summary"):
+            persona_text = (persona_text or "") + "\n" + self.miner.profile["persona_summary"]
+
+        channel = "voice" if self.io_mode == "voice" else "text"  # however you track it
+        
+        adaptive_prompt = compose_prompt(
+            system_prompt=system_prompt,
+            user_text=text,
+            profile_mgr=self.profile_mgr,
+            memory_store=self.db,
+            habit_miner=self.miner,
+            persona_text=self.profile_mgr.get_persona_text(),
+            channel=channel,
+        )
+        reply = self.brain.complete(adaptive_prompt)
+
+        # 4. Generate reply
+        reply, confidence = self.brain.generate_with_confidence(adaptive_prompt)
+
+        # 5. Memory enrichment
         fact = self.decider.extract_structured_fact(text)
         if fact:
             key, value = fact
-            self.memory_store.upsert_fact(key, value)
+            self.db.upsert_fact(key, value)
 
-        # 4) decide if the exchange should be remembered as an event
         maybe = self.decider.decide_memory(text, reply)
         if maybe:
-            # adapt to your MemoryStore API
-            self.memory_store.add_event(
+            self.db.add_event(
                 content=f"{maybe['type']}: {maybe['content']} | reply: {maybe['response']}",
                 importance=float(score),
                 type_=maybe["type"],
             )
 
-        # 5) trigger habit miner occasionally
-        self.interaction_count += 1
-        if self.interaction_count >= self.mining_threshold:
-            try:
-                self.miner.mine()
-            finally:
-                self.interaction_count = 0
+        # 6. Post-reply adaptation loop
+        if confidence < 0.5:  # threshold can be tuned
+            followup = "Did I do that right?"
+            logger.info("Low confidence → prompting user for feedback")
+            return f"{reply}\n\n{followup}"
 
         return reply
     
-    # def handle_user_message(self, text: str) -> str:
-    #     """
-    #     Main entrypoint for processing user input.
-    #     """
-    #     reply = self.llm.generate(text)
-    #     maybe = decider.decide_memory(text, reply)
-    #     if maybe:
-    #         self.store.save_memory(maybe)
-    #         return reply
-        
-    #     # ✅ Count interaction
-    #     self.interaction_count += 1
-    #     if self.interaction_count >= self.mining_threshold:
-    #         try:
-    #             logger.info("Triggering HabitMiner (interaction threshold reached)")
-    #             self.miner.mine()
-    #         except Exception as e:
-    #             logger.error(f"HabitMiner mining failed: {e}")
-    #         finally:
-    #             self.interaction_count = 0  # reset
+    
+    def handle_feedback(self, text: str, last_action: str) -> str:
+        """
+        Process explicit user feedback after Ultron asks:
+        - Reinforce habits if positive
+        - Adjust / log corrections if negative
+        """
+        normalized = text.strip().lower()
+        if any(w in normalized for w in ["yes", "correct", "good", "right", "ok"]):
+            self.miner.reinforce(last_action)
+            return "Got it. I’ll remember to do it that way."
+        elif any(w in normalized for w in ["no", "wrong", "bad", "incorrect"]):
+            self.miner.adjust(last_action)
+            return "Understood. I’ll avoid doing that in the future."
+        return "Feedback noted."
 
-    #     return reply
+
 
     # ---------- Misc ----------
     def forget_memory(self, user_text: str) -> str:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 import json
 import datetime
+import math
 
 from pathlib import Path
 from collections import Counter, defaultdict
@@ -319,3 +320,71 @@ class HabitMiner:
 
         # Refresh persona summary
         self._update_persona_summary()
+
+
+    def _decay_factor(self, days_delta: float) -> float:
+        return math.exp(-math.log(2) * (days_delta / 30.0))
+
+    def update_from_usage(self) -> int:
+        c = self.db.conn.cursor()
+        c.execute(
+            """
+            WITH recent AS (
+            SELECT id, resolved_action, params_json, created_at
+            FROM usage_log ORDER BY id DESC LIMIT 5000
+            )
+            SELECT id, resolved_action, params_json, strftime('%s', 'now') - strftime('%s', created_at) AS age_sec
+            FROM recent
+            WHERE resolved_action IS NOT NULL
+            """
+        )
+        updates = 0
+        rows = c.fetchall()
+        for r in rows:
+            try:
+                params = json.loads(r[2] or "{}")
+            except Exception:
+                params = {}
+            age_days = max(0.0, (r[3] or 0) / 86400.0)
+            df = self._decay_factor(age_days)
+
+            keys = []
+            if svc := params.get("service"):
+                keys.append(f"music.service={svc}")
+            if genre := params.get("genre"):
+                keys.append(f"music.genre={genre}")
+            if greet := params.get("greeting_style"):
+                keys.append(f"ux.greeting_style={greet}")
+            if bedtime := params.get("sleep_time"):
+                keys.append(f"user.sleep_time={bedtime}")
+
+            for key in keys:
+                c.execute("SELECT id, count, score FROM habits WHERE key = ?", (key,))
+                row = c.fetchone()
+                if row:
+                    hid, cnt, score = row
+                    new_cnt = cnt + 1
+                    new_score = score * 0.99 + df
+                    c.execute(
+                        "UPDATE habits SET count = ?, score = ?, last_used = CURRENT_TIMESTAMP WHERE id = ?",
+                        (new_cnt, new_score, hid),
+                    )
+                else:
+                    c.execute(
+                        "INSERT INTO habits (key, count, score, last_used) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
+                        (key, 1, df),
+                    )
+                updates += 1
+
+        self.db.conn.commit()
+        logger.info(f"HabitMiner.update_from_usage: {updates} habit rows updated")
+        return updates
+
+    def top(self, prefix: str, n: int = 3):
+        c = self.db.conn.cursor()
+        c.execute(
+            "SELECT key, count, score FROM habits WHERE key LIKE ? ORDER BY score DESC, count DESC LIMIT ?",
+            (f"{prefix}%", n),
+        )
+        cols = ["key", "count", "score"]
+        return [dict(zip(cols, r)) for r in c.fetchall()]

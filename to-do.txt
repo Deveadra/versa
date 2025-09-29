@@ -1,2 +1,26 @@
-- add a voice interrupt manager that can cut off simpleaudio playback on command
+- Add a voice interrupt manager that can cut off simpleaudio playback on command
+
 - Mood Engine: mood-driven recall strategies
+
+- Future GUI Compatibility
+
+Later when you build a GUI, you won’t need to touch the logic again.
+The GUI just toggles settings.auto_speak:
+
+# In your GUI code
+```bash
+from config.config import settings
+
+def toggle_voice(enabled: bool):
+    settings.auto_speak = enabled
+```
+
+- keep initial_habits around for seeding/bootstrapping, just keep it in a variable but don’t pass it here. You can later do:
+
+```bash
+for h in initial_habits:
+    # maybe seed or log
+    print(f"[Seed habit] {h}")
+```
+
+

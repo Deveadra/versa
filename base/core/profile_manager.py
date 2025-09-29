@@ -53,6 +53,14 @@ class ProfileManager:
         if profile_path:
             os.environ["USER_PROFILE_PATH"] = profile_path  # used by base.core.profile
 
+    # high-level API used by PersonaPrimer - helper method for Orchestrator
+    def get_persona_text(self) -> str:
+        try:
+            profile = self.load_profile()
+            return get_persona(profile)
+        except Exception:
+            return ""
+
     # high-level API used by ProfileEnricher
     def get_persona(self) -> str:
         profile = self.load_profile()

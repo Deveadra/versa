@@ -12,5 +12,8 @@
     "reportMissingTypeStubs": "none"
   },
 
-  "cSpell.words": ["dateutil"]
+  "cSpell.words": [
+    "dateutil",
+    "mtype"
+  ]
 }

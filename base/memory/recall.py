@@ -4,6 +4,8 @@ import re
 from pathlib import Path
 
 from base.policy.topic_manager import get_known_topics
+from base.llm.brain import ask_brain
+import json
 
 DB_PATH = Path("memory.db")
 

@@ -26,4 +26,18 @@ tone = choose_tone_for_topic(self.db, row["topic_id"])
 last_example = style_complaint(cluster_row["last_example"], mood=tone) if cluster_row else None
 ```
 
-4.
+4. Review Options
+
+Voice: “Ultron, approve rule 2.” → status='approved'.
+
+Text: “Show me pending rules.” → he reads from DB.
+
+Logs: Check logs/morning_review_YYYYMMDD.txt.
+
+CLI (optional):
+
+python manage.py review --list
+python manage.py review --approve 3
+python manage.py review --deny 4
+
+5. 

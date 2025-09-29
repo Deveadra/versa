@@ -1,36 +1,42 @@
-
+# base/learning/feedback.py
 from __future__ import annotations
 from typing import Optional, Iterable, Callable, Dict, Any, Union
 import sqlite3
 import threading
 import time
+import json
 
-# Use the path your project uses elsewhere
+from config.config import settings
 from base.database.sqlite import SQLiteConn
 from base.policy.tone_memory import update_tone_memory
+from base.memory.store import MemoryStore
 
 
-def _unwrap_conn(db: Union[SQLiteConn, sqlite3.Connection]) -> sqlite3.Connection:
+def _unwrap_conn(db: Union[SQLiteConn, sqlite3.Connection]) -> SQLiteConn:
     """
-    Accept either your SQLiteConn wrapper or a raw sqlite3.Connection
-    and return a sqlite3.Connection.
+    Always normalize to SQLiteConn.
     """
-    if isinstance(db, sqlite3.Connection):
+    if isinstance(db, SQLiteConn):
         return db
-    if hasattr(db, "conn") and isinstance(db.conn, sqlite3.Connection):
-        return db.conn
+    if isinstance(db, sqlite3.Connection):
+        return SQLiteConn(settings.db_path)  # rewrap
     raise TypeError("Unsupported DB connection type passed to feedback module.")
 
 
 class Feedback:
     """
-    Generic feedback-events writer (your existing usage logs).
-    Left intact, but normalized to always use a sqlite3.Connection under the hood.
+    Feedback-events writer.
+    Normalized to always use a sqlite3.Connection under the hood.
     """
+
     def __init__(self, conn: Union[SQLiteConn, sqlite3.Connection]):
         self.conn = _unwrap_conn(conn)
+        # Secondary store (optional) for cross-module integration
+        # self.db = SQLiteConn(settings.db_path)
+        self.db: SQLiteConn = _unwrap_conn(conn)
 
-    def record(self, usage_id: int, kind: str, note: Optional[str] = None):
+
+    def record(self, usage_id: int, kind: str, note: Optional[str] = None) -> None:
         cur = self.conn.cursor()
         cur.execute(
             "INSERT INTO feedback_events (usage_id, kind, note) VALUES (?, ?, ?)",
@@ -56,17 +62,20 @@ def record_rule_feedback(
     """
     db = _unwrap_conn(conn)
     cur = db.cursor()
+
     summary = f"User {outcome} {topic_id} reminder. Context: {context}"
     importance = 0.3 if outcome in ("ignore", "angry") else 0.6
+
+    # Memory integration: every feedback is an event Ultron can learn from
     mem = MemoryStore(db)
     mem.add_event(
         summary,
         importance=importance,
         type_="habit_feedback",
-        topic=topic_id
+        # topic=topic_id,
     )
 
-    # 1) History
+    # 1) History log
     cur.execute(
         "INSERT INTO rule_history (rule_id, topic_id, tone, context, outcome) VALUES (?,?,?,?,?)",
         (rule_id, topic_id, tone, context, outcome),
@@ -78,31 +87,10 @@ def record_rule_feedback(
         (rule_id,),
     ).fetchone()
 
-    # 3) Tone memory update
-    update_tone_memory(db, topic_id, tone, outcome)
-
-    # 4) Reset signals if this rule specifies any
-    if outcome == "acted":
-        rule_row = cur.execute(
-            "SELECT reset_signals FROM engagement_rules WHERE id=?",
-            (rule_id,)
-        ).fetchone()
-        if rule_row and rule_row["reset_signals"]:
-            try:
-                resets = json.loads(rule_row["reset_signals"])
-                for sig in resets:
-                    from base.policy.context_signals import ContextSignals
-                    ctx_mgr = ContextSignals(db)
-                    ctx_mgr.reset(sig, 0)
-            except Exception:
-                pass
-            
     def _ema_update(suc: float, neg: float, out: str) -> tuple[float, float]:
-        # positive signals
         if out in ("acted", "thanks"):
             suc = (1 - alpha) * suc + alpha * 1.0
             neg = (1 - alpha) * neg + alpha * 0.0
-        # negative signals
         elif out in ("ignore", "angry"):
             suc = (1 - alpha) * suc + alpha * 0.0
             neg = (1 - alpha) * neg + alpha * 1.0
@@ -133,6 +121,22 @@ def record_rule_feedback(
     # 3) Tone memory update (per-topic)
     update_tone_memory(db, topic_id, tone, outcome)
 
+    # 4) Reset signals if outcome = acted
+    if outcome == "acted":
+        rule_row = cur.execute(
+            "SELECT reset_signals FROM engagement_rules WHERE id=?",
+            (rule_id,),
+        ).fetchone()
+        if rule_row and rule_row["reset_signals"]:
+            try:
+                resets = json.loads(rule_row["reset_signals"])
+                from base.policy.context_signals import ContextSignals
+                ctx_mgr = ContextSignals(SQLiteConn(settings.db_path))
+                for sig in resets:
+                    ctx_mgr.reset(sig, 0)
+            except Exception:
+                pass
+
 
 def schedule_signal_check(
     conn: Union[SQLiteConn, sqlite3.Connection],
@@ -145,13 +149,9 @@ def schedule_signal_check(
     delay: int = 300,
 ) -> None:
     """
-    After `delay` seconds, read all named signals from context_signals, then
-    call expect_change({signal_name: value}). If True → record 'acted', else 'ignore'.
-
-    - signal_names: one or more context signal names the rule condition was based on
-    - expect_change: function derived from the rule condition that returns True when
-                     the "improvement" is observed (e.g., leaving a risky range).
+    After `delay` seconds, re-check signals and record feedback automatically.
     """
+
     db = _unwrap_conn(conn)
 
     def _fetch_values(names: Iterable[str]) -> Dict[str, Any]:
@@ -161,11 +161,9 @@ def schedule_signal_check(
         cur = db.cursor()
         cur.execute(query, list(names))
         for n, v in cur.fetchall():
-            # coerce to float where possible, keep raw otherwise
             try:
                 vals[n] = float(v)
             except Exception:
-                # boolean-ish strings -> normalize
                 lv = str(v).strip().lower()
                 if lv in ("true", "false"):
                     vals[n] = (lv == "true")
@@ -183,7 +181,7 @@ def schedule_signal_check(
             outcome = "acted" if acted else "ignore"
             record_rule_feedback(db, rule_id, topic_id, tone, context, outcome)
         except Exception:
-            # Fail-safe: never crash the process because of background thread errors
+            # Fail-safe: never crash background threads
             pass
 
     threading.Thread(target=_check_later, daemon=True).start()

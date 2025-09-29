@@ -40,6 +40,14 @@ class Settings(BaseModel):
     # Consolidation cron
     consolidation_hour: int = int(os.getenv("ULTRON_CONSOLIDATION_HOUR", 3))
     consolidation_minute: int = int(os.getenv("ULTRON_CONSOLIDATION_MINUTE", 0))
+    
+    # Voice
+    auto_speak: bool = True  # ✅ default enabled
+    wake_word: str = "ultron"  # ✅ wake word for vocal cues
+    wake_commands: dict[str, str] = {
+        "text me": "disable_speak",   # Ultron will text instead of speak
+        "talk to me": "enable_speak",      # Explicitly turn speaking back on
+    }
 
 settings = Settings()
 

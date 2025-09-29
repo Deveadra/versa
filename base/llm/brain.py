@@ -1,10 +1,11 @@
-# assistant/base/llm/brain.py
+# base/llm/brain.py
 from __future__ import annotations
 import os
 from typing import List, cast, Optional
 
 from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
+from loguru import logger
 
 from ..core.core import messages, reset_session, JARVIS_PROMPT, CURRENT_PERSONALITY, PERSONALITIES
 from base.core.audio import stream_speak
@@ -18,17 +19,13 @@ _MODEL = settings.openai_model or os.getenv("BRAIN_MODEL", "gpt-4o-mini")
 
 
 def _check_vocal_cue(user_text: str) -> str | None:
-    """
-    Check if the user is giving Ultron a vocal cue like:
-    'Ultron, text me' or 'Ultron, speak'.
-    Returns command name if matched, else None.
-    """
     lowered = user_text.lower()
     if lowered.startswith(settings.wake_word.lower()):
         for phrase, command in settings.wake_commands.items():
             if phrase in lowered:
                 return command
     return None
+
 
 class Brain:
     def __init__(self, client: Optional[OpenAI] = None, model: Optional[str] = None):
@@ -48,33 +45,28 @@ class Brain:
             CURRENT_PERSONALITY = PERSONALITIES["default"]
         JARVIS_PROMPT = CURRENT_PERSONALITY["prompt"]
 
-    # -------- simple ask (non-streaming) -----------
-    def ask_brain(self, prompt: str, response_format: str = "text") -> str:
+    # -------- ask (text or json) -----------
+    def ask_brain(self, prompt: str, system_prompt: str | None = None, response_format: str = "text") -> str:
         """
-        Send prompt to Ultron's brain (LLM).
-        response_format: "text" | "json"
+        Send a prompt to OpenAI. Supports text or JSON output.
         """
         try:
-            # ---------- handle JSON mode ----------
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
             if response_format == "json":
-                completion = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": "Respond ONLY in strict JSON."},
-                        {"role": "user", "content": prompt},
-                    ],
-                    temperature=0.6,
-                )
-            else:
-                completion = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.6,
-                )
+                messages.append({"role": "system", "content": "Respond ONLY in strict JSON."})
+            messages.append({"role": "user", "content": prompt})
+
+            completion = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=0.6,
+            )
 
             reply = (completion.choices[0].message.content or "").strip()
 
-            # ---------- vocal cue handling ----------
+            # vocal cue handling
             command = _check_vocal_cue(prompt)
             if command == "disable_speak":
                 settings.auto_speak = False
@@ -83,16 +75,14 @@ class Brain:
                 settings.auto_speak = True
                 return "Voice enabled again."
 
-            # ---------- auto-speak ----------
+            # auto-speak if enabled
             if settings.auto_speak:
                 self.voice.speak_async(reply)
 
             return reply
-
         except Exception as e:
-            print(f"[ask_brain error] {e}")
-            return ""
-
+            logger.exception(f"[ask_brain error] {e}")
+            return "Sorry, I couldn’t process that."
 
     # -------- streaming ask with TTS -----------
     def ask_jarvis_stream(self, user_text: str) -> str:
@@ -120,7 +110,6 @@ class Brain:
                 if not token:
                     continue
                 reply_accum += token
-                
                 if token.endswith((".", "?", "!")):
                     stream_speak(reply_accum.strip())
                     reply_accum = ""
@@ -135,10 +124,8 @@ class Brain:
 # ---------- Singleton + module-level wrappers ----------
 _brain = Brain()
 
-def ask_brain(prompt: str, response_format: str = "text") -> str:
-    """Module-level wrapper so callers can import ask_brain directly."""
-    return _brain.ask_brain(prompt, response_format=response_format)
+def ask_brain(prompt: str, system_prompt: str | None = None, response_format: str = "text") -> str:
+    return _brain.ask_brain(prompt, system_prompt=system_prompt, response_format=response_format)
 
 def ask_jarvis_stream(user_text: str) -> str:
-    """Module-level wrapper so callers can import ask_jarvis_stream directly."""
     return _brain.ask_jarvis_stream(user_text)

@@ -20,17 +20,15 @@ def run_voice(orch):
       facts = orch.store.list_facts()
       reply = "Here are your facts: " + "; ".join(f"{k}: {v}" for k, v in facts)
       speak(reply)
-    continue
+    
 
-
-    if msg.lower().startswith("forget "):
+    elif msg.lower().startswith("forget "):
       topic = msg.split(" ", 1)[1]
       n = orch.store.forget(topic)
       speak(f"I forgot {n} entries about {topic}.")
-    continue
+    
 
-
-    if msg.lower().startswith("kg "):
+    elif msg.lower().startswith("kg "):
       entity = msg.split(" ", 1)[1]
       relations = orch.kg_store.query_relations(entity)
     if relations:
@@ -41,5 +39,5 @@ def run_voice(orch):
     continue
 
 
-reply = orch.handle_user(msg)
-speak(reply)
+  reply = orch.handle_user(msg)
+  speak(reply)

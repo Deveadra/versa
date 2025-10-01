@@ -33,12 +33,4 @@ CREATE TABLE IF NOT EXISTS feedback_events (
   FOREIGN KEY (usage_id) REFERENCES usage_log(id)
 );
 
--- 4) Facts table columns for confidence maintenance (if not present)
--- (SQLite will error if column exists; wrap in try via separate statements)
--- We'll attempt; if it fails in your environment, keep the existing column.
--- Add confidence
-ALTER TABLE facts ADD COLUMN confidence REAL DEFAULT 0.75;
--- Add last_reinforced
-ALTER TABLE facts ADD COLUMN last_reinforced DATETIME;
-
 COMMIT;

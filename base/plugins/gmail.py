@@ -34,6 +34,7 @@ def get_unread_emails(n=5):
     if not _service:
         return "[Mock] No Gmail service available."
 
+    # account = _service.users().getProfile(userId="me").execute().get("emailAddress", "unknown")
     results = _service.users().messages().list(userId="me", labelIds=["INBOX"], q="is:unread", maxResults=n).execute()
     messages = results.get("messages", [])
     if not messages:

@@ -9,7 +9,6 @@ pyrightconfig.json
 
 tests/
 base/agents/orchestrator1.py
-
 orchestrator_feedback.patch
 apply_orchestrator_feedback.py
 base/agents/orchestrator.py.bak

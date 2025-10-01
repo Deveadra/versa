@@ -1,59 +1,131 @@
-
+# base/llm/brain.py
 from __future__ import annotations
-import subprocess, openai, time
 import os
+from typing import List, cast, Optional
+
+from openai import OpenAI
+from openai.types.chat import ChatCompletionMessageParam
+from loguru import logger
 
 from ..core.core import messages, reset_session, JARVIS_PROMPT, CURRENT_PERSONALITY, PERSONALITIES
 from base.core.audio import stream_speak
 from base.plugins import PLUGINS
-from openai import OpenAI
-from assistant.config.config import settings
+from config.config import settings
+from base.voice.tts_elevenlabs import Voice
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# ---------- OpenAI client / model ----------
+_CLIENT = OpenAI(api_key=settings.openai_api_key)  # new SDK
+_MODEL = settings.openai_model or os.getenv("BRAIN_MODEL", "gpt-4o-mini")
+
+
+def _check_vocal_cue(user_text: str) -> str | None:
+    lowered = user_text.lower()
+    if lowered.startswith(settings.wake_word.lower()):
+        for phrase, command in settings.wake_commands.items():
+            if phrase in lowered:
+                return command
+    return None
+
 
 class Brain:
-    def __init__(self):
-        self.client = OpenAI(api_key=settings.openai_api_key)
-        self.model = settings.openai_model
+    def __init__(self, client: Optional[OpenAI] = None, model: Optional[str] = None):
+        self.client = client or _CLIENT
+        self.model = model or _MODEL
+        self.voice = Voice.get_instance()
 
-    def complete(self, system: str, prompt: str, max_tokens: int = 300) -> str:
-        resp = self.client.chat.completions.create(
+    # -------- persona -----------
+    def auto_set_personality(self, user_text: str) -> None:
+        global CURRENT_PERSONALITY, JARVIS_PROMPT
+        lowered = user_text.lower()
+        if any(w in lowered for w in ["cpu", "memory", "system", "process"]):
+            CURRENT_PERSONALITY = PERSONALITIES["sarcastic"]
+        elif any(w in lowered for w in ["email", "calendar", "meeting", "schedule"]):
+            CURRENT_PERSONALITY = PERSONALITIES["formal"]
+        else:
+            CURRENT_PERSONALITY = PERSONALITIES["default"]
+        JARVIS_PROMPT = CURRENT_PERSONALITY["prompt"]
+
+    # -------- ask (text or json) -----------
+    def ask_brain(self, prompt: str, system_prompt: str | None = None, response_format: str = "text") -> str:
+        """
+        Send a prompt to OpenAI. Supports text or JSON output.
+        """
+        try:
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            if response_format == "json":
+                messages.append({"role": "system", "content": "Respond ONLY in strict JSON."})
+            messages.append({"role": "user", "content": prompt})
+
+            completion = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=0.6,
+            )
+
+            reply = (completion.choices[0].message.content or "").strip()
+
+            # vocal cue handling
+            command = _check_vocal_cue(prompt)
+            if command == "disable_speak":
+                settings.auto_speak = False
+                return "Understood. I’ll stop speaking and switch to text."
+            elif command == "enable_speak":
+                settings.auto_speak = True
+                return "Voice enabled again."
+
+            # auto-speak if enabled
+            if settings.auto_speak:
+                self.voice.speak_async(reply)
+
+            return reply
+        except Exception as e:
+            logger.exception(f"[ask_brain error] {e}")
+            return "Sorry, I couldn’t process that."
+
+    # -------- streaming ask with TTS -----------
+    def ask_jarvis_stream(self, user_text: str) -> str:
+        self.auto_set_personality(user_text)
+
+        # quick plugin dispatch
+        for name, fn in PLUGINS.items():
+            if name in user_text.lower():
+                return fn()
+
+        messages.append({"role": "user", "content": user_text})
+        typed_msgs: List[ChatCompletionMessageParam] = cast(List[ChatCompletionMessageParam], messages)
+
+        stream = self.client.chat.completions.create(
             model=self.model,
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": prompt}],
+            messages=typed_msgs,
             temperature=0.6,
-            max_tokens=max_tokens,
+            stream=True,
         )
-        return resp.choices[0].message.content.strip()
-    
-def auto_set_personality(user_text):
-    global CURRENT_PERSONALITY, JARVIS_PROMPT
-    lowered = user_text.lower()
-    if any(word in lowered for word in ["cpu", "memory", "system", "process"]):
-        CURRENT_PERSONALITY = PERSONALITIES["sarcastic"]
-    elif any(word in lowered for word in ["email", "calendar", "meeting", "schedule"]):
-        CURRENT_PERSONALITY = PERSONALITIES["formal"]
-    else:
-        CURRENT_PERSONALITY = PERSONALITIES["default"]
-    JARVIS_PROMPT = CURRENT_PERSONALITY["prompt"]
 
-
-def ask_jarvis_stream(user_text):
-    auto_set_personality(user_text)
-    for plugin in PLUGINS:
-        if plugin in user_text.lower():
-            return PLUGINS[plugin]()
-    messages.append({"role": "user", "content": user_text})
-    response_stream = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=messages, stream=True)
-    reply_accum = ""
-    for chunk in response_stream:
-        if "choices" in chunk and len(chunk["choices"]) > 0:
-            delta = chunk["choices"][0]["delta"]
-            if "content" in delta:
-                token = delta["content"]
+        reply_accum = ""
+        for chunk in stream:
+            for choice in chunk.choices:
+                token = choice.delta.content or ""
+                if not token:
+                    continue
                 reply_accum += token
-                if any(p in token for p in [".", "?", "!"]):
+                if token.endswith((".", "?", "!")):
                     stream_speak(reply_accum.strip())
                     reply_accum = ""
-    if reply_accum:
-        messages.append({"role": "assistant", "content": reply_accum})
-    return reply_accum
+
+        if reply_accum:
+            stream_speak(reply_accum.strip())
+            messages.append({"role": "assistant", "content": reply_accum})
+
+        return reply_accum
+
+
+# ---------- Singleton + module-level wrappers ----------
+_brain = Brain()
+
+def ask_brain(prompt: str, system_prompt: str | None = None, response_format: str = "text") -> str:
+    return _brain.ask_brain(prompt, system_prompt=system_prompt, response_format=response_format)
+
+def ask_jarvis_stream(user_text: str) -> str:
+    return _brain.ask_jarvis_stream(user_text)

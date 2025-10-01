@@ -1,8 +1,9 @@
 
-from assistant.config import settings
+# wherever interface.py lives
+from config.config import settings  # not Settings
 
 def launch_interface(orch):
-    mode = settings.mode.lower()
+    mode = (settings.mode or "text").lower()
     if mode == "text":
         from .text_loop import run_text
         run_text(orch)
@@ -13,4 +14,4 @@ def launch_interface(orch):
         from .stream_loop import run_stream
         run_stream(orch)
     else:
-        raise ValueError(f"Unknown ULTRON_MODE: {mode}")
+        raise ValueError(f"Unknown ULTRON_MODE: {mode!r}")

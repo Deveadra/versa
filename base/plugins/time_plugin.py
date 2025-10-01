@@ -1,11 +1,11 @@
 import datetime
 import pytz
-from jarvis.core.profile import get_pref
+from base.core.profile import get_pref
 
 
 def handle_time_command(text):
     if "time" in text.lower():
-        tz_name = get_pref("timezone", "UTC")
+        tz_name = str(get_pref("timezone", "UTC") or "UTC")
         try:
             tz = pytz.timezone(tz_name)
         except Exception:

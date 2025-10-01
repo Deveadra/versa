@@ -112,6 +112,71 @@ print(kg.query_relations("Alice"))
 ### Reverse Traversal
 - KG traversal now works in **both directions**.
 
+## Learning & Personality Layer (v1)
+
+--- 
+---
+---
+
+### Data flow
+1. Every user interaction/action is appended to `usage_log`.
+2. `HabitMiner.update_from_usage()` scans recent usage and updates `habits` with exponential‑decay scores (half‑life 30d).
+3. `ProfileEnricher.run()` derives `preferred_player`, `favorite_music`, `greeting_style`, and `sleep_time` from top habits, updating `user_profile.json`.
+4. Orchestrator uses profile defaults for contextual shortcuts (e.g., `play music` → service=preferred_player, genre=favorite_music).
+5. When uncertain, orchestrator asks the user to confirm. Feedback is recorded in `feedback_events` and used to tune tone policy via a small bandit.
+
+### Extending habits
+Add new key builders in `HabitMiner.update_from_usage()` to track additional domains:
+- `home.lights=bright|dim`
+- `calendar.reminder_minutes=10|30|60`
+- `email.signature=short|detailed`
+
+### Confidence maintenance for facts
+Facts are kept fresh by periodically bumping `confidence` and `last_reinforced` when feedback affirms them; they decay implicitly with time unless reaffirmed.
+
+### Migration
+Place `0002_learning.sql` next to `0001_init.sql`. Ensure orchestrator runs both on startup.
+
+### How rules get into the DB (seed via SQL or commands)
+We don’t hardcode them. You (or Ultron, during “dream”) insert them. Example seeds (optional, purely data).
+
+- If you don’t like these, delete/disable them (enabled=0)—no code changes needed.
+- Ultron can write new rows during the dream job based on correlations (below):
+
+```sql
+INSERT INTO engagement_rules
+(name, topic_id, priority, cooldown_seconds, max_per_day, condition_json, tone_strategy_json, context_template)
+VALUES
+(
+  'rule.sedentary_break',
+  'movement',
+  40, 1800, 6,
+  '{"cond":{"gte":[{"signal":"sedentary_minutes"},120]},
+    "severity":{"between":[{"signal":"sedentary_minutes"},90,240]},
+    "bindings":{"sitting_minutes":{"signal":"sedentary_minutes"}}}',
+  '{"map":[{"gte":["severity",0.7],"tone":"firm"},{"gte":["severity",0.4],"tone":"persistent"}],"default":"gentle"}',
+  "sitting_minutes={{sitting_minutes}}"
+);
+
+INSERT INTO engagement_rules
+(name, topic_id, priority, cooldown_seconds, max_per_day, condition_json, tone_strategy_json, context_template)
+VALUES
+(
+  'rule.hydration_gap',
+  'hydration',
+  50, 3600, 6,
+  '{"cond":{"gte":[{"signal":"minutes_since_water"},120]},
+    "severity":{"between":[{"signal":"minutes_since_water"},90,240]},
+    "bindings":{"gap":{"signal":"minutes_since_water"}}}',
+  '{"map":[{"gte":["severity",0.7],"tone":"firm"},{"gte":["severity",0.4],"tone":"persistent"}],"default":"gentle"}',
+  "gap={{gap}}"
+);
+```
+
+--- 
+---
+---
+
 
 ## Summary
 - Cron schedule now configurable via `.env`.

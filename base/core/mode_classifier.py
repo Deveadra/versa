@@ -5,7 +5,9 @@ import random
 _last_input = None
 _repeat_count = 0
 
-def classify_mode(user_text: str, last_mode: str = "default") -> (str, bool):
+from typing import Tuple
+
+def classify_mode(user_text: str, last_mode: str = "default") -> Tuple[str, bool]:
     """
     Returns (mode, repeat_triggered) tuple.
     """

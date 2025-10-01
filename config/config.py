@@ -1,12 +1,17 @@
 from __future__ import annotations
 import os
 
+from typing import Literal
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
-load_dotenv()
+# load .env that lives next to this file
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 class Settings(BaseModel):
+    # simple, concrete types (no Optional for mode)
+    mode: Literal["text", "voice", "stream"] = "text"
+    
     db_path: str = Field(default=os.getenv("ULTRON_DB_PATH", "./ultron.db"))
     memory_ttl_days: int = int(os.getenv("ULTRON_MEMORY_TTL_DAYS", 30))
     importance_threshold: int = int(os.getenv("ULTRON_IMPORTANCE_THRESHOLD", 25))
@@ -35,8 +40,18 @@ class Settings(BaseModel):
     # Consolidation cron
     consolidation_hour: int = int(os.getenv("ULTRON_CONSOLIDATION_HOUR", 3))
     consolidation_minute: int = int(os.getenv("ULTRON_CONSOLIDATION_MINUTE", 0))
-
-class Settings(BaseModel):
-    mode: str = os.getenv("ULTRON_MODE", "text")
+    
+    # Voice
+    auto_speak: bool = True  # ✅ default enabled
+    wake_word: str = "ultron"  # ✅ wake word for vocal cues
+    wake_commands: dict[str, str] = {
+        "text me": "disable_speak",   # Ultron will text instead of speak
+        "talk to me": "enable_speak",      # Explicitly turn speaking back on
+    }
 
 settings = Settings()
+
+# class Settings(BaseModel):
+#     mode: str = os.getenv("ULTRON_MODE", "text")
+
+# settings = Settings()

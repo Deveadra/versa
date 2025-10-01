@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any, Iterable
 from dateutil.rrule import rrulestr, rrule, WEEKLY, DAILY, MONTHLY
 from dateutil import tz
-from ..db.sqlite import SQLiteConn
+from ..database.sqlite import SQLiteConn
 
 class CalendarStore:
     def __init__(self, db: SQLiteConn):
@@ -58,6 +58,8 @@ class CalendarStore:
             ),
         )
         self.db.conn.commit()
+        if cur.lastrowid is None:
+            raise RuntimeError("Failed to insert event: lastrowid is None")
         return cur.lastrowid
 
     def list_events(self) -> List[dict]:

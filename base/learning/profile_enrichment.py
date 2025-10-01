@@ -1,8 +1,8 @@
 from __future__ import annotations
 from typing import Dict, Any
 from loguru import logger
-from base.core.profile_manager import ProfileManager
-from .habits import HabitMiner
+from base.core.profile_manager import ProfileManager, handle_profile_command
+from base.learning.habit_miner import HabitMiner
 
 class ProfileEnricher:
     def __init__(self, pm: ProfileManager, miner: HabitMiner):

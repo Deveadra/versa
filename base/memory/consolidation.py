@@ -2,7 +2,7 @@
 from __future__ import annotations
 from datetime import datetime, timedelta
 from loguru import logger
-from assistant.config import settings
+from config.config import settings
 
 
 class Consolidator:
@@ -20,7 +20,7 @@ class Consolidator:
     texts = [r["content"] for r in rows]
     joined = "\n".join(texts)
     prompt = f"Summarize these past events into a concise knowledge note:\n{joined}"
-    summary = self.brain.complete("System: consolidation", prompt, max_tokens=200)
+    summary = self.brain.ask_brain("System: consolidation", prompt, max_tokens=200)
     if summary:
       self.store.add_event(summary, importance=40, type_="summary")
       ids = [r["id"] for r in rows]

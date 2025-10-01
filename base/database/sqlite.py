@@ -26,6 +26,12 @@ class SQLiteConn:
 
     def cursor(self):
         return self.conn.cursor()
+    
+    def commit(self):
+        return self.conn.commit()
 
+    def execute(self, *args, **kwargs):
+        return self.conn.execute(*args, **kwargs)
+    
     def close(self):
         self.conn.close()

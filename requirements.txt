@@ -23,6 +23,7 @@ sounddevice==0.5.2
 soundfile==0.13.1
 spacy==3.7.5 # 3.8.7
 sqlite-utils #==3.37
+textblob
 TTS==0.22.0
 
 # Embeddings (local-first, optional)

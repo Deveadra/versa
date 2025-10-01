@@ -1,5 +1,5 @@
 import unittest, os, sqlite3, tempfile
-from base.memory.retrieval import Retriever
+from base.llm.retriever import Retriever
 
 class RetrieverTests(unittest.TestCase):
     def setUp(self):

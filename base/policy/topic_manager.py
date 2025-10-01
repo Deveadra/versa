@@ -5,15 +5,6 @@ from datetime import timedelta, datetime
 
 from base.database.sqlite import SQLiteConn
 
-def get_known_topics(conn: Union[SQLiteConn, sqlite3.Connection]) -> List[str]:
-    """
-    Return all topics Ultron currently knows about.
-    Populated automatically by dream cycle inserts into topics table.
-    """
-    cur = conn.cursor()
-    rows = cur.execute("SELECT id FROM topics ORDER BY created_at ASC").fetchall()
-    return [r["id"] for r in rows]
-
 
 def get_known_topics(conn: Union[SQLiteConn, sqlite3.Connection]) -> List[str]:
     """
@@ -23,7 +14,6 @@ def get_known_topics(conn: Union[SQLiteConn, sqlite3.Connection]) -> List[str]:
     cur = conn.cursor()
     rows = cur.execute("SELECT id FROM topics ORDER BY created_at ASC").fetchall()
     return [r["id"] for r in rows]
-
 
 def prune_stale_topics(
     conn: Union[SQLiteConn, sqlite3.Connection],

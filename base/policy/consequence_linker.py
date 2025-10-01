@@ -1,10 +1,12 @@
 
+import json
 import random
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 from base.policy.tone_memory import update_tone_memory
 
-# crude keyword mapping of consequence → likely topic
+
+# Hardcoded bootstrap map — acts as seed knowledge
 CONSEQUENCE_MAP = {
     "headache": "hydration",
     "fatigue": "sleep",
@@ -12,52 +14,92 @@ CONSEQUENCE_MAP = {
     "leg": "movement",
     "back": "movement",
     "stress": "workload",
-    "late": "time_management"
+    "late": "time_management",
 }
 
+
 def detect_consequence(conn, user_text: str):
-    """Look up consequence keywords from DB instead of hardcoded map."""
+    """
+    Detect a consequence (user complaint/symptom) and link it to a topic.
+    Always return (topic_id, keyword_or_cluster, confidence).
+    Dynamically learns new mappings if none exist.
+    """
     text = user_text.lower()
     cur = conn.cursor()
-    rows = cur.execute("SELECT keyword, topic_id, confidence FROM consequence_map").fetchall()
-    text = user_text.lower()
+
+    # 1. Hardcoded quick map (bootstrap knowledge)
     for word, topic in CONSEQUENCE_MAP.items():
         if re.search(rf"\b{word}\b", text):
-            return topic, word
-    # for r in rows:
-    #     if re.search(rf"\b{re.escape(r['keyword'])}\b", text):
-    #         return r["topic_id"], r["keyword"], r["confidence"]
-    # 1. Direct keyword map
+            return topic, word, 0.8
+
+    # 2. DB keyword map
+    rows = cur.execute("SELECT keyword, topic_id, confidence FROM consequence_map").fetchall()
     for r in rows:
         if r["keyword"] in text:
-            return r["topic_id"], r["keyword"], 0.9
-    # 2. Cluster match
+            # Increment confidence slightly when used
+            new_conf = min(1.0, (r["confidence"] or 0.8) + 0.05)
+            cur.execute(
+                "UPDATE consequence_map SET confidence=?, last_updated=datetime('now') WHERE keyword=?",
+                (new_conf, r["keyword"]),
+            )
+            conn.commit()
+            return r["topic_id"], r["keyword"], new_conf
+
+    # 3. Cluster match
     clusters = cur.execute("SELECT cluster, topic_id, examples FROM complaint_clusters").fetchall()
     for c in clusters:
         examples = json.loads(c["examples"])
         if any(e in text for e in examples):
+            # Expand examples with new text if novel
+            if user_text not in examples:
+                examples.append(user_text)
+                cur.execute(
+                    """
+                    UPDATE complaint_clusters 
+                    SET examples=?, last_example=?, last_updated=datetime('now')
+                    WHERE cluster=? AND topic_id=?
+                    """,
+                    (json.dumps(examples), user_text, c["cluster"], c["topic_id"]),
+                )
+                conn.commit()
             return c["topic_id"], c["cluster"], 0.7
-    return None, None, None
+
+    # 4. Nothing matched → create a *new dynamic mapping* (self-learning)
+    inferred_topic = "general"  # fallback topic if not inferred
+    cur.execute(
+        """
+        INSERT INTO consequence_map (keyword, topic_id, confidence, last_updated)
+        VALUES (?, ?, ?, datetime('now'))
+        """,
+        (user_text, inferred_topic, 0.5),
+    )
+    conn.commit()
+
+    return inferred_topic, user_text, 0.5
 
 
 def link_consequence(conn, user_text: str):
-    topic, word, confidence = detect_consequence(conn, user_text)
+    """
+    Insert complaint, try to link it to ignored advice, update tone memory,
+    and improve consequence mappings over time.
+    """
+    topic, keyword, confidence = detect_consequence(conn, user_text)
     if not topic:
         return False
 
     cur = conn.cursor()
     cur.execute(
         "INSERT INTO feedback_events (usage_id, kind, note) VALUES (?, ?, ?)",
-        (None, "complaint", user_text)
+        (None, "complaint", user_text),
     )
     conn.commit()
 
-    # 2) Try to link to ignored advice
-    topic, word, confidence = detect_consequence(conn, user_text)
+    # Try again to confirm consequence
+    topic, keyword, confidence = detect_consequence(conn, user_text)
     if not topic:
         return False
-      
-    # find a recent ignored rule for this topic (last 24h)
+
+    # Find a recent ignored rule for this topic (last 24h)
     row = cur.execute("""
         SELECT rule_id FROM rule_history
         WHERE topic_id=? AND outcome='ignored'
@@ -70,31 +112,31 @@ def link_consequence(conn, user_text: str):
         update_tone_memory(
             conn,
             topic_id=topic,
-            tone="genuine",   # whatever tone was last used
+            tone="genuine",   # TODO: retrieve actual tone from tone_memory
             outcome="ignored",
-            consequence=f"user reported {word}"
+            consequence=f"user reported {keyword}"
         )
         return True
+
+    # If no ignored rule, still track it in complaint_clusters
     cur.execute("""
-        UPDATE complaint_clusters
-        SET last_example=?, last_updated=datetime('now')
-        WHERE topic_id=? AND cluster=?
-    """, (user_text, topic, cluster))
+        INSERT INTO complaint_clusters (cluster, topic_id, examples, last_updated, last_example)
+        VALUES (?, ?, ?, datetime('now'), ?)
+        ON CONFLICT(cluster, topic_id) DO UPDATE SET
+            examples=?,
+            last_example=?,
+            last_updated=datetime('now')
+    """, (
+        keyword, topic, json.dumps([user_text]), user_text,
+        json.dumps([user_text]), user_text
+    ))
     conn.commit()
 
     return False
-  
-import random
-import re
 
 
 def style_complaint(complaint: str, mood: str) -> str:
-    """
-    Decide whether to return complaint verbatim or styled, based on mood.
-    - sarcastic/frustrated → verbatim (to rub it in)
-    - patient/genuine → styled (softer, more conversational)
-    - smug/proving → mostly verbatim, with occasional styled for flair
-    """
+    """Choose how to surface the complaint back to user depending on tone/mood."""
     if not complaint:
         return ""
 
@@ -105,16 +147,13 @@ def style_complaint(complaint: str, mood: str) -> str:
         return shorten_complaint(complaint)
 
     if mood in ("smug", "proving"):
-        import random
         return complaint.strip() if random.random() < 0.7 else shorten_complaint(complaint)
 
-    # default fallback
     return shorten_complaint(complaint)
 
 
 def shorten_complaint(complaint: str) -> str:
     """Simplify complaint to essence (remove filler, shorten length)."""
-    import re
     styled = complaint.lower()
     styled = re.sub(r"\b(ugh|uh|um|why does|why do|so much|really)\b", "", styled)
     styled = styled.strip().capitalize()

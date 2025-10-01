@@ -101,8 +101,8 @@ else:
         print("Warning: could not find suitable __init__ insertion point - you will need to add initialization manually.")
         # continue; we'll still try the other edits
 
-# 3) Replace the call to LLM: detect a call to self.brain.complete(...prompt...) and replace it with policy selection + composer + mapping
-if "reply = self.brain.complete(SYSTEM_PROMPT, prompt)" in txt and "self.policy_by_usage_id" in txt:
+# 3) Replace the call to LLM: detect a call to self.brain.ask_brain(...prompt...) and replace it with policy selection + composer + mapping
+if "reply = self.brain.ask_brain(SYSTEM_PROMPT, prompt)" in txt and "self.policy_by_usage_id" in txt:
     replacement = (
         "# select tone policy (if available) and record it so we can attribute feedback later\n"
         "        try:\n"
@@ -117,7 +117,7 @@ if "reply = self.brain.complete(SYSTEM_PROMPT, prompt)" in txt and "self.policy_
         "        # compose final prompt using the composer (persona + memories + extra_context)\n"
         "        prompt = compose_prompt(SYSTEM_PROMPT, user_text, persona_text=persona_text, memories=memories, extra_context=kg_context, top_k_memories=3)\n"
         "        # optionally: you may inject policy instructions into SYSTEM_PROMPT or extra_context based on policy here\n"
-        "        reply = self.brain.complete(SYSTEM_PROMPT, prompt)\n\n"
+        "        reply = self.brain.ask_brain(SYSTEM_PROMPT, prompt)\n\n"
         "        # if we logged a usage for this outgoing reply, attach mapping usage_id -> policy_id so feedback can credit the bandit\n"
         "        try:\n"
         "            if hasattr(self, \"last_usage_id\") and getattr(self, \"last_usage_id\", None):\n"
@@ -130,10 +130,10 @@ if "reply = self.brain.complete(SYSTEM_PROMPT, prompt)" in txt and "self.policy_
         "        except Exception:\n"
         "            pass\n"
     )
-    txt = txt.replace("reply = self.brain.complete(SYSTEM_PROMPT, prompt)", replacement)
+    txt = txt.replace("reply = self.brain.ask_brain(SYSTEM_PROMPT, prompt)", replacement)
     print("Replaced LLM call with policy selection + composer + mapping.")
 else:
-    print("Warning: did not find exact 'reply = self.brain.complete(SYSTEM_PROMPT, prompt)' string; you may need to edit manually to integrate policy selection.")
+    print("Warning: did not find exact 'reply = self.brain.ask_brain(SYSTEM_PROMPT, prompt)' string; you may need to edit manually to integrate policy selection.")
 
 # 4) Insert the two methods after __init__ end. Find insertion point: after def __init__ block (look for next 'def ' after it)
 if "def ask_confirmation_if_unsure" not in txt:

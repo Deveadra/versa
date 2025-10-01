@@ -10,7 +10,7 @@ from datetime import datetime
 from base.core.profile_manager import ProfileManager
 from base.memory.store import MemoryStore
 from base.learning.habit_miner import HabitMiner
-from base.learning.sentiment import quick_polarity
+from base.learning.sentiment import quick_polarity, quick_polarity_label
 from base.personality.tone_adapter import ToneAdapter
 
 
@@ -106,7 +106,7 @@ def compose_prompt(
     memory_store: MemoryStore,
     habit_miner: HabitMiner,
     persona_text: str | None = None,
-    memories: list[dict[str, any]] | None = None,
+    memories: list[dict[str, Any]] | None = None,
     habits: list[str] | None = None,
     extra_context: str | None = None,
     top_k_memories: int = 3,
@@ -157,9 +157,9 @@ def compose_prompt(
     parts.append(render_style_instructions(style_plan))
 
     # Sentiment analysis
-    polarity = quick_polarity(user_text)
+    polarity = quick_polarity(user_text)   # keep float for numeric analysis
     if polarity:
-        tone_hint = ToneAdapter.adapt(polarity)
+        tone_hint = ToneAdapter.adapt(quick_polarity_label(user_text))  # pass str instead
         parts.append(f"Adjust your tone: {tone_hint}\n")
 
     # Extra session context
@@ -183,18 +183,20 @@ def compose_style_plan(
     Combines: sentiment, policy bandit, habits, and channel.
     """
     profile = profile_mgr.load_profile()  # assume it returns dict
-    polarity = quick_polarity(user_text)  # 'positive'|'neutral'|'negative'
-    bandit = ToneAdapter(profile)
-    policy = bandit.choose_policy()  # e.g., {'id':'succinct', 'max_words':60}
+    polarity = quick_polarity(user_text)
 
     # basic time-of-day vibe
     hour = datetime.now().hour
     tod = "morning" if 5 <= hour < 12 else "afternoon" if hour < 18 else "evening"
 
     # defaults
+    polarity_label = quick_polarity_label(user_text)  
+    bandit = ToneAdapter(profile)
+    policy = bandit.choose_policy()
+
     plan = {
-        "tone_hint": ToneAdapter.adapt(polarity),  # empathetic when negative, etc.
-        "style_id": policy["id"],                  # casual/formal/playful/succinct
+        "tone_hint": ToneAdapter.adapt(polarity_label),
+        "style_id": policy["id"],
         "max_words": policy["max_words"],
         "formality": "casual" if policy["id"] in ("casual", "playful") else "neutral",
         "humor": policy["id"] == "playful",

@@ -1,9 +1,9 @@
 
 import json
-from base.policy.topic_manager import get_known_topics
+from datetime import datetime   # <-- add this
+from base.policy.topic_manager import get_known_topics, prune_stale_topics
 from base.policy.context_signals import ContextSignals
-from base.policy.topic_manager import prune_stale_topics
-
+from base.llm.brain import ask_brain   # <-- wherever ask_brain is actually implemented
 
 
 def propose_new_signals_and_rules(conn):
@@ -152,26 +152,22 @@ def cluster_complaints(conn):
     Respond as JSON array:
     [{{"cluster":"aches","examples":["back hurts","headache"],"topic_id":"movement"}}]
     """
-    cur.execute("""
-        INSERT INTO complaint_clusters (cluster, topic_id, examples, last_updated, last_example)
-        VALUES (?,?,?,?,?)
-    """, (
-        c["cluster"],
-        c["topic_id"],
-        json.dumps(c["examples"]),
-        datetime.utcnow().isoformat(),
-        c["examples"][-1] if c["examples"] else None
-    ))
-
 
     reply = ask_brain(prompt)
     try:
         clusters = json.loads(reply)
         for c in clusters:
             cur.execute("""
-                INSERT INTO complaint_clusters (cluster, topic_id, examples, last_updated)
-                VALUES (?,?,?,datetime('now'))
-            """, (c["cluster"], c["topic_id"], json.dumps(c["examples"])))
+                INSERT INTO complaint_clusters (cluster, topic_id, examples, last_updated, last_example)
+                VALUES (?,?,?,?,?)
+            """, (
+                c["cluster"],
+                c["topic_id"],
+                json.dumps(c["examples"]),
+                datetime.utcnow().isoformat(),
+                c["examples"][-1] if c["examples"] else None
+            ))
         conn.commit()
     except Exception:
         pass
+

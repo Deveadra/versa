@@ -1,25 +1,27 @@
+# base/learning/sentiment.py
 from __future__ import annotations
+from textblob import TextBlob # type: ignore
 
-from textblob import TextBlob  # or VADER, or your custom model
 
-def quick_polarity(text: str) -> str:
+def quick_polarity(text: str) -> float:
     """
-    Quick polarity detection: returns 'positive', 'negative', or 'neutral'.
+    Return sentiment polarity as a float in [-1.0, 1.0].
+    -1.0 = very negative, 0.0 = neutral, 1.0 = very positive.
     """
     if not text:
-        return "neutral"
+        return 0.0
     blob = TextBlob(text)
-    polarity = blob.sentiment.polarity
-    if polarity > 0.2:
+    return float(blob.sentiment.polarity)
+
+
+def quick_polarity_label(text: str) -> str:
+    """
+    Return sentiment label: 'positive', 'negative', or 'neutral'.
+    Uses quick_polarity() internally.
+    """
+    score = quick_polarity(text)
+    if score > 0.2:
         return "positive"
-    elif polarity < -0.2:
+    elif score < -0.2:
         return "negative"
     return "neutral"
-
-# def quick_polarity(text: str) -> float:
-#     t = text.lower()
-#     pos = sum(t.count(w) for w in ["thanks", "great", "love", "nice", "perfect", "awesome"])
-#     neg = sum(t.count(w) for w in ["no", "not", "bad", "hate", "ugh", "terrible", "wrong"])
-#     if pos == neg == 0:
-#         return 0.0
-#     return (pos - neg) / max(1.0, pos + neg)

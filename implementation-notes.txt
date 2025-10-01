@@ -1,0 +1,46 @@
+# resolved_action, params come from your intent parser
+usage_id = self.usage_logger.log(UsageEvent(...))  # log before / after action as you prefer
+
+# derive a confidence number (you may have it from your intent resolver)
+confidence = params.get("confidence", None)
+# fallback: use retriever highest score if present
+if not confidence and memories:
+    confidence = max((m.get("score",0) for m in memories), default=None)
+
+confirm = self.ask_confirmation_if_unsure(suggestion=resolved_action, confidence=confidence, usage_id=usage_id)
+if confirm:
+    # send confirm['ask_user'] to UI/REPL and await user response (non-blocking)
+    # your UI/REPL should call orchestrator.record_user_feedback(usage_id, user_reply)
+    return confirm  # or queue to user channel
+# otherwise continue and perform the action
+
+
+policy = self.tone_adapter.choose_policy()
+self.last_policy_id = policy["id"]
+# then use policy to guide the system prompt or instruct the LLM
+
+
+
+
+UI / REPL integration examples
+
+REPL flow (pseudo):
+
+Orchestrator returns {"ask_user": "...", "usage_id": 123}.
+
+REPL prints prompt to user and reads reply.
+
+REPL calls:
+
+orch.record_user_feedback(usage_id=123, text=user_reply)
+
+
+Simple HTTP endpoint (Flask example):
+
+@app.route("/feedback", methods=["POST"])
+def feedback():
+    data = request.json
+    usage_id = data.get("usage_id")
+    text = data.get("text")
+    orchestrator.record_user_feedback(usage_id, text)
+    return jsonify({"ok": True})

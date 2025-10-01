@@ -175,17 +175,22 @@ class MemoryStore:
     # ---------- retrieval ----------
     def keyword_search(self, query: str, limit: int = 5) -> List[str]:
         if self._fts_enabled:
-            cur = self.conn.execute(
-                "SELECT content FROM events_fts WHERE events_fts MATCH ? LIMIT ?",
-                (query, limit),
-            )
-            return [r[0] for r in cur.fetchall()]
+            try:
+                sql = f"SELECT content FROM events_fts WHERE events_fts MATCH ? LIMIT {int(limit)}"
+                cur = self.conn.execute(sql, (query,))
+                return [r[0] for r in cur.fetchall()]
+            except sqlite3.OperationalError as e:
+                from loguru import logger
+                logger.error(f"FTS search failed, falling back to LIKE: {e}")
+                self._fts_enabled = False
+                # fallback to LIKE if FTS errors out
         # fallback: LIKE
         cur = self.conn.execute(
             "SELECT content FROM events WHERE content LIKE ? ORDER BY id DESC LIMIT ?",
             (f"%{query}%", limit),
         )
         return [r[0] for r in cur.fetchall()]
+
 
 
 # ---------- Legacy helpers for backward compatibility ----------

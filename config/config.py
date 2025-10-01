@@ -2,11 +2,20 @@ from __future__ import annotations
 import os
 
 from typing import Literal
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 from pydantic import BaseModel, Field
 
-# load .env that lives next to this file
-load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+
+env_override = os.getenv("ULTRON_ENV_PATH")
+if env_override and os.path.exists(env_override):
+    load_dotenv(env_override, override=True)
+else:
+    # 2) Otherwise, find the nearest .env (project root)
+    found = find_dotenv(filename=".env", usecwd=True)
+    if found:
+        load_dotenv(found, override=True)
+    else:
+        load_dotenv(override=True)  # last-resort fallback
 
 class Settings(BaseModel):
     # simple, concrete types (no Optional for mode)
@@ -19,7 +28,7 @@ class Settings(BaseModel):
 
     # LLM
     openai_api_key: str | None = os.getenv("OPENAI_API_KEY")
-    openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o")
+    openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 
     # Embeddings

@@ -1,7 +1,7 @@
 
 from __future__ import annotations
 from typing import Optional
-from database.sqlite import SQLiteConn
+from base.database.sqlite import SQLiteConn
 
 def write_policy_assignment(conn: SQLiteConn, usage_id: int, policy_id: str):
     """Persist mapping usage_id -> policy_id."""

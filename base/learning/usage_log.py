@@ -4,7 +4,7 @@ from typing import Optional, Dict, Any
 import json
 
 from loguru import logger
-from database.sqlite import SQLiteConn
+from base.database.sqlite import SQLiteConn
 
 @dataclass
 class UsageEvent:

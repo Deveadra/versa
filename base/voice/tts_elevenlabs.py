@@ -1,5 +1,7 @@
 from __future__ import annotations
-from typing import Iterable, Union, Optional
+
+import logging as logger
+from typing import Iterable, Union, Optional, List
 import os
 import threading
 import simpleaudio as sa
@@ -19,6 +21,24 @@ class Voice:
         if not settings.eleven_api_key or not settings.eleven_voice_id:
             raise RuntimeError("ElevenLabs API key/voice id not configured")
 
+        self.api_key = settings.eleven_api_key
+        self.voice_id = settings.eleven_voice_id
+
+        if not self.api_key:
+            raise RuntimeError("ElevenLabs API key not configured")
+
+        # Auto-resolve friendly names to IDs
+        if self.voice_id and not self.voice_id.isalnum():
+            try:
+                client = ElevenLabs(api_key=self.api_key)
+                voices = client.voices.list().voices
+                match = next((v for v in voices if v.name == self.voice_id), None)
+                if match:
+                    self.voice_id = match.voice_id
+                    logger.info(f"Resolved ElevenLabs voice '{match.name}' → {self.voice_id}")
+            except Exception as e:
+                logger.warning(f"Failed to resolve voice name '{self.voice_id}': {e}")
+                
         self.client = ElevenLabs(api_key=settings.eleven_api_key)
         self.voice_id = settings.eleven_voice_id
         self.model_id = model_id or os.getenv("ELEVENLABS_MODEL", "eleven_multilingual_v2")

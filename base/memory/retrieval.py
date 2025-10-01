@@ -9,7 +9,7 @@ from base.memory.store import MemoryStore
 from .vector_backend import VectorBackend
 
 
-class Retriever:
+class VectorRetriever:
     def __init__(
         self,
         store: MemoryStore,

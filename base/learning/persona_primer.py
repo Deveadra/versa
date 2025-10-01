@@ -3,7 +3,7 @@ from typing import Dict, Any, Optional, List
 from loguru import logger
 from base.core.profile_manager import ProfileManager
 from base.learning.habit_miner import HabitMiner
-from database.sqlite import SQLiteConn
+from base.database.sqlite import SQLiteConn
 import json
 
 class PersonaPrimer:

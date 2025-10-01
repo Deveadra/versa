@@ -2,7 +2,7 @@
 import re
 import hashlib
 from typing import Tuple
-from base.core import memory, context
+from base.core import context
 from datetime import datetime
 
 # Configurable weights

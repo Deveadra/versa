@@ -1,7 +1,13 @@
 
 import re
 import spacy
-
+try:
+    nlp = spacy.load("en_core_web_sm")
+except OSError:
+    from spacy.cli import download
+    download("en_core_web_sm")
+    nlp = spacy.load("en_core_web_sm")
+    
 from .relations import RELATION_SYNONYMS
 from .store import KGStore
 from .entities import ENTITY_TYPES, DEFAULT_TYPE

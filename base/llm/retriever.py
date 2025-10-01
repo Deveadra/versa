@@ -5,7 +5,7 @@ import math, datetime
 
 HALF_LIFE_DAYS = 90.0
 
-class Retriever:
+class DbRetriever:
     def __init__(self, conn):
         self.conn = conn
 

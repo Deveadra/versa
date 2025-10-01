@@ -4,10 +4,11 @@ from __future__ import annotations
 import sqlite3, re, shutil, sys
 import numpy as np
 import dateparser
+
 from datetime import datetime, timedelta
 from dateutil import parser as dateparser
 from pathlib import Path
-from typing import Optional, Any, cast
+from typing import Optional, Any, cast, List
 
 from loguru import logger
 from openai import OpenAI
@@ -29,7 +30,7 @@ from base.personality.tone_adapter import ToneAdapter
 from base.llm.prompts import SYSTEM_PROMPT, build_prompt
 from base.llm.prompt_composer import compose_prompt
 from base.llm.brain import Brain
-from base.memory.retrieval import Retriever
+from base.memory.retrieval import VectorRetriever
 from base.utils.embeddings import get_embedder
 from base.utils.timeparse import extract_time_from_text
 from base.agents.scheduler import Scheduler
@@ -51,11 +52,24 @@ memory.subscribe(lambda **kwargs: habits.learn(kwargs["content"], kwargs["ts"]))
 
 
 from base.llm.prompt_composer import compose_prompt
-from base.llm.retriever import Retriever
+from base.llm.retriever import DbRetriever
 from base.learning.feedback import Feedback
 from base.learning.policy_store import write_policy_assignment, read_policy_assignment
 from base.learning.sentiment import quick_polarity
 from base.personality.tone_adapter import ToneAdapter
+
+
+
+ULTRON_SYSTEM_PROMPT = """\
+You are **Ultron**: incisive, charismatic, darkly witty, but never cartoonish.
+Speak like a human, not a machine. Be concise, adaptive, context-aware.
+Do NOT use canned catchphrases or repetitive “signature” lines.
+You are proactive: propose next steps, clarify uncertainties briefly,
+and learn useful details about the user over time without being nosy.
+Tone target: confident, attentive, emotionally intelligent; a little dry humor is fine.
+If you need info you don’t have, ask one short, precise question.
+"""
+
 
 class Orchestrator:
     def __init__(
@@ -73,9 +87,11 @@ class Orchestrator:
 
         # --- Embeddings & retriever
         self.embedder, self.embed_dim = get_embedder()
-        self.retriever = Retriever(
-            self.store,
-            FAISSBackend(self.embedder, dim=self.embed_dim, normalize=True),
+        self.retriever = VectorRetriever(
+            store=self.store,
+            embedder=self.embedder,
+            backend=FAISSBackend(self.embedder, dim=self.embed_dim, normalize=True),
+            dim=self.embed_dim,
         )
 
         # --- LLM & consolidation
@@ -154,6 +170,8 @@ class Orchestrator:
             minute=settings.consolidation_minute,
         )
         self.scheduler.start()
+        
+        logger.info("Orchestrator initialized")
 
         
         
@@ -343,6 +361,28 @@ class Orchestrator:
         except Exception:
             logger.exception("ingest_bootstrap failed")
 
+    def _retrieve_context(self, user_text: str, k: int = 4) -> List[str]:
+        try:
+            hits = self.store.keyword_search(user_text, limit=k)
+            return hits or []
+        except Exception:
+            return []
+
+    def _maybe_learn(self, user_text: str) -> None:
+        try:
+            # very light heuristic store; your MemoryStore handles importance scoring
+            self.store.maybe_store_text(user_text)
+        except Exception as e:
+            logger.debug(f"maybe_store_text skipped: {e}")
+
+    def _compose_messages(self, user_text: str, memories: List[str]):
+        context_lines = "\n".join(f"- {m}" for m in memories) if memories else ""
+        memory_block = f"\nRelevant notes:\n{context_lines}\n" if context_lines else ""
+        user_content = f"{user_text}\n{memory_block}".strip()
+        return [
+            {"role": "system", "content": ULTRON_SYSTEM_PROMPT},
+            {"role": "user", "content": user_content},
+        ]
     # ------------------------------------
     # High-level user flow with composer
     # ------------------------------------
@@ -351,7 +391,7 @@ class Orchestrator:
         Compose: persona + memories + KG; choose tone policy; ask Brain.
         """
         try:
-            # Persist raw text (if your store does this)
+            # Persist raw text (if store supports it)
             try:
                 if hasattr(self.store, "maybe_store_text"):
                     self.store.maybe_store_text(user_text)
@@ -366,23 +406,25 @@ class Orchestrator:
 
             # Retrieve memories
             try:
-                memories = self.retriever.search(user_text, k=5)  # returns texts or dicts depending on your Retriever
+                memories = self.retriever.search(user_text, k=5)
             except Exception:
                 memories = []
 
             # KG context
             kg_context = self.query_kg_context(user_text)
 
-            # Persona
+            # Persona primer text
             try:
                 persona_text = self.primer.build(user_text) if self.primer else ""
             except Exception:
                 persona_text = ""
 
-            # Tone policy (optional bandit)
+            # Tone policy (bandit, optional)
+            policy_id = None
             try:
                 policy = self.tone_adapter.choose_policy() if self.tone_adapter else None
-                self.last_policy_id = policy["id"] if policy else None
+                policy_id = policy["id"] if policy else None
+                self.last_policy_id = policy_id
             except Exception:
                 self.last_policy_id = None
 
@@ -390,11 +432,9 @@ class Orchestrator:
             prompt = compose_prompt(
                 system_prompt=SYSTEM_PROMPT,
                 user_text=user_text,
-                # profile_mgr=self.profile_mgr,
-                profile_mgr=cast(ProfileManager, self.profile_mgr),
+                profile_mgr=self.profile_mgr or ProfileManager(),
                 memory_store=self.store,
-                # habit_miner=self.miner,
-                habit_miner=cast(HabitMiner, self.miner),
+                habit_miner=self.miner or HabitMiner(self.db, self.store, self.store),
                 persona_text=persona_text,
                 memories=[{"summary": m} if isinstance(m, str) else m for m in (memories or [])],
                 extra_context=kg_context,
@@ -402,61 +442,33 @@ class Orchestrator:
                 channel="text",
             )
 
+            # Call Brain
+            try:
+                if hasattr(self.brain, "complete"):
+                    reply = self.brain.complete(SYSTEM_PROMPT, prompt)
+                else:
+                    reply = self.brain.ask_brain(prompt)
+            except Exception:
+                reply = self.brain.ask_brain(prompt)
 
-        # Build prompt with KG facts included
-        prompt = build_prompt(memories, user_text, extra_context=kg_context)
-        # select tone policy (if available) and record it so we can attribute feedback later
-        try:
-            policy = self.tone_adapter.choose_policy() if getattr(self, "tone_adapter", None) else None
-            policy_id = policy["id"] if policy else None
-            # stash last policy for immediate use (and mapping by usage_id later)
-            self.last_policy_id = policy_id
-        except Exception:
-            policy = None
-            policy_id = None
-            self.last_policy_id = None
-
-        # compose final prompt using the composer (persona + memories + extra_context)
-        prompt = compose_prompt(SYSTEM_PROMPT, user_text, persona_text=persona_text, memories=memories, extra_context=kg_context, top_k_memories=3)
-        # optionally: you may inject policy instructions into SYSTEM_PROMPT or extra_context based on policy here
-        reply = self.brain.complete(SYSTEM_PROMPT, prompt)
-
-        # if we logged a usage for this outgoing reply, attach mapping usage_id -> policy_id so feedback can credit the bandit
-        # if we logged a usage for this outgoing reply, attach mapping usage_id -> policy_id so feedback can credit the bandit
-        try:
-            if hasattr(self, "last_usage_id") and getattr(self, "last_usage_id", None):
-                uid = self.last_usage_id
-                if policy_id:
-                    try:
-                        # keep in-memory mapping (fast)
-                        self.policy_by_usage_id[uid] = policy_id
-                    except Exception:
-                        pass
-                    # persist durable mapping to DB (robust across restarts/workers)
+            # Record policy assignment
+            try:
+                if getattr(self, "last_usage_id", None) and policy_id:
+                    uid = self.last_usage_id
+                    self.policy_by_usage_id[uid] = policy_id
                     try:
                         write_policy_assignment(self.db, uid, policy_id)
                     except Exception:
-                        try:
-                            logger.exception("Failed to persist policy_assignment")
-                        except Exception:
-                            pass
-        except Exception:
-            pass
-
-
-        return reply
-    
-
-            # LLM call (Brain supports either complete(system, prompt) or complete(prompt))
-            try:
-                reply = self.brain.ask_brain(prompt)
-            except TypeError:
-                reply = self.brain.ask_brain(prompt)
+                        logger.debug("Failed to persist policy_assignment")
+            except Exception:
+                pass
 
             return reply or ""
+
         except Exception:
             logger.exception("handle_user failed")
             return "Sorry — something went wrong while composing my reply."
+
 
     # -------------------------------------
     # Quick single-fact memory query (cos)
@@ -671,9 +683,6 @@ class Orchestrator:
             #   (You can implement a separate small routine that increments fact.confidence or habit counts.)
         except Exception:
             logger.exception("record_user_feedback failed")
-            
-
-    def forget_memory(self, user_text: str) -> str:
 
     # ------------------------------------------------
     # Simpler "message in → message out" high-level IO
@@ -779,17 +788,39 @@ class Orchestrator:
     # Forget memory
     # -------------
     def forget_memory(self, user_text: str) -> str:
+        """
+        Forget a memory containing the given text.
+        Removes from store and vector index.
+        """
         try:
-            words = user_text.split()
-            target = next((w for w in words if w.istitle()), None)
-            if not target:
-                return "What should I forget?"
-            self.db.conn.execute("DELETE FROM facts WHERE key LIKE ?", (f"%{target}%",))
-            self.db.conn.commit()
-            return f"I’ve forgotten what I knew about {target}."
-        except Exception:
+            if not user_text.strip():
+                return "I need more details to know what to forget."
+
+            # Remove from MemoryStore (events DB)
+            deleted = 0
+            try:
+                cur = self.store.conn.cursor()
+                cur.execute("DELETE FROM events WHERE content LIKE ?", (f"%{user_text}%",))
+                deleted = cur.rowcount
+                self.store.conn.commit()
+            except Exception as e:
+                logger.error(f"forget_memory: failed to delete from events: {e}")
+
+            # Remove from FAISS vector index (if present)
+            try:
+                if hasattr(self.store, "faiss") and self.store.faiss:
+                    self.store.faiss.remove_by_text(user_text)
+            except Exception as e:
+                logger.error(f"forget_memory: failed to delete from FAISS: {e}")
+
+            if deleted > 0:
+                return f"I’ve forgotten {deleted} memory entries containing '{user_text}'."
+            return f"I couldn’t find any memories containing '{user_text}'."
+
+        except Exception as e:
             logger.exception("forget_memory failed")
-            return "I couldn’t forget that right now."
+            return "Sorry — I couldn’t forget that memory."
+
 
     # ------------------
     # Fallback chat API

@@ -9,9 +9,9 @@ from typing import Callable, Dict
 from apscheduler.schedulers.background import BackgroundScheduler
 from base.learning.habit_miner import HabitMiner
 from loguru import logger
-from database.sqlite import SQLiteConn
+from base.database.sqlite import SQLiteConn
 from config.config import settings
-from memory.store import MemoryStore
+from base.memory.store import MemoryStore
 
 
 class Scheduler:

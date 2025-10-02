@@ -75,6 +75,10 @@ Tone target: confident, attentive, emotionally intelligent; a little dry humor i
 If you need info you don’t have, ask one short, precise question.
 """
 
+class ConsoleNotifier:
+    def notify(self, title: str, message: str):
+        print(f"\n[NOTIFY] {title}: {message}\n")
+
 
 class Orchestrator:
     def __init__(
@@ -86,6 +90,7 @@ class Orchestrator:
     ):
         # --- LLM & consolidation
         self.brain = Brain()
+        self.notifier = ConsoleNotifier()
         
         # --- DB / stores
         self.db: SQLiteConn = db or SQLiteConn(settings.db_path)

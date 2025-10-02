@@ -196,6 +196,11 @@ class MemoryStore:
 
     # ---------- retrieval ----------
 def keyword_search(self, query):
+    # Strip commas from the query
+    query = query.replace(',', '')
+    # Existing functionality to search using FTS triggers or LIKE fallback
+    # Add your FTS implementation here
+    pass
         query = query.replace(',', '')  # Strip commas from the query
         # Existing functionality for FTS triggers and LIKE fallback goes here
         if self._fts_enabled:

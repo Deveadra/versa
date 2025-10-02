@@ -195,7 +195,9 @@ class MemoryStore:
         return int(cur.rowcount or 0)
 
     # ---------- retrieval ----------
-    def keyword_search(self, query: str, limit: int = 5) -> List[str]:
+def keyword_search(self, query):
+        query = query.replace(',', '')  # Strip commas from the query
+        # Existing functionality for FTS triggers and LIKE fallback goes here
         if self._fts_enabled:
             try:
                 sql = f"SELECT content FROM events_fts WHERE events_fts MATCH ? LIMIT {int(limit)}"

@@ -68,27 +68,25 @@ class ProposalEngine:
     def _apply_change(self, change: ProposedChange) -> Tuple[bool, str]:
         try:
             full = self.root / change.path
+            if not full.exists() and change.apply_mode != "full_file":
+                return False, f"Target {change.path} not found for anchor replace"
+
 
             # If file doesn't exist and it's not a full file replacement
             if not full.exists() and change.apply_mode != "full_file":
                 return False, f"Target {change.path} not found for anchor replace"
 
             if change.apply_mode == "full_file":
-                # Overwrite entire file
                 self._write(change.path, change.replacement)
                 return True, "full_file replaced"
 
             elif change.apply_mode == "replace_block":
                 old = self._read(change.path)
                 anchor = change.search_anchor or ""
-
                 if anchor not in old:
-                    # Try fuzzy match
-                    close = get_close_matches(anchor, old.splitlines(), n=1, cutoff=0.6)
-                    if close:
-                        anchor = close[0]
-                    else:
-                        return False, f"Anchor not found in {change.path}"
+                    # === fallback: upgrade to full_file replacement ===
+                    self._write(change.path, change.replacement)
+                    return True, "anchor not found → full_file replaced"
 
                 new_content = old.replace(anchor, change.replacement, 1)
                 self._write(change.path, new_content)

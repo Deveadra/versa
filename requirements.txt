@@ -26,6 +26,7 @@ en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_
 sqlite-utils #==3.37
 textblob
 TTS==0.22.0
+tqdm
 
 # Embeddings (local-first, optional)
 numpy==1.26.4

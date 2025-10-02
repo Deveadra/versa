@@ -1,13 +1,17 @@
-
+# base/self_improve/proposal_engine.py
 from __future__ import annotations
-from dataclasses import dataclass
+
+import datetime
 import difflib
-from typing import List, Dict, Optional, Tuple
-from difflib import get_close_matches
+import tempfile, shutil, difflib
 import re
-from pathlib import Path
+
+from dataclasses import dataclass
+from datetime import datetime
+from difflib import get_close_matches
 from loguru import logger
-from typing import Tuple
+from pathlib import Path
+from typing import List, Dict, Optional, Tuple
 
 from base.self_improve.code_indexer import CodeIndexer
 from base.llm.brain import Brain
@@ -56,14 +60,46 @@ class ProposalEngine:
     def __init__(self, repo_root: str, brain: Optional[Brain] = None):
         self.root = Path(repo_root).resolve()
         self.brain = brain or Brain()
-
+        # self.pr_manager = PRManager(repo_root)
+        
     def _read(self, relpath: str) -> str:
         return (self.root / relpath).read_text(encoding="utf-8", errors="ignore")
 
-    def _write(self, relpath: str, content: str) -> None:
-        p = self.root / relpath
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content, encoding="utf-8")
+    def safe_write(self, path: str, new_content: str) -> bool:
+        """
+        Safely write new content to file.
+        - Writes to a temp file first
+        - Diffs against existing
+        - Replaces original only if safe
+        """
+        try:
+            original = open(path, encoding="utf-8").read()
+            diff = list(difflib.unified_diff(
+                original.splitlines(),
+                new_content.splitlines(),
+                fromfile="before", tofile="after"
+            ))
+
+            if not diff:
+                return False  # no changes
+
+            # write to temp
+            fd, tmp_path = tempfile.mkstemp()
+            with open(fd, "w", encoding="utf-8") as tmpf:
+                tmpf.write(new_content)
+
+            # replace original safely
+            shutil.move(tmp_path, path)
+            return True
+
+        except Exception as e:
+            logger.error(f"Safe write failed for {path}: {e}")
+            return False
+    
+    # def _write(self, relpath: str, content: str) -> None:
+    #     p = self.root / relpath
+    #     p.parent.mkdir(parents=True, exist_ok=True)
+    #     p.write_text(content, encoding="utf-8")
 
     def _apply_change(self, change: ProposedChange) -> Tuple[bool, str]:
         try:
@@ -71,35 +107,25 @@ class ProposalEngine:
             if not full.exists() and change.apply_mode != "full_file":
                 return False, f"Target {change.path} not found for anchor replace"
 
-
-            # If file doesn't exist and it's not a full file replacement
-            if not full.exists() and change.apply_mode != "full_file":
-                return False, f"Target {change.path} not found for anchor replace"
-
             if change.apply_mode == "full_file":
-                self._write(change.path, change.replacement)
-                return True, "full_file replaced"
+                ok = self.safe_write(str(full), change.replacement)
+                return ok, "full_file replaced" if ok else "no changes applied"
 
             elif change.apply_mode == "replace_block":
                 old = self._read(change.path)
                 anchor = change.search_anchor or ""
                 if anchor not in old:
-                    # === fallback: upgrade to full_file replacement ===
-                    self._write(change.path, change.replacement)
-                    return True, "anchor not found → full_file replaced"
+                    return False, f"Anchor not found in {change.path}"
 
                 new_content = old.replace(anchor, change.replacement, 1)
-                self._write(change.path, new_content)
-                return True, "block replaced"
+                ok = self.safe_write(str(full), new_content)
+                return ok, "block replaced" if ok else "no changes applied"
 
             else:
                 return False, f"Unknown apply_mode {change.apply_mode}"
 
         except Exception as e:
             return False, f"apply error: {e}"
-
-
-    # base/self_improve/proposal_engine.py
 
     def propose(self, instruction: str, index_md: str) -> Proposal:
         sys_prompt = PROPOSAL_SYS_PROMPT.format(
@@ -165,6 +191,12 @@ Respond with strictly the JSON schema described.
 
 
     def apply_proposal(self, proposal: Proposal) -> List[Tuple[ProposedChange, bool, str]]:
+        # Ensure branch isolation
+        time = datetime.now().strftime("%Y%m%d%H%M%S")
+        suffix = re.sub(r"[^a-z0-9_\-]+", "-", proposal.title.lower())[:40]
+        safe_suffix = suffix if isinstance(suffix, str) and suffix else f"proposal-{int(time.time())}"
+        branch = self.pr_manager.prepare_branch(safe_suffix) # type: ignore
+        
         applied = []
         total_bytes = 0
         for ch in proposal.changes[: settings.proposer_max_files_per_pr]:
@@ -176,13 +208,13 @@ Respond with strictly the JSON schema described.
             ok, msg = self._apply_change(ch)
             applied.append((ch, ok, msg))
 
-            # --- NEW: auto-generate test stubs for big changes ---
             if ok:
                 lines_changed = len(ch.replacement.splitlines())
                 if lines_changed > 15 or "def " in ch.replacement:
                     self._generate_test_stub(ch.path, ch.replacement)
 
         return applied
+
 
 
     def _generate_test_stub(self, path: str, replacement: str) -> None:

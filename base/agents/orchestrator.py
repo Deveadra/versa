@@ -387,14 +387,13 @@ class Orchestrator:
             return f"Failed to commit/push: {e}"
 
         try:
+            # Prefix title if there were failures
+            pr_title = proposal.title
+            if failed or issues:
+                pr_title = "[Partial] " + pr_title
+
             pr_body = (proposal.description or instruction) + "\n\n" + failure_report
             pr_url = self.pr_manager.open_pr(branch=branch, proposal=proposal)
-            
-            # 5) Notify (stdout + memory event)
-            test_report = self.pr_manager.run_tests_and_update_pr(branch)
-            if settings.proposal_notify_stdout:
-                self.notifier.notify("New Code Proposal", f"{proposal.title}\n{pr_url}\n\nTests:\n{test_report}")
-
         except Exception as e:
             return f"Changes pushed to {branch}, but PR creation failed: {e}"
 

@@ -173,6 +173,41 @@ VALUES
 );
 ```
 
+## Mentor Mode
+
+### How you use it
+
+In your running text UI:
+
+**Type:**
+```bash
+propose: switch memory search to FTS triggers and LIKE fallback, and add a guard to store.py keyword_search to strip commas from MATCH query
+```
+
+**Ultron:**
+
+- Scans codebase
+
+- Drafts a proposal (edits base/memory/store.py, maybe tests)
+
+- Applies local changes
+
+- Creates branch ultron/proposal/...
+
+- Commits, pushes, opens a PR — prints the PR URL
+
+- Logs an event you can query later
+
+### Security & guardrails
+
+- Only writes files under allowlist.
+
+- Caps patch size and file count.
+
+- Uses anchor-replace when possible, to avoid deleting unrelated code blocks.
+
+- No secrets are generated or written.
+
 --- 
 ---
 ---

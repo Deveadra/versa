@@ -24,3 +24,15 @@ for h in initial_habits:
 ```
 
 
+- in your startup script, you’d do something like:
+```bash
+echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+echo "passphrase=$GPG_PASSPHRASE" > ~/.gnupg/gpg-pass.conf
+chmod 600 ~/.gnupg/gpg-pass.conf
+```
+
+And tell git which key to use:
+```bash
+git config --global user.signingkey YOUR_KEY_ID_OR_FINGERPRINT
+git config --global commit.gpgsign true
+```

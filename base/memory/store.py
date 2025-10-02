@@ -30,6 +30,7 @@ class MemoryStore:
         self._subscribers = []
 
     # ---------- schema ----------
+        # ---------- schema ----------
     def _ensure_schema(self) -> None:
         cur = self.conn.cursor()
 
@@ -70,7 +71,7 @@ class MemoryStore:
             """
         )
 
-        # Optional FTS for events
+        # Full-text search index linked to events.content
         try:
             cur.execute(
                 """
@@ -78,8 +79,29 @@ class MemoryStore:
                 USING fts5(content, content='events', content_rowid='id')
                 """
             )
+
+            # Keep FTS index in sync automatically
+            cur.executescript(
+                """
+                CREATE TRIGGER IF NOT EXISTS events_ai AFTER INSERT ON events BEGIN
+                  INSERT INTO events_fts(rowid, content) VALUES (new.id, new.content);
+                END;
+
+                CREATE TRIGGER IF NOT EXISTS events_ad AFTER DELETE ON events BEGIN
+                  INSERT INTO events_fts(events_fts, rowid, content) VALUES('delete', old.id, old.content);
+                END;
+
+                CREATE TRIGGER IF NOT EXISTS events_au AFTER UPDATE ON events BEGIN
+                  INSERT INTO events_fts(events_fts, rowid, content) VALUES('delete', old.id, old.content);
+                  INSERT INTO events_fts(rowid, content) VALUES (new.id, new.content);
+                END;
+                """
+            )
+
             self._fts_enabled = True
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as e:
+            from loguru import logger
+            logger.error(f"FTS init failed: {e}")
             self._fts_enabled = False
 
         self.conn.commit()

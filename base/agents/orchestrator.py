@@ -39,6 +39,11 @@ from base.kg.integration import KGIntegrator
 from base.calendar.store import CalendarStore
 from base.learning.persona_primer import PersonaPrimer
 from base.calendar.rrule_helpers import rrule_from_phrase
+from base.self_improve.code_indexer import CodeIndexer
+from base.self_improve.proposal_engine import ProposalEngine
+from base.self_improve.pr_manager import PRManager
+from config.config import settings
+
 
 
 db_conn = SQLiteConn(settings.db_path)
@@ -93,6 +98,17 @@ class Orchestrator:
             backend=FAISSBackend(self.embedder, dim=self.embed_dim, normalize=True),
             dim=self.embed_dim,
         )
+        
+        # Mentorship / proposal components
+        self.repo_root = Path(".").resolve()
+        self.code_indexer = CodeIndexer(
+            root=str(self.repo_root),
+            allowlist=settings.proposer_allowlist,
+            blocklist=settings.proposer_blocklist,
+        )
+        self.proposal_engine = ProposalEngine(str(self.repo_root), brain=self.brain)
+        self.pr_manager = PRManager(str(self.repo_root))
+
 
         # --- LLM & consolidation
         self.brain = Brain()
@@ -261,6 +277,60 @@ class Orchestrator:
         except Exception:
             logger.exception("record_user_feedback failed")
 
+    def propose_code_change(self, instruction: str) -> str:
+        """
+        Natural-language → code proposal → branch+commit+PR → notify user.
+        """
+        # 1) Build repository index (for LLM context)
+        index = self.code_indexer.scan()
+        index_md = self.code_indexer.to_markdown(index)
+
+        # 2) Ask the LLM to produce a proposal (title, description, changes)
+        proposal = self.proposal_engine.propose(instruction, index_md=index_md)
+
+        # 3) Apply locally (bounded by allowlist & size limits inside ProposalEngine)
+        results = self.proposal_engine.apply_proposal(proposal)
+
+        # Any failures?
+        failed = [r for r in results if not r[1]]
+        if failed:
+            lines = [f"- {c.path}: {msg}" for (c, ok, msg) in failed]
+            return "Some changes could not be applied:\n" + "\n".join(lines)
+
+        # 4) Create branch, commit, push, open PR
+        import re, time
+        suffix = re.sub(r"[^a-z0-9_\-]+", "-", proposal.title.lower())[:40] or f"change-{int(time.time())}"
+        branch = self.pr_manager.prepare_branch(suffix)
+        try:
+            self.pr_manager.commit_and_push(branch, proposal.title)
+        except Exception as e:
+            return f"Failed to commit/push: {e}"
+
+        try:
+            pr_url = self.pr_manager.open_pr(
+                branch=branch,
+                title=proposal.title,
+                body=proposal.description or instruction
+            )
+        except Exception as e:
+            return f"Changes pushed to {branch}, but PR creation failed: {e}"
+
+        # 5) Notify (stdout + memory event)
+        if settings.proposal_notify_stdout:
+            self.notifier.notify("New Code Proposal", f"{proposal.title}\n{pr_url}")
+
+        try:
+            if hasattr(self.store, "add_event"):
+                self.store.add_event(
+                    content=f"[proposal] {proposal.title} → {pr_url}",
+                    importance=0.0,
+                    type_="proposal",
+                )
+        except Exception:
+            pass
+
+        return f"Proposal opened: {pr_url}"
+
     # -------------------------
     # Facts (semantic de-dupe)
     # -------------------------
@@ -427,6 +497,12 @@ class Orchestrator:
                 self.last_policy_id = policy_id
             except Exception:
                 self.last_policy_id = None
+
+            # Example inside your text loop or orchestrator.handle_user() pre-dispatch:
+            lower = user_text.strip().lower()
+            if lower.startswith("propose:"):
+                instruction = user_text.split(":", 1)[1].strip()
+                return self.propose_code_change(instruction)
 
             # Compose final prompt
             prompt = compose_prompt(

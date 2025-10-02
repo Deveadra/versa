@@ -58,6 +58,29 @@ class Settings(BaseModel):
         "talk to me": "enable_speak",      # Explicitly turn speaking back on
     }
 
+    # --- GitHub / PR settings ---
+    github_token: str | None = os.getenv("GITHUB_TOKEN")        # required for PRs
+    github_repo: str | None = os.getenv("GITHUB_REPO")          # e.g. "yourname/assistant"
+    github_default_branch: str = os.getenv("GITHUB_DEFAULT_BRANCH", "main")
+    github_bot_name: str = os.getenv("GITHUB_BOT_NAME", "ultron-bot")
+    github_bot_email: str = os.getenv("GITHUB_BOT_EMAIL", "ultron-bot@local")
+    github_remote_name: str = os.getenv("GITHUB_REMOTE_NAME", "origin")
+
+    # Proposer behavior
+    proposer_allowlist: list[str] = [
+        "base/",
+        "config/",
+        "run.py",
+    ]
+    proposer_blocklist: list[str] = [
+        ".venv/", ".git/", "data/", "models/", "__pycache__/"
+    ]
+    proposer_branch_prefix: str = os.getenv("PROPOSER_BRANCH_PREFIX", "ultron/proposal/")
+    proposer_max_files_per_pr: int = int(os.getenv("PROPOSER_MAX_FILES_PER_PR", "20"))
+    proposer_max_patch_bytes: int = int(os.getenv("PROPOSER_MAX_PATCH_BYTES", str(256_000)))
+    proposal_notify_stdout: bool = True  # simple notification channel; you can add Slack later
+
+
 settings = Settings()
 
 # class Settings(BaseModel):

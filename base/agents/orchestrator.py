@@ -9,7 +9,7 @@ import json
 import re
 import time
 import subprocess
-import tqdm
+from tqdm import tqdm
 
 from datetime import datetime, timedelta
 from dateutil import parser as dateparser
@@ -50,6 +50,7 @@ from base.self_improve.proposal_engine import ProposalEngine
 from base.self_improve.pr_manager import PRManager
 from config.config import settings
 from base.self_improve.diagnostic_engine import DiagnosticEngine
+from base.voice.tts_elevenlabs import Voice
 # from base.self_improve.diagnostic_engine import benchmark_action
 
 
@@ -121,6 +122,7 @@ class Orchestrator:
         # --- LLM & consolidation
         self.brain = Brain()
         self.notifier = ConsoleNotifier()
+        self.voice = Voice.get_instance()
         
         # --- DB / stores
         self.db: SQLiteConn = db or SQLiteConn(settings.db_path)
@@ -249,7 +251,8 @@ class Orchestrator:
             ok = False
             msg = str(e)
         latency = (time.perf_counter() - start) * 1000.0
-        return result, elapsed
+        # return result, elapsed
+        return {"label": label, "latency_ms": latency, "ok": ok, "msg": msg}        
 
     def _run_action(self, user_text: str, intent: str, action: str, params: dict) -> Any:
         """
@@ -344,6 +347,8 @@ class Orchestrator:
         """
         Natural-language → code proposal → branch+commit+PR → notify user.
         """
+        self.pr_manager.restore_original_branch()
+        
         # 1) Build repository index (for LLM context)
         index = self.code_indexer.scan()
         index_md = self.code_indexer.to_markdown(index)
@@ -362,11 +367,11 @@ class Orchestrator:
         # 3.5) Validate changes before committing
         issues = self._validate_changes()
         if issues:
-            # If you want: bail out instead of pushing PR
-            return "Validation failed:\n" + "\n".join(issues)
+            pr_url = self.pr_manager.open_pr(branch="draft", proposal=proposal, extra_tests="\n".join(issues))
+            return f"Validation found issues, opened draft PR for review: {pr_url}"
+
 
         # 4) Create branch, commit, push, open PR
-        import re, time
         suffix = re.sub(r"[^a-z0-9_\-]+", "-", proposal.title.lower())[:40] or f"change-{int(time.time())}"
         branch = self.pr_manager.prepare_branch(suffix)
         try:
@@ -380,7 +385,7 @@ class Orchestrator:
                 proposal=proposal
             )
 
-            # NEW: run tests after opening PR
+            # 5) Notify (stdout + memory event)
             test_report = self.pr_manager.run_tests_and_update_pr(branch)
             if settings.proposal_notify_stdout:
                 self.notifier.notify("New Code Proposal", f"{proposal.title}\n{pr_url}\n\nTests:\n{test_report}")
@@ -388,10 +393,6 @@ class Orchestrator:
 
         except Exception as e:
             return f"Changes pushed to {branch}, but PR creation failed: {e}"
-
-        # 5) Notify (stdout + memory event)
-        if settings.proposal_notify_stdout:
-            self.notifier.notify("New Code Proposal", f"{proposal.title}\n{pr_url}")
 
         try:
             if hasattr(self.store, "add_event"):
@@ -403,23 +404,18 @@ class Orchestrator:
         except Exception:
             pass
 
+        finally:
+            self.pr_manager.restore_original_branch()
+
         return f"Proposal opened: {pr_url}"
-    
-    def benchmark_action(self, label: str, func, *args, **kwargs):
-        start = time.perf_counter()
-        try:
-            func(*args, **kwargs)
-            ok = True
-            msg = None
-        except Exception as e:
-            ok = False
-            msg = str(e)
-        latency = (time.perf_counter() - start) * 1000.0
-        return {"label": label, "latency_ms": latency, "ok": ok, "msg": msg}
 
     def run_diagnostic(self, auto_fix: bool = False, verbose: bool = False) -> str:
         """
         Run a self-diagnostic scan on the repo with progress bar and conversational reporting.
+        Run a self-diagnostic scan with:
+        - Progress bar in terminal
+        - Spoken progress milestones (20%, 40%, 60%, 80%, 100%)
+        - Conversational reporting at end
         """
         structured = {"issues": []}
         steps = [
@@ -667,8 +663,16 @@ class Orchestrator:
         
     #     return f"Diagnostic complete. I noticed a few things: {preview}.{more}"
 
-    def speak_progress(percent: int, desc: str):
+    def speak_progress(self, percent: int, desc: str):
         """Speak progress aloud if TTS is available."""
+        steps = [
+            "Running performance benchmarks",
+            "Static code scan",
+            "Indexing repository",
+            "LLM-assisted scan",
+            "Merging results",
+        ]
+        
         try:
             if percent % 20 == 0:  # only speak at milestones
                 msg = f"Diagnostic {percent}% complete. {desc}."
@@ -734,7 +738,7 @@ class Orchestrator:
                 pbar.set_description(step)
                 pbar.update(1)
                 percent = int((idx / len(steps)) * 100)
-                speak_progress(percent, step)
+                self.speak_progress(percent, step)
                 time.sleep(0.3)  # pacing, so bar doesn't flash instantly
 
         # === Conversational Reporting ===

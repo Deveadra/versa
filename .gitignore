@@ -7,7 +7,7 @@ __pycache__/
 .vscode/
 pyrightconfig.json
 
-.env
+/.env/
 tests/
 base/agents/orchestrator1.py
 orchestrator_feedback.patch

@@ -4,6 +4,18 @@ import os
 from typing import Literal
 from dotenv import load_dotenv, find_dotenv
 from pydantic import BaseModel, Field
+from pathlib import Path
+import os
+
+
+def _read_secret(path_env: str) -> str | None:
+    path = os.getenv(path_env)
+    if path and Path(path).exists():
+        return Path(path).read_text(encoding="utf-8").strip()
+    return None
+
+github_ssh_key = _read_secret("GITHUB_SSH_KEY_FILE")
+github_gpg_key = _read_secret("GITHUB_GPG_KEY_FILE")
 
 
 env_override = os.getenv("ULTRON_ENV_PATH")
@@ -51,7 +63,7 @@ class Settings(BaseModel):
     consolidation_minute: int = int(os.getenv("ULTRON_CONSOLIDATION_MINUTE", 0))
     
     # Voice
-    auto_speak: bool = True  # ✅ default enabled
+    auto_speak: bool = False  # ✅ default enabled
     wake_word: str = "ultron"  # ✅ wake word for vocal cues
     wake_commands: dict[str, str] = {
         "text me": "disable_speak",   # Ultron will text instead of speak

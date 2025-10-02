@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Tuple
 import difflib
+import re
 from pathlib import Path
 from loguru import logger
 from base.self_improve.code_indexer import CodeIndexer
@@ -14,14 +15,19 @@ Given the user's natural-language request and a summary of the repository,
 propose a *minimal, safe patch set*.
 
 Return a JSON object with:
-{
+{{
   "title": "...",
   "description": "...",
   "changes": [
-    {"path": "relative/path.py", "apply_mode":"replace_block"|"full_file","search_anchor": "...", "replacement": "...</code>"},
+    {{
+      "path": "relative/path.py",
+      "apply_mode": "replace_block" | "full_file",
+      "search_anchor": "...",
+      "replacement": "..."
+    }},
     ...
   ]
-}
+}}
 
 Rules:
 - Only modify files within the allowlist.
@@ -81,15 +87,23 @@ class ProposalEngine:
             max_bytes=settings.proposer_max_patch_bytes
         )
         user_prompt = f"""User request:
-{instruction}
+    {instruction}
 
-Repository index:
-{index_md}
+    Repository index:
+    {index_md}
 
-Respond with strictly the JSON schema described.
-"""
+    Respond with strictly the JSON schema described.
+    """
 
+        # Call LLM
         raw = self.brain.ask_brain(user_prompt, system_prompt=sys_prompt)
+
+        # Clean wrapper code fences if the model wrapped JSON in ```json ... ```
+        if raw and raw.startswith("```"):
+            import re
+            raw = re.sub(r"^```[a-zA-Z]*\n", "", raw)
+            raw = raw.rstrip("`").strip()
+
         # Defensive parse
         import json
         try:
@@ -102,18 +116,19 @@ Respond with strictly the JSON schema described.
         for ch in obj.get("changes", []):
             changes.append(
                 ProposedChange(
-                    path=ch.get("path",""),
-                    apply_mode=ch.get("apply_mode","replace_block"),
+                    path=ch.get("path", ""),
+                    apply_mode=ch.get("apply_mode", "replace_block"),
                     search_anchor=ch.get("search_anchor"),
-                    replacement=ch.get("replacement",""),
+                    replacement=ch.get("replacement", ""),
                 )
             )
 
         return Proposal(
-            title=obj.get("title","Ultron proposal"),
-            description=obj.get("description",""),
-            changes=changes
+            title=obj.get("title", "Ultron proposal"),
+            description=obj.get("description", ""),
+            changes=changes,
         )
+
 
     def apply_proposal(self, proposal: Proposal) -> List[Tuple[ProposedChange, bool, str]]:
         applied = []

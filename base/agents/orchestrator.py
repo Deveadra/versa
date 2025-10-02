@@ -84,6 +84,9 @@ class Orchestrator:
         store: MemoryStore | None = None,
         plugin_manager: PluginManager | None = None,
     ):
+        # --- LLM & consolidation
+        self.brain = Brain()
+        
         # --- DB / stores
         self.db: SQLiteConn = db or SQLiteConn(settings.db_path)
         self.store: MemoryStore = store or memory or MemoryStore(self.db.conn)
@@ -109,9 +112,6 @@ class Orchestrator:
         self.proposal_engine = ProposalEngine(str(self.repo_root), brain=self.brain)
         self.pr_manager = PRManager(str(self.repo_root))
 
-
-        # --- LLM & consolidation
-        self.brain = Brain()
         # learning & feedback components (inserted)
         try:
             self.feedback = Feedback(self.db)

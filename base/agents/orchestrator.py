@@ -4,6 +4,12 @@ from __future__ import annotations
 import sqlite3, re, shutil, sys
 import numpy as np
 import dateparser
+import subprocess
+import json
+import re
+import time
+import subprocess
+import tqdm
 
 from datetime import datetime, timedelta
 from dateutil import parser as dateparser
@@ -43,6 +49,8 @@ from base.self_improve.code_indexer import CodeIndexer
 from base.self_improve.proposal_engine import ProposalEngine
 from base.self_improve.pr_manager import PRManager
 from config.config import settings
+from base.self_improve.diagnostic_engine import DiagnosticEngine
+# from base.self_improve.diagnostic_engine import benchmark_action
 
 
 
@@ -73,6 +81,28 @@ You are proactive: propose next steps, clarify uncertainties briefly,
 and learn useful details about the user over time without being nosy.
 Tone target: confident, attentive, emotionally intelligent; a little dry humor is fine.
 If you need info you don’t have, ask one short, precise question.
+"""
+
+DIAGNOSTIC_SYS_PROMPT = """You are Ultron's internal diagnostic engine.
+Analyze the given repository files for:
+- Syntax errors
+- Import errors or unused imports
+- Runtime bugs or misused APIs
+- Inefficient or redundant code
+- Readability / maintainability issues
+
+Respond ONLY in this JSON schema:
+{
+  "summary": "...",
+  "issues": [
+    {"path": "relative/path.py", "line": 42, "issue": "description", "suggestion": "how to fix"},
+    ...
+  ],
+  "recommendations": [
+    "general optimization 1",
+    "general optimization 2"
+  ]
+}
 """
 
 class ConsoleNotifier:
@@ -194,8 +224,6 @@ class Orchestrator:
         
         logger.info("Orchestrator initialized")
 
-        
-        
     # ------------------------------------------------------------
     # Action dispatch with usage logging + lightweight enrichment
     # ------------------------------------------------------------
@@ -206,6 +234,22 @@ class Orchestrator:
         logger.warning(f"No dispatcher implemented for {action}")
         return None
 
+    def benchmark_action(self, label: str, func, *args, **kwargs):
+        """Measure latency for any action (ms)."""
+
+        start = time.perf_counter()
+        result = func(*args, **kwargs)
+        elapsed = (time.perf_counter() - start) * 1000
+        logger.info(f"[benchmark] {label} took {elapsed:.1f} ms")
+        try:
+            func(*args, **kwargs)
+            ok = True
+            msg = None
+        except Exception as e:
+            ok = False
+            msg = str(e)
+        latency = (time.perf_counter() - start) * 1000.0
+        return result, elapsed
 
     def _run_action(self, user_text: str, intent: str, action: str, params: dict) -> Any:
         """
@@ -255,32 +299,46 @@ class Orchestrator:
     # ----------------------------------------
     # Low-confidence confirmation, feedback IO
     # ----------------------------------------
-    def ask_confirmation_if_unsure(self, suggestion: str, confidence: float, usage_id: int | None = None) -> Optional[dict]:
-        """
-        If we’re not confident, return a UX prompt payload the caller can surface.
-        """
-        if confidence < 0.6:
-            q = f"I can {suggestion}. Did I get that right?"
-            return {"ask_user": q, "usage_id": usage_id}
-        return None
+    
+    # def ask_confirmation_if_unsure(self, suggestion: str, confidence: float, usage_id: int | None = None) -> Optional[dict]:
+    #     """
+    #     If we’re not confident, return a UX prompt payload the caller can surface.
+    #     """
+    #     if confidence < 0.6:
+    #         q = f"I can {suggestion}. Did I get that right?"
+    #         return {"ask_user": q, "usage_id": usage_id}
+    #     return None
 
-    def record_user_feedback(self, usage_id: int, text: str) -> None:
-        """
-        Very light sentiment → feedback mapping. Safe even if Feedback is unavailable.
-        """
-        if not self.feedback:
-            return
+    # def record_user_feedback(self, usage_id: int, text: str) -> None:
+    #     """
+    #     Very light sentiment → feedback mapping. Safe even if Feedback is unavailable.
+    #     """
+    #     if not self.feedback:
+    #         return
+    #     try:
+    #         s = quick_polarity(text)
+    #         kind = "confirm" if s > 0.2 else "dislike" if s < -0.2 else "note"
+    #         self.feedback.record(usage_id, kind, text)
+    #         # If you wire ToneAdapter.update(reward), you could add:
+    #         # pid = self.policy_by_usage_id.get(usage_id)
+    #         # if pid and self.tone_adapter:
+    #         #     reward = 1.0 if kind == "confirm" else -1.0 if kind == "dislike" else 0.0
+    #         #     self.tone_adapter.update(pid, reward)
+    #     except Exception:
+    #         logger.exception("record_user_feedback failed")
+
+    def _validate_changes(self) -> List[str]:
+        issues = []
         try:
-            s = quick_polarity(text)
-            kind = "confirm" if s > 0.2 else "dislike" if s < -0.2 else "note"
-            self.feedback.record(usage_id, kind, text)
-            # If you wire ToneAdapter.update(reward), you could add:
-            # pid = self.policy_by_usage_id.get(usage_id)
-            # if pid and self.tone_adapter:
-            #     reward = 1.0 if kind == "confirm" else -1.0 if kind == "dislike" else 0.0
-            #     self.tone_adapter.update(pid, reward)
-        except Exception:
-            logger.exception("record_user_feedback failed")
+            subprocess.run(["black", "--check", "."], check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            issues.append("⚠️ Black formatting issues detected")
+
+        try:
+            subprocess.run(["pytest", "-q"], check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            issues.append("⚠️ Some tests failed")
+        return issues
 
     def propose_code_change(self, instruction: str) -> str:
         """
@@ -296,11 +354,16 @@ class Orchestrator:
         # 3) Apply locally (bounded by allowlist & size limits inside ProposalEngine)
         results = self.proposal_engine.apply_proposal(proposal)
 
-        # Any failures?
         failed = [r for r in results if not r[1]]
         if failed:
             lines = [f"- {c.path}: {msg}" for (c, ok, msg) in failed]
             return "Some changes could not be applied:\n" + "\n".join(lines)
+
+        # 3.5) Validate changes before committing
+        issues = self._validate_changes()
+        if issues:
+            # If you want: bail out instead of pushing PR
+            return "Validation failed:\n" + "\n".join(issues)
 
         # 4) Create branch, commit, push, open PR
         import re, time
@@ -314,9 +377,15 @@ class Orchestrator:
         try:
             pr_url = self.pr_manager.open_pr(
                 branch=branch,
-                title=proposal.title,
-                body=proposal.description or instruction
+                proposal=proposal
             )
+
+            # NEW: run tests after opening PR
+            test_report = self.pr_manager.run_tests_and_update_pr(branch)
+            if settings.proposal_notify_stdout:
+                self.notifier.notify("New Code Proposal", f"{proposal.title}\n{pr_url}\n\nTests:\n{test_report}")
+
+
         except Exception as e:
             return f"Changes pushed to {branch}, but PR creation failed: {e}"
 
@@ -335,7 +404,372 @@ class Orchestrator:
             pass
 
         return f"Proposal opened: {pr_url}"
+    
+    def benchmark_action(self, label: str, func, *args, **kwargs):
+        start = time.perf_counter()
+        try:
+            func(*args, **kwargs)
+            ok = True
+            msg = None
+        except Exception as e:
+            ok = False
+            msg = str(e)
+        latency = (time.perf_counter() - start) * 1000.0
+        return {"label": label, "latency_ms": latency, "ok": ok, "msg": msg}
 
+    def run_diagnostic(self, auto_fix: bool = False, verbose: bool = False) -> str:
+        """
+        Run a self-diagnostic scan on the repo with progress bar and conversational reporting.
+        """
+        structured = {"issues": []}
+        steps = [
+            "Running performance benchmarks",
+            "Static code scan",
+            "Indexing repository",
+            "LLM-assisted scan",
+            "Merging results",
+        ]
+
+        print("\nUltron: Beginning self-diagnostic.\n")
+
+        # Progress bar (tqdm) across main stages
+        with tqdm(total=len(steps), bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]") as pbar:
+            
+            # --- 1. Performance benchmarks ---
+            benchmarks = []
+            try:
+                benchmarks.append(self.benchmark_action("Memory Search", self.store.keyword_search, "test"))
+                benchmarks.append(self.benchmark_action("Embedding Encode", self.embedder.encode, ["benchmark string"]))
+                benchmarks.append(self.benchmark_action("Brain Response", self.brain.ask_brain, "ping", system_prompt="diag"))
+            except Exception as e:
+                logger.error(f"Benchmarking failed: {e}")
+            pbar.set_description(steps[0])
+            pbar.update(1)
+
+            # Lag detection
+            laggy = any(b["latency_ms"] > 300 for b in benchmarks)
+            if laggy:
+                structured["issues"].append({
+                    "file": "performance",
+                    "summary": "High latency detected",
+                    "suggestion": "Optimize embedding, DB retrieval, or caching."
+                })
+
+            # --- 2. Static scan ---
+            engine = DiagnosticEngine(repo_root=str(self.repo_root))
+            _, scan_struct = engine.scan()
+            structured["issues"].extend(scan_struct.get("issues", []))
+            pbar.set_description(steps[1])
+            pbar.update(1)
+
+            # --- 3. Index repository ---
+            index = self.code_indexer.scan()
+            index_md = self.code_indexer.to_markdown(index)
+            pbar.set_description(steps[2])
+            pbar.update(1)
+
+            # --- 4. LLM scan ---
+            user_prompt = f"""Run a full self-diagnostic scan.\n\nRepository index:\n{index_md}"""
+            raw = self.brain.ask_brain(user_prompt, system_prompt=DIAGNOSTIC_SYS_PROMPT)
+            try:
+                if raw.startswith("```"):
+                    raw = re.sub(r"^```[a-zA-Z]*\n", "", raw).rstrip("`").strip()
+                report = json.loads(raw)
+            except Exception as e:
+                logger.error(f"Diagnostic parse error: {e} | Raw: {raw[:200]}")
+                report = {"summary": "LLM parse failed", "issues": []}
+            structured["issues"].extend(report.get("issues", []))
+            pbar.set_description(steps[3])
+            pbar.update(1)
+
+            # --- 5. Merge & log ---
+            issues = structured.get("issues", [])
+            log_payload = {"issues": issues, "fixable": bool(issues)}
+            logger.info(f"[diagnostic] structured={log_payload}")
+            if hasattr(self.store, "add_event"):
+                self.store.add_event(content=f"[diagnostic] {log_payload}", importance=0.0, type_="diagnostic")
+            pbar.set_description(steps[4])
+            pbar.update(1)
+
+        # Conversational reporting
+        if not issues and not laggy:
+            return "Diagnostic complete. Everything looks clean — no glaring issues."
+
+        if laggy:
+            lag_summary = "; ".join(f"{b['label']} {b['latency_ms']:.1f}ms" for b in benchmarks)
+            return f"Diagnostic complete. ⚠️ I noticed lag: {lag_summary}. I’ve already proposed an optimization."
+
+        preview = "; ".join(f"{i['file']}: {i.get('summary', i.get('issue','?'))}" for i in issues[:3])
+        more = "" if len(issues) <= 3 else f" …and {len(issues)-3} more."
+        return f"Diagnostic complete. I found: {preview}{more}"
+
+    # def run_diagnostic(self, auto_fix: bool = False, verbose: bool = False) -> str:
+    #     """
+    #     Run a self-diagnostic scan on the repo.
+    #     - Conversational summary to user.
+    #     - Logs structured results for later.
+    #     - If auto_fix=True, automatically propose a PR with corrections.
+    #     """
+    #     # ex.
+    #     # _, latency = self.benchmark_action("retriever.search", self.retriever.search, "hello", 3)
+    #     # benchmarks = [{"label": "retriever.search", "latency_ms": latency}]
+
+
+    #     # --- Performance benchmarks ---
+    #     benchmarks = []
+    #     try:
+    #         benchmarks.append(self.benchmark_action("Memory Search", self.store.keyword_search, "test"))
+    #         benchmarks.append(self.benchmark_action("Embedding Encode", self.embedder.encode, ["benchmark string"]))
+    #         benchmarks.append(self.benchmark_action("Brain Response", self.brain.ask_brain, "ping", system_prompt="diag"))
+    #     except Exception as e:
+    #         logger.error(f"Benchmarking failed: {e}")
+
+
+    #     # Laggy detection (simple thresholds)
+    #     laggy = any(b["latency_ms"] > 300 for b in benchmarks)  # 300ms threshold
+    #     if laggy:
+    #         structured.setdefault("issues", []).append({
+    #             "file": "performance",
+    #             "summary": "High latency detected",
+    #             "suggestion": "Optimize embedding, DB retrieval, or caching."
+    #         })
+
+    #         # Auto-trigger self-optimization proposal
+    #         try:
+    #             logger.info("Lag detected — initiating optimization proposal")
+    #             pr_msg = self.propose_code_change("optimize performance")
+    #             # Add the PR link to structured results
+    #             structured.setdefault("recommendations", []).append(pr_msg)
+    #         except Exception as e:
+    #             logger.error(f"Failed to auto-propose optimization: {e}")
+
+            
+            
+    #     # 1. Local static scan
+    #     engine = DiagnosticEngine(repo_root=str(self.repo_root))
+    #     _, structured = engine.scan()
+
+    #     # 2. LLM-assisted scan for higher-level issues
+    #     index = self.code_indexer.scan()
+    #     index_md = self.code_indexer.to_markdown(index)
+
+    #     user_prompt = f"""Run a full self-diagnostic scan.
+
+    # Repository index:
+    # {index_md}
+    # """
+    #     raw = self.brain.ask_brain(user_prompt, system_prompt=DIAGNOSTIC_SYS_PROMPT)
+
+    #     # Defensive JSON parse of LLM report
+    #     report = {}
+    #     try:
+    #         if raw.startswith("```"):
+    #             raw = re.sub(r"^```[a-zA-Z]*\n", "", raw).rstrip("`").strip()
+    #         report = json.loads(raw)
+    #     except Exception as e:
+    #         logger.error(f"Diagnostic parse error: {e} | Raw: {raw[:200]}")
+    #         report = {"summary": "LLM parse failed", "issues": []}
+
+    #     # Merge: local + LLM issues
+    #     issues = structured.get("issues", []) + report.get("issues", [])
+
+    #     # Log structured results
+    #     try:
+    #         log_payload = {"issues": issues, "fixable": bool(issues)}
+    #         logger.info(f"[diagnostic] structured={log_payload}")
+    #         if hasattr(self.store, "add_event"):
+    #             self.store.add_event(
+    #                 content=f"[diagnostic] {log_payload}",
+    #                 importance=0.0,
+    #                 type_="diagnostic",
+    #             )
+    #     except Exception:
+    #         logger.debug("Failed to persist diagnostic results")
+
+    #     # === Auto-fix path ===
+    #     if auto_fix and issues:
+    #         try:
+    #             proposal = self.proposal_engine.propose(
+    #                 "Fix issues discovered during diagnostic scan", index_md=index_md
+    #             )
+    #             results = self.proposal_engine.apply_proposal(proposal)
+
+    #             failed = [f"- {c.path}: {msg}" for (c, ok, msg) in results if not ok]
+
+    #             suffix = f"diagnostic-{int(time.time())}"
+    #             branch = self.pr_manager.prepare_branch(suffix)
+    #             self.pr_manager.commit_and_push(branch, proposal.title)
+    #             pr_url = self.pr_manager.open_pr(branch, proposal=proposal, extra_tests=self.run_tests_in_branch(branch))
+
+    #             if failed:
+    #                 return f"Diagnostic complete. Applied fixes, but some failed:\n" + "\n".join(failed) + \
+    #                     f"\n✅ Auto-fix PR opened → {pr_url}"
+    #             else:
+    #                 return f"Diagnostic complete. All fixes applied successfully.\n✅ Auto-fix PR opened → {pr_url}"
+
+    #         except Exception as e:
+    #             return f"Diagnostic complete. Auto-fix failed: {e}"
+
+    #     # === Conversational / Report path ===
+    #     if not issues and not laggy:
+    #         return "Diagnostic complete. Everything looks clean — no glaring issues to address."
+
+    #     if laggy:
+    #         lag_summary = "; ".join(f"{b['label']} took {b['latency_ms']} ms" for b in benchmarks)
+    #         return f"Diagnostic complete. I noticed lag: {lag_summary}. I’ve already opened a proposal to optimize performance."
+
+    #     if verbose:
+    #         summary = report.get("summary", "No summary provided.")
+    #         recs = report.get("recommendations", [])
+    #         out = [f"### Diagnostic Report\n\n**Summary:** {summary}\n"]
+    #         out.append("\n**Issues Found:**\n")
+    #         for i in issues:
+    #             out.append(f"- {i.get('file','?')}: {i.get('summary', i.get('issue','?'))}")
+    #         if recs:
+    #             out.append("\n**Recommendations:**\n")
+    #             out.extend(f"- {r}" for r in recs)
+    #         return "\n".join(out)
+
+    #     # Short conversational mode
+    #     proposal = self.proposal_engine.propose(
+    #         "Fix issues discovered during diagnostic scan", index_md=index_md
+    #     )
+    #     preview = "; ".join(f"{i['file']}: {i.get('summary', i.get('issue','?'))}" for i in issues[:3])
+    #     more = "" if len(issues) <= 3 else f" …and {len(issues)-3} more."
+    #     suffix = f"diagnostic-{int(time.time())}"
+    #     branch = self.pr_manager.prepare_branch(suffix)
+    #     self.pr_manager.commit_and_push(branch, proposal.title)
+    #     pr_url = self.pr_manager.open_pr(branch, proposal=proposal)
+
+    #     # --- NEW: Run pytest suite and capture results ---
+    #     try:
+    #         result = subprocess.run(
+    #             ["pytest", "--maxfail=5", "--disable-warnings", "-q"],
+    #             cwd=str(self.repo_root),
+    #             capture_output=True,
+    #             text=True,
+    #             timeout=120
+    #         )
+    #         passed = result.returncode == 0
+    #         test_summary = result.stdout.strip().splitlines()[-10:]  # last lines only
+    #         test_report = "\n".join(test_summary)
+    #     except Exception as e:
+    #         passed = False
+    #         test_report = f"⚠️ Failed to run tests: {e}"
+
+    #     # --- Update PR body with test results ---
+    #     self.pr_manager.update_pr_body(
+    #         branch=branch,
+    #         extra=f"\n\n## Test Results\n{'✅ All tests passed' if passed else '❌ Some tests failed'}\n```\n{test_report}\n```"
+    #     )
+        
+    #     output.append(f"\n\n✅ Auto-fix applied → [PR Link]({pr_url})")
+        
+    #     return f"Diagnostic complete. I noticed a few things: {preview}.{more}"
+
+    def speak_progress(percent: int, desc: str):
+        """Speak progress aloud if TTS is available."""
+        try:
+            if percent % 20 == 0:  # only speak at milestones
+                msg = f"Diagnostic {percent}% complete. {desc}."
+                if hasattr(self, "voice") and callable(getattr(self.voice, "say", None)):
+                    self.voice.say(msg)
+                else:
+                    print(f"[Ultron Voice] {msg}")
+        except Exception as e:
+            logger.debug(f"TTS progress update failed: {e}")
+
+        print("\nUltron: Beginning self-diagnostic.\n")
+        if hasattr(self, "voice"):
+            self.voice.say("Beginning self-diagnostic.")
+
+        with tqdm(total=len(steps), bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]") as pbar:
+            for idx, step in enumerate(steps, start=1):
+                # --- STEP EXECUTION ---
+                if step == "Running performance benchmarks":
+                    benchmarks = []
+                    try:
+                        benchmarks.append(self.benchmark_action("Memory Search", self.store.keyword_search, "test"))
+                        benchmarks.append(self.benchmark_action("Embedding Encode", self.embedder.encode, ["benchmark string"]))
+                        benchmarks.append(self.benchmark_action("Brain Response", self.brain.ask_brain, "ping", system_prompt="diag"))
+                    except Exception as e:
+                        logger.error(f"Benchmarking failed: {e}")
+                    laggy = any(b["latency_ms"] > 300 for b in benchmarks)
+                    if laggy:
+                        structured["issues"].append({
+                            "file": "performance",
+                            "summary": "High latency detected",
+                            "suggestion": "Optimize embedding, DB retrieval, or caching."
+                        })
+
+                elif step == "Static code scan":
+                    engine = DiagnosticEngine(repo_root=str(self.repo_root))
+                    _, scan_struct = engine.scan()
+                    structured["issues"].extend(scan_struct.get("issues", []))
+
+                elif step == "Indexing repository":
+                    index = self.code_indexer.scan()
+                    index_md = self.code_indexer.to_markdown(index)
+
+                elif step == "LLM-assisted scan":
+                    user_prompt = f"""Run a full self-diagnostic scan.\n\nRepository index:\n{index_md}"""
+                    raw = self.brain.ask_brain(user_prompt, system_prompt=DIAGNOSTIC_SYS_PROMPT)
+                    try:
+                        if raw.startswith("```"):
+                            raw = re.sub(r"^```[a-zA-Z]*\n", "", raw).rstrip("`").strip()
+                        report = json.loads(raw)
+                    except Exception as e:
+                        logger.error(f"Diagnostic parse error: {e} | Raw: {raw[:200]}")
+                        report = {"summary": "LLM parse failed", "issues": []}
+                    structured["issues"].extend(report.get("issues", []))
+
+                elif step == "Merging results":
+                    issues = structured.get("issues", [])
+                    log_payload = {"issues": issues, "fixable": bool(issues)}
+                    logger.info(f"[diagnostic] structured={log_payload}")
+                    if hasattr(self.store, "add_event"):
+                        self.store.add_event(content=f"[diagnostic] {log_payload}", importance=0.0, type_="diagnostic")
+
+                # --- PROGRESS UPDATE ---
+                pbar.set_description(step)
+                pbar.update(1)
+                percent = int((idx / len(steps)) * 100)
+                speak_progress(percent, step)
+                time.sleep(0.3)  # pacing, so bar doesn't flash instantly
+
+        # === Conversational Reporting ===
+        issues = structured.get("issues", [])
+        if not issues and not laggy:
+            msg = "Diagnostic complete. Everything looks clean — no glaring issues."
+        elif laggy:
+            lag_summary = "; ".join(f"{b['label']} {b['latency_ms']:.1f}ms" for b in benchmarks)
+            msg = f"Diagnostic complete. ⚠️ I noticed lag: {lag_summary}. Optimization proposed."
+        else:
+            preview = "; ".join(f"{i['file']}: {i.get('summary', i.get('issue','?'))}" for i in issues[:3])
+            more = "" if len(issues) <= 3 else f" …and {len(issues)-3} more."
+            msg = f"Diagnostic complete. I found: {preview}{more}"
+
+        print(msg)
+        if hasattr(self, "voice"):
+            self.voice.say(msg)
+        return msg
+    
+
+    def run_tests_in_branch(self, branch: str) -> str:
+        """Run pytest inside the repo and return results as a string."""
+        try:
+            result = subprocess.run(
+                ["pytest", "--maxfail=5", "--disable-warnings", "-q"],
+                cwd=str(self.repo_root),
+                capture_output=True,
+                text=True,
+                timeout=300
+            )
+            output = result.stdout + "\n" + result.stderr
+            return f"Exit code {result.returncode}\n```\n{output}\n```"
+        except Exception as e:
+            return f"⚠️ Test run failed: {e}"
+        
     # -------------------------
     # Facts (semantic de-dupe)
     # -------------------------
@@ -432,7 +866,7 @@ class Orchestrator:
             cur = self.db.conn.execute("SELECT content FROM events ORDER BY id DESC LIMIT ?", (limit,))
             texts = [r[0] for r in cur.fetchall() if r and r[0]]
             if texts:
-                self.retriever.index(texts)
+                self.retriever.index_texts(texts)
         except Exception:
             logger.exception("ingest_bootstrap failed")
 
@@ -465,6 +899,42 @@ class Orchestrator:
         """
         Compose: persona + memories + KG; choose tone policy; ask Brain.
         """
+        lower = user_text.strip().lower()
+        
+        # --- Special commands ---
+        if lower.startswith("propose:"):
+            instruction = user_text.split(":", 1)[1].strip()
+            return self.propose_code_change(instruction)
+
+        # Laggy / slow triggers → auto diagnostic with autofix
+        if any(word in lower for word in ["laggy", "slow", "optimize", "sluggish"]):
+            return self.run_diagnostic(auto_fix=True)
+        
+        if any(word in lower for word in ["laggy", "slow", "optimize", "diagnose", "scan"]):
+            return self.run_diagnostic(auto_fix=True)
+
+        try:
+            # === Special command hooks ===
+            if lower.startswith("propose:"):
+                instruction = user_text.split(":", 1)[1].strip()
+                return self.propose_code_change(instruction)
+
+            if any(kw in lower for kw in ["diagnostic", "scan yourself", "self-check", "optimize"]):
+                auto = "auto" in lower or "fix" in lower
+                return self.run_diagnostic(auto_fix=auto)
+
+            # --- Run diagnostics ---
+            if "diagnostic" in lower or "scan" in lower:
+                auto = "fix" in lower or "auto" in lower  # e.g. "diagnostic scan and fix"
+                return self.run_diagnostic(auto_fix=auto)
+            
+        finally:
+            # --- Code proposals ---
+            if lower.startswith("propose:"):
+                instruction = user_text.split(":", 1)[1].strip()
+                return self.propose_code_change(instruction)
+
+
         try:
             # Persist raw text (if store supports it)
             try:

@@ -18,6 +18,7 @@ base/agents/orchestrator1.py
 orchestrator_feedback.patch
 apply_orchestrator_feedback.py
 base/agents/orchestrator.py.bak
+protect-main.sh
 
 # SQLite runtime files
 *.db

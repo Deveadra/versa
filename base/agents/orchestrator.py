@@ -10,6 +10,7 @@ import re
 import time
 import subprocess
 from tqdm import tqdm
+from tqdm import tqdm
 
 from datetime import datetime, timedelta
 from dateutil import parser as dateparser
@@ -50,6 +51,7 @@ from base.self_improve.proposal_engine import ProposalEngine
 from base.self_improve.pr_manager import PRManager
 from config.config import settings
 from base.self_improve.diagnostic_engine import DiagnosticEngine
+from base.voice.tts_elevenlabs import Voice
 from base.voice.tts_elevenlabs import Voice
 # from base.self_improve.diagnostic_engine import benchmark_action
 
@@ -122,6 +124,7 @@ class Orchestrator:
         # --- LLM & consolidation
         self.brain = Brain()
         self.notifier = ConsoleNotifier()
+        self.voice = Voice.get_instance()
         self.voice = Voice.get_instance()
         
         # --- DB / stores
@@ -253,6 +256,8 @@ class Orchestrator:
         latency = (time.perf_counter() - start) * 1000.0
         # return result, elapsed
         return {"label": label, "latency_ms": latency, "ok": ok, "msg": msg}        
+        # return result, elapsed
+        return {"label": label, "latency_ms": latency, "ok": ok, "msg": msg}        
 
     def _run_action(self, user_text: str, intent: str, action: str, params: dict) -> Any:
         """
@@ -348,6 +353,9 @@ class Orchestrator:
         Natural-language → code proposal → branch+commit+PR → notify user.
         """
         self.pr_manager.restore_original_branch()
+        
+        # 1) Build repository index (for LLM context)
+        self.pr_manager.restore_original_branch()
 
         # 1) Build repo index
         index = self.code_indexer.scan()
@@ -413,6 +421,10 @@ class Orchestrator:
     def run_diagnostic(self, auto_fix: bool = False, verbose: bool = False) -> str:
         """
         Run a self-diagnostic scan on the repo with progress bar and conversational reporting.
+        Run a self-diagnostic scan with:
+        - Progress bar in terminal
+        - Spoken progress milestones (20%, 40%, 60%, 80%, 100%)
+        - Conversational reporting at end
         Run a self-diagnostic scan with:
         - Progress bar in terminal
         - Spoken progress milestones (20%, 40%, 60%, 80%, 100%)
@@ -665,7 +677,16 @@ class Orchestrator:
     #     return f"Diagnostic complete. I noticed a few things: {preview}.{more}"
 
     def speak_progress(self, percent: int, desc: str):
+    def speak_progress(self, percent: int, desc: str):
         """Speak progress aloud if TTS is available."""
+        steps = [
+            "Running performance benchmarks",
+            "Static code scan",
+            "Indexing repository",
+            "LLM-assisted scan",
+            "Merging results",
+        ]
+        
         steps = [
             "Running performance benchmarks",
             "Static code scan",
@@ -739,6 +760,7 @@ class Orchestrator:
                 pbar.set_description(step)
                 pbar.update(1)
                 percent = int((idx / len(steps)) * 100)
+                self.speak_progress(percent, step)
                 self.speak_progress(percent, step)
                 time.sleep(0.3)  # pacing, so bar doesn't flash instantly
 
@@ -901,10 +923,20 @@ class Orchestrator:
     # High-level user flow with composer
     # ------------------------------------
     def handle_user(self, msg: str) -> str:
+    def handle_user(self, msg: str) -> str:
         """
         Compose: persona + memories + KG; choose tone policy; ask Brain.
         Also routes special commands like 'propose:' and diagnostics.
+        Also routes special commands like 'propose:' and diagnostics.
         """
+        try:
+            lower = msg.strip().lower()
+
+            # --- Fast intent routing (short-circuit if matched) ---
+            # --- Fast intent routing (short-circuit if matched) ---
+            if lower.startswith("propose:"):
+                instruction = msg.split(":", 1)[1].strip()
+                return self.propose_code_change(instruction)
         try:
             lower = msg.strip().lower()
 
@@ -917,40 +949,56 @@ class Orchestrator:
             if "propose" in lower:
                 # Try to extract what user wants improved
                 instruction = lower.replace("ultron", "").replace("propose", "").strip() or "Apply a small improvement"
+            if "propose" in lower:
+                # Try to extract what user wants improved
+                instruction = lower.replace("ultron", "").replace("propose", "").strip() or "Apply a small improvement"
                 return self.propose_code_change(instruction)
 
+            if any(k in lower for k in ("laggy", "slow", "optimize", "diagnose", "diagnostic", "scan")):
+                auto = any(k in lower for k in ("optimize", "auto", "autofix", "fix"))
             if any(k in lower for k in ("laggy", "slow", "optimize", "diagnose", "diagnostic", "scan")):
                 auto = any(k in lower for k in ("optimize", "auto", "autofix", "fix"))
                 return self.run_diagnostic(auto_fix=auto)
 
             # --- Persist raw text (best-effort) ---
+            # --- Persist raw text (best-effort) ---
             try:
                 if hasattr(self.store, "maybe_store_text"):
+                    self.store.maybe_store_text(msg)
                     self.store.maybe_store_text(msg)
             except Exception:
                 pass
 
             # --- KG ingestion (best-effort) ---
+            # --- KG ingestion (best-effort) ---
             try:
+                self.kg_integrator.ingest_event(msg)
                 self.kg_integrator.ingest_event(msg)
             except Exception:
                 logger.debug("KG ingest skipped.")
 
             # --- Retrieve memories ---
+            # --- Retrieve memories ---
             try:
+                memories = self.retriever.search(msg, k=5)
                 memories = self.retriever.search(msg, k=5)
             except Exception:
                 memories = []
 
             # --- KG context ---
             kg_context = self.query_kg_context(msg)
+            # --- KG context ---
+            kg_context = self.query_kg_context(msg)
 
             # --- Persona primer text ---
+            # --- Persona primer text ---
             try:
+                persona_text = self.primer.build(msg) if self.primer else ""
                 persona_text = self.primer.build(msg) if self.primer else ""
             except Exception:
                 persona_text = ""
 
+            # --- Tone policy (optional) ---
             # --- Tone policy (optional) ---
             policy_id = None
             try:
@@ -961,8 +1009,10 @@ class Orchestrator:
                 self.last_policy_id = None
 
             # --- Compose final prompt ---
+            # --- Compose final prompt ---
             prompt = compose_prompt(
                 system_prompt=SYSTEM_PROMPT,
+                user_text=msg,
                 user_text=msg,
                 profile_mgr=self.profile_mgr or ProfileManager(),
                 memory_store=self.store,
@@ -975,12 +1025,28 @@ class Orchestrator:
             )
 
             # --- Call Brain ---
+            # --- Call Brain ---
             try:
+                reply = self.brain.ask_brain(prompt, system_prompt=SYSTEM_PROMPT)
                 reply = self.brain.ask_brain(prompt, system_prompt=SYSTEM_PROMPT)
             except Exception:
                 logger.exception("Brain call failed")
                 reply = "Sorry — my reasoning module hit an error."
+                logger.exception("Brain call failed")
+                reply = "Sorry — my reasoning module hit an error."
 
+            # # --- Record policy assignment (best-effort) ---
+            # try:
+            #     if getattr(self, "last_usage_id", None) and policy_id:
+            #         uid = self.last_usage_id
+            #         self.policy_by_usage_id[uid] = policy_id
+            #         try:
+            #             write_policy_assignment(self.db, uid, policy_id)
+            #         except Exception:
+            #             logger.debug("Failed to persist policy_assignment")
+            # except Exception:
+            #     pass
+            # return reply or ""
             # # --- Record policy assignment (best-effort) ---
             # try:
             #     if getattr(self, "last_usage_id", None) and policy_id:
@@ -997,6 +1063,7 @@ class Orchestrator:
         except Exception:
             logger.exception("handle_user failed")
             return "Sorry — something went wrong while composing my reply."
+
 
 
 

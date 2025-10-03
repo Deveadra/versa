@@ -1,4 +1,5 @@
 # base/self_improve/proposal_engine.py
+# base/self_improve/proposal_engine.py
 from __future__ import annotations
 
 import datetime
@@ -9,8 +10,11 @@ import os
 
 from dataclasses import dataclass
 from datetime import datetime
+from datetime import datetime
 from difflib import get_close_matches
 from loguru import logger
+from pathlib import Path
+from typing import List, Dict, Optional, Tuple
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 
@@ -61,6 +65,8 @@ class ProposalEngine:
     def __init__(self, repo_root: str, brain: Optional[Brain] = None):
         self.root = Path(repo_root).resolve()
         self.brain = brain or Brain()
+        # self.pr_manager = PRManager(repo_root)
+        
         # self.pr_manager = PRManager(repo_root)
         
     def _read(self, relpath: str) -> str:
@@ -125,8 +131,11 @@ class ProposalEngine:
                 anchor = change.search_anchor or ""
                 if anchor not in old:
                     return False, f"Anchor not found in {change.path}"
+                    return False, f"Anchor not found in {change.path}"
 
                 new_content = old.replace(anchor, change.replacement, 1)
+                ok = self.safe_write(str(full), new_content)
+                return ok, "block replaced" if ok else "no changes applied"
                 ok = self.safe_write(str(full), new_content)
                 return ok, "block replaced" if ok else "no changes applied"
 
@@ -202,6 +211,12 @@ Respond with strictly the JSON schema described.
 
 
     def apply_proposal(self, proposal: Proposal) -> List[Tuple[ProposedChange, bool, str]]:
+        # Ensure branch isolation
+        time = datetime.now().strftime("%Y%m%d%H%M%S")
+        suffix = re.sub(r"[^a-z0-9_\-]+", "-", proposal.title.lower())[:40]
+        safe_suffix = suffix if isinstance(suffix, str) and suffix else f"proposal-{int(time.time())}"
+        branch = self.pr_manager.prepare_branch(safe_suffix) # type: ignore
+        
         applied = []
         total_bytes = 0
         for ch in proposal.changes[: settings.proposer_max_files_per_pr]:
@@ -219,6 +234,7 @@ Respond with strictly the JSON schema described.
                     self._generate_test_stub(ch.path, ch.replacement)
 
         return applied
+
 
 
     def _generate_test_stub(self, path: str, replacement: str) -> None:

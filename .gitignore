@@ -7,6 +7,11 @@ __pycache__/
 .vscode/
 pyrightconfig.json
 
+# Ignore runtime DB files
+ultron.db
+*.db-shm
+*.db-wal
+
 /.env/
 tests/
 base/agents/orchestrator1.py

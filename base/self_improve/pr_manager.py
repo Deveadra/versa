@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 from loguru import logger
 from pathlib import Path
-import os
+import os, sys
 import requests
 import subprocess
 
@@ -20,6 +20,7 @@ class PRManager:
         self.repo_slug = repo_slug or settings.github_repo
         self.token = token or settings.github_token
         self.client = GitClient(self.root, remote=settings.github_remote_name)
+        self.original_branch: Optional[str] = None
 
     def open_pr(self, branch: str, proposal: Proposal, extra_tests: str = "") -> str:
         
@@ -65,9 +66,21 @@ class PRManager:
 
     def prepare_branch(self, name_suffix: str) -> str:
         branch = settings.proposer_branch_prefix + name_suffix
+        # Remember where the user was
+        self.original_branch = self.client.current_branch()
+
+        branch = settings.proposer_branch_prefix + name_suffix
         self.client.fetch()
+
+        # Start from default branch
+        self.client.safe_switch(settings.github_default_branch)
+
+        # Create new branch
+        self.client.safe_switch(branch, create=True)
+        
         # Start from default branch
         self.client.checkout(settings.github_default_branch)
+        
         # Create from remote default baseline if exists
         self.client.checkout(branch, create=True)
         return branch
@@ -106,12 +119,19 @@ class PRManager:
 
         try:
             result = subprocess.run(
-                ["pytest", "--maxfail=5", "--disable-warnings", "-q"],
-                cwd=str(self.root),
+                [sys.executable, "-m", "pytest", "-q"],
                 capture_output=True,
-                text=True,
-                timeout=120
+                text=True
             )
+
+            # result = subprocess.run(
+            #     ["pytest", "--maxfail=5", "--disable-warnings", "-q"],
+            #     cwd=str(self.root),
+            #     capture_output=True,
+            #     text=True,
+            #     timeout=120
+            # )
+            
             passed = result.returncode == 0
             summary = result.stdout.strip().splitlines()[-10:]
             test_report = "\n".join(summary)
@@ -123,3 +143,12 @@ class PRManager:
 
         self.update_pr_body(branch, body_append)
         return test_report
+
+    def restore_original_branch(self):
+        """Switch back to the branch the user was on."""
+        if self.original_branch:
+            try:
+                self.client.safe_switch(self.original_branch)
+                logger.info(f"Restored user branch: {self.original_branch}")
+            except Exception as e:
+                logger.error(f"Failed to restore branch: {e}")

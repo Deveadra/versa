@@ -16,7 +16,7 @@ from base.voice.tts_elevenlabs import Voice
 # ---------- OpenAI client / model ----------
 _CLIENT = OpenAI(api_key=settings.openai_api_key)  # new SDK
 _MODEL = settings.openai_model or os.getenv("BRAIN_MODEL", "gpt-4o-mini")
-
+# complete = cast(OpenAI, _CLIENT).chat.completions.create
 
 def _check_vocal_cue(user_text: str) -> str | None:
     lowered = user_text.lower()

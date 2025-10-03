@@ -34,7 +34,7 @@ class DiagnosticEngine:
         structured = {"issues": issues, "fixable": bool(issues)}
         return "Scan complete", structured
 
-    def benchmark_action(label: str, func, *args, **kwargs) -> dict:
+    def benchmark_action(self,label: str, func, *args, **kwargs) -> dict:
       """Run func, measure latency and memory, return stats + output."""
       start = time.perf_counter()
       tracemalloc.start()

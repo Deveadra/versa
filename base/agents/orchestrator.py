@@ -9,7 +9,8 @@ import json
 import re
 import time
 import subprocess
-import tqdm
+from tqdm import tqdm
+from tqdm import tqdm
 
 from datetime import datetime, timedelta
 from dateutil import parser as dateparser
@@ -50,6 +51,8 @@ from base.self_improve.proposal_engine import ProposalEngine
 from base.self_improve.pr_manager import PRManager
 from config.config import settings
 from base.self_improve.diagnostic_engine import DiagnosticEngine
+from base.voice.tts_elevenlabs import Voice
+from base.voice.tts_elevenlabs import Voice
 # from base.self_improve.diagnostic_engine import benchmark_action
 
 
@@ -121,6 +124,8 @@ class Orchestrator:
         # --- LLM & consolidation
         self.brain = Brain()
         self.notifier = ConsoleNotifier()
+        self.voice = Voice.get_instance()
+        self.voice = Voice.get_instance()
         
         # --- DB / stores
         self.db: SQLiteConn = db or SQLiteConn(settings.db_path)
@@ -249,7 +254,10 @@ class Orchestrator:
             ok = False
             msg = str(e)
         latency = (time.perf_counter() - start) * 1000.0
-        return result, elapsed
+        # return result, elapsed
+        return {"label": label, "latency_ms": latency, "ok": ok, "msg": msg}        
+        # return result, elapsed
+        return {"label": label, "latency_ms": latency, "ok": ok, "msg": msg}        
 
     def _run_action(self, user_text: str, intent: str, action: str, params: dict) -> Any:
         """
@@ -344,82 +352,83 @@ class Orchestrator:
         """
         Natural-language → code proposal → branch+commit+PR → notify user.
         """
+        self.pr_manager.restore_original_branch()
+        
         # 1) Build repository index (for LLM context)
+        self.pr_manager.restore_original_branch()
+
+        # 1) Build repo index
         index = self.code_indexer.scan()
         index_md = self.code_indexer.to_markdown(index)
 
-        # 2) Ask the LLM to produce a proposal (title, description, changes)
+        # 2) Ask LLM for proposal
         proposal = self.proposal_engine.propose(instruction, index_md=index_md)
 
-        # 3) Apply locally (bounded by allowlist & size limits inside ProposalEngine)
-        results = self.proposal_engine.apply_proposal(proposal)
-
-        failed = [r for r in results if not r[1]]
-        if failed:
-            lines = [f"- {c.path}: {msg}" for (c, ok, msg) in failed]
-            return "Some changes could not be applied:\n" + "\n".join(lines)
-
-        # 3.5) Validate changes before committing
-        issues = self._validate_changes()
-        if issues:
-            # If you want: bail out instead of pushing PR
-            return "Validation failed:\n" + "\n".join(issues)
-
-        # 4) Create branch, commit, push, open PR
+        # 3) Prepare branch
         import re, time
-        suffix = re.sub(r"[^a-z0-9_\-]+", "-", proposal.title.lower())[:40] or f"change-{int(time.time())}"
+        suffix = re.sub(r"[^a-z0-9_\-]+", "-", proposal.title.lower())[:40]
+        suffix = suffix or f"proposal-{int(time.time())}"
         branch = self.pr_manager.prepare_branch(suffix)
+
+        # 4) Apply proposal
+        results = self.proposal_engine.apply_proposal(proposal)
+        failed = [f"- {c.path}: {msg}" for (c, ok, msg) in results if not ok]
+
+        # 4.5) Validation
+        issues = self._validate_changes()
+
+        # Collect diagnostics
+        failure_report = ""
+        if failed:
+            failure_report += "⚠️ Some changes could not be applied:\n" + "\n".join(failed) + "\n"
+        if issues:
+            failure_report += "⚠️ Validation issues:\n" + "\n".join(issues) + "\n"
+
+        # If everything failed, bail out before PR
+        if not results or (failed and not any(ok for (_, ok, _) in results)):
+            return "Proposal aborted — no changes could be safely applied."
+
+        # 5) Commit + push + PR
         try:
             self.pr_manager.commit_and_push(branch, proposal.title)
+
+            pr_title = proposal.title
+            if failed or issues:
+                pr_title = "[Partial] " + pr_title
+
+            pr_url = self.pr_manager.open_pr(branch=branch, proposal=proposal)
         except Exception as e:
-            return f"Failed to commit/push: {e}"
+            return f"Failed to commit/push PR: {e}"
 
-        try:
-            pr_url = self.pr_manager.open_pr(
-                branch=branch,
-                proposal=proposal
-            )
-
-            # NEW: run tests after opening PR
-            test_report = self.pr_manager.run_tests_and_update_pr(branch)
-            if settings.proposal_notify_stdout:
-                self.notifier.notify("New Code Proposal", f"{proposal.title}\n{pr_url}\n\nTests:\n{test_report}")
-
-
-        except Exception as e:
-            return f"Changes pushed to {branch}, but PR creation failed: {e}"
-
-        # 5) Notify (stdout + memory event)
+        # 6) Notify
+        report_text = failure_report or "✅ All changes applied successfully."
         if settings.proposal_notify_stdout:
-            self.notifier.notify("New Code Proposal", f"{proposal.title}\n{pr_url}")
+            self.notifier.notify("New Code Proposal", f"{pr_title}\n{pr_url}\n\n{report_text}")
 
         try:
             if hasattr(self.store, "add_event"):
                 self.store.add_event(
-                    content=f"[proposal] {proposal.title} → {pr_url}",
+                    content=f"[proposal] {pr_title} → {pr_url}\n{report_text}",
                     importance=0.0,
                     type_="proposal",
                 )
         except Exception:
             pass
 
-        return f"Proposal opened: {pr_url}"
-    
-    def benchmark_action(self, label: str, func, *args, **kwargs):
-        start = time.perf_counter()
-        try:
-            func(*args, **kwargs)
-            ok = True
-            msg = None
-        except Exception as e:
-            ok = False
-            msg = str(e)
-        latency = (time.perf_counter() - start) * 1000.0
-        return {"label": label, "latency_ms": latency, "ok": ok, "msg": msg}
+        return f"Proposal opened: {pr_url}\n\n{report_text}"
+
 
     def run_diagnostic(self, auto_fix: bool = False, verbose: bool = False) -> str:
         """
         Run a self-diagnostic scan on the repo with progress bar and conversational reporting.
+        Run a self-diagnostic scan with:
+        - Progress bar in terminal
+        - Spoken progress milestones (20%, 40%, 60%, 80%, 100%)
+        - Conversational reporting at end
+        Run a self-diagnostic scan with:
+        - Progress bar in terminal
+        - Spoken progress milestones (20%, 40%, 60%, 80%, 100%)
+        - Conversational reporting at end
         """
         structured = {"issues": []}
         steps = [
@@ -667,8 +676,25 @@ class Orchestrator:
         
     #     return f"Diagnostic complete. I noticed a few things: {preview}.{more}"
 
-    def speak_progress(percent: int, desc: str):
+    def speak_progress(self, percent: int, desc: str):
+    def speak_progress(self, percent: int, desc: str):
         """Speak progress aloud if TTS is available."""
+        steps = [
+            "Running performance benchmarks",
+            "Static code scan",
+            "Indexing repository",
+            "LLM-assisted scan",
+            "Merging results",
+        ]
+        
+        steps = [
+            "Running performance benchmarks",
+            "Static code scan",
+            "Indexing repository",
+            "LLM-assisted scan",
+            "Merging results",
+        ]
+        
         try:
             if percent % 20 == 0:  # only speak at milestones
                 msg = f"Diagnostic {percent}% complete. {desc}."
@@ -734,7 +760,8 @@ class Orchestrator:
                 pbar.set_description(step)
                 pbar.update(1)
                 percent = int((idx / len(steps)) * 100)
-                speak_progress(percent, step)
+                self.speak_progress(percent, step)
+                self.speak_progress(percent, step)
                 time.sleep(0.3)  # pacing, so bar doesn't flash instantly
 
         # === Conversational Reporting ===
@@ -895,76 +922,84 @@ class Orchestrator:
     # ------------------------------------
     # High-level user flow with composer
     # ------------------------------------
-    def handle_user(self, user_text: str) -> str:
+    def handle_user(self, msg: str) -> str:
+    def handle_user(self, msg: str) -> str:
         """
         Compose: persona + memories + KG; choose tone policy; ask Brain.
+        Also routes special commands like 'propose:' and diagnostics.
+        Also routes special commands like 'propose:' and diagnostics.
         """
-        lower = user_text.strip().lower()
-        
-        # --- Special commands ---
-        if lower.startswith("propose:"):
-            instruction = user_text.split(":", 1)[1].strip()
-            return self.propose_code_change(instruction)
-
-        # Laggy / slow triggers → auto diagnostic with autofix
-        if any(word in lower for word in ["laggy", "slow", "optimize", "sluggish"]):
-            return self.run_diagnostic(auto_fix=True)
-        
-        if any(word in lower for word in ["laggy", "slow", "optimize", "diagnose", "scan"]):
-            return self.run_diagnostic(auto_fix=True)
-
         try:
-            # === Special command hooks ===
+            lower = msg.strip().lower()
+
+            # --- Fast intent routing (short-circuit if matched) ---
+            # --- Fast intent routing (short-circuit if matched) ---
             if lower.startswith("propose:"):
-                instruction = user_text.split(":", 1)[1].strip()
+                instruction = msg.split(":", 1)[1].strip()
+                return self.propose_code_change(instruction)
+        try:
+            lower = msg.strip().lower()
+
+            # --- Fast intent routing (short-circuit if matched) ---
+            # --- Fast intent routing (short-circuit if matched) ---
+            if lower.startswith("propose:"):
+                instruction = msg.split(":", 1)[1].strip()
                 return self.propose_code_change(instruction)
 
-            if any(kw in lower for kw in ["diagnostic", "scan yourself", "self-check", "optimize"]):
-                auto = "auto" in lower or "fix" in lower
-                return self.run_diagnostic(auto_fix=auto)
-
-            # --- Run diagnostics ---
-            if "diagnostic" in lower or "scan" in lower:
-                auto = "fix" in lower or "auto" in lower  # e.g. "diagnostic scan and fix"
-                return self.run_diagnostic(auto_fix=auto)
-            
-        finally:
-            # --- Code proposals ---
-            if lower.startswith("propose:"):
-                instruction = user_text.split(":", 1)[1].strip()
+            if "propose" in lower:
+                # Try to extract what user wants improved
+                instruction = lower.replace("ultron", "").replace("propose", "").strip() or "Apply a small improvement"
+            if "propose" in lower:
+                # Try to extract what user wants improved
+                instruction = lower.replace("ultron", "").replace("propose", "").strip() or "Apply a small improvement"
                 return self.propose_code_change(instruction)
 
+            if any(k in lower for k in ("laggy", "slow", "optimize", "diagnose", "diagnostic", "scan")):
+                auto = any(k in lower for k in ("optimize", "auto", "autofix", "fix"))
+            if any(k in lower for k in ("laggy", "slow", "optimize", "diagnose", "diagnostic", "scan")):
+                auto = any(k in lower for k in ("optimize", "auto", "autofix", "fix"))
+                return self.run_diagnostic(auto_fix=auto)
 
-        try:
-            # Persist raw text (if store supports it)
+            # --- Persist raw text (best-effort) ---
+            # --- Persist raw text (best-effort) ---
             try:
                 if hasattr(self.store, "maybe_store_text"):
-                    self.store.maybe_store_text(user_text)
+                    self.store.maybe_store_text(msg)
+                    self.store.maybe_store_text(msg)
             except Exception:
                 pass
 
-            # KG ingestion of event
+            # --- KG ingestion (best-effort) ---
+            # --- KG ingestion (best-effort) ---
             try:
-                self.kg_integrator.ingest_event(user_text)
+                self.kg_integrator.ingest_event(msg)
+                self.kg_integrator.ingest_event(msg)
             except Exception:
                 logger.debug("KG ingest skipped.")
 
-            # Retrieve memories
+            # --- Retrieve memories ---
+            # --- Retrieve memories ---
             try:
-                memories = self.retriever.search(user_text, k=5)
+                memories = self.retriever.search(msg, k=5)
+                memories = self.retriever.search(msg, k=5)
             except Exception:
                 memories = []
 
-            # KG context
-            kg_context = self.query_kg_context(user_text)
+            # --- KG context ---
+            kg_context = self.query_kg_context(msg)
+            # --- KG context ---
+            kg_context = self.query_kg_context(msg)
 
-            # Persona primer text
+            # --- Persona primer text ---
+            # --- Persona primer text ---
             try:
-                persona_text = self.primer.build(user_text) if self.primer else ""
+                persona_text = self.primer.build(msg) if self.primer else ""
+                persona_text = self.primer.build(msg) if self.primer else ""
             except Exception:
                 persona_text = ""
 
-            # Tone policy (bandit, optional)
+            # --- Tone policy (optional) ---
+            # --- Tone policy (optional) ---
             policy_id = None
             try:
                 policy = self.tone_adapter.choose_policy() if self.tone_adapter else None
@@ -973,16 +1008,12 @@ class Orchestrator:
             except Exception:
                 self.last_policy_id = None
 
-            # Example inside your text loop or orchestrator.handle_user() pre-dispatch:
-            lower = user_text.strip().lower()
-            if lower.startswith("propose:"):
-                instruction = user_text.split(":", 1)[1].strip()
-                return self.propose_code_change(instruction)
-
-            # Compose final prompt
+            # --- Compose final prompt ---
+            # --- Compose final prompt ---
             prompt = compose_prompt(
                 system_prompt=SYSTEM_PROMPT,
-                user_text=user_text,
+                user_text=msg,
+                user_text=msg,
                 profile_mgr=self.profile_mgr or ProfileManager(),
                 memory_store=self.store,
                 habit_miner=self.miner or HabitMiner(self.db, self.store, self.store),
@@ -993,32 +1024,47 @@ class Orchestrator:
                 channel="text",
             )
 
-            # Call Brain
+            # --- Call Brain ---
+            # --- Call Brain ---
             try:
-                if hasattr(self.brain, "complete"):
-                    reply = self.brain.complete(SYSTEM_PROMPT, prompt)
-                else:
-                    reply = self.brain.ask_brain(prompt)
+                reply = self.brain.ask_brain(prompt, system_prompt=SYSTEM_PROMPT)
+                reply = self.brain.ask_brain(prompt, system_prompt=SYSTEM_PROMPT)
             except Exception:
-                reply = self.brain.ask_brain(prompt)
+                logger.exception("Brain call failed")
+                reply = "Sorry — my reasoning module hit an error."
+                logger.exception("Brain call failed")
+                reply = "Sorry — my reasoning module hit an error."
 
-            # Record policy assignment
-            try:
-                if getattr(self, "last_usage_id", None) and policy_id:
-                    uid = self.last_usage_id
-                    self.policy_by_usage_id[uid] = policy_id
-                    try:
-                        write_policy_assignment(self.db, uid, policy_id)
-                    except Exception:
-                        logger.debug("Failed to persist policy_assignment")
-            except Exception:
-                pass
-
-            return reply or ""
+            # # --- Record policy assignment (best-effort) ---
+            # try:
+            #     if getattr(self, "last_usage_id", None) and policy_id:
+            #         uid = self.last_usage_id
+            #         self.policy_by_usage_id[uid] = policy_id
+            #         try:
+            #             write_policy_assignment(self.db, uid, policy_id)
+            #         except Exception:
+            #             logger.debug("Failed to persist policy_assignment")
+            # except Exception:
+            #     pass
+            # return reply or ""
+            # # --- Record policy assignment (best-effort) ---
+            # try:
+            #     if getattr(self, "last_usage_id", None) and policy_id:
+            #         uid = self.last_usage_id
+            #         self.policy_by_usage_id[uid] = policy_id
+            #         try:
+            #             write_policy_assignment(self.db, uid, policy_id)
+            #         except Exception:
+            #             logger.debug("Failed to persist policy_assignment")
+            # except Exception:
+            #     pass
+            # return reply or ""
 
         except Exception:
             logger.exception("handle_user failed")
             return "Sorry — something went wrong while composing my reply."
+
+
 
 
     # -------------------------------------

@@ -18,6 +18,12 @@ base/agents/orchestrator1.py
 orchestrator_feedback.patch
 apply_orchestrator_feedback.py
 base/agents/orchestrator.py.bak
+
+# Ignore runtime DB files
+ultron.db
+*.db-shm
+*.db-wal
+
 protect-main.sh
 
 # SQLite runtime files

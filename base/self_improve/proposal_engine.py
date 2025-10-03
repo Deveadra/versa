@@ -18,6 +18,7 @@ from typing import List, Dict, Optional, Tuple
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 
+from base.self_improve.models import Proposal, ProposedChange
 from base.self_improve.code_indexer import CodeIndexer
 from base.llm.brain import Brain
 from config.config import settings
@@ -47,19 +48,6 @@ Rules:
 - Prefer 'replace_block' with a reliable 'search_anchor' snippet to find the place to change.
 - NEVER include secrets or tokens.
 """
-
-@dataclass
-class ProposedChange:
-    path: str
-    apply_mode: str           # "replace_block" or "full_file"
-    search_anchor: Optional[str]
-    replacement: str
-
-@dataclass
-class Proposal:
-    title: str
-    description: str
-    changes: List[ProposedChange]
 
 class ProposalEngine:
     def __init__(self, repo_root: str, brain: Optional[Brain] = None):
@@ -210,15 +198,16 @@ Respond with strictly the JSON schema described.
         )
 
 
+    # base/self_improve/proposal_engine.py
+
     def apply_proposal(self, proposal: Proposal) -> List[Tuple[ProposedChange, bool, str]]:
-        # Ensure branch isolation
-        time = datetime.now().strftime("%Y%m%d%H%M%S")
-        suffix = re.sub(r"[^a-z0-9_\-]+", "-", proposal.title.lower())[:40]
-        safe_suffix = suffix if isinstance(suffix, str) and suffix else f"proposal-{int(time.time())}"
-        branch = self.pr_manager.prepare_branch(safe_suffix) # type: ignore
-        
+        """
+        Apply proposed changes to the working tree. 
+        Git branching is handled by Orchestrator/PRManager.
+        """
         applied = []
         total_bytes = 0
+
         for ch in proposal.changes[: settings.proposer_max_files_per_pr]:
             total_bytes += len(ch.replacement.encode("utf-8"))
             if total_bytes > settings.proposer_max_patch_bytes:
@@ -234,6 +223,7 @@ Respond with strictly the JSON schema described.
                     self._generate_test_stub(ch.path, ch.replacement)
 
         return applied
+
 
 
 

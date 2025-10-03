@@ -9,8 +9,13 @@ pyrightconfig.json
 
 # Ignore runtime DB files
 ultron.db
-*.db-shm
+ultron.db-wal
+ultron.db-shm
+
+# SQLite runtime files
+*.db
 *.db-wal
+*.db-shm
 
 /.env/
 tests/
@@ -18,15 +23,4 @@ base/agents/orchestrator1.py
 orchestrator_feedback.patch
 apply_orchestrator_feedback.py
 base/agents/orchestrator.py.bak
-
-# Ignore runtime DB files
-ultron.db
-*.db-shm
-*.db-wal
-
 protect-main.sh
-
-# SQLite runtime files
-*.db
-*.db-shm
-*.db-wal

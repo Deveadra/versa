@@ -335,109 +335,125 @@ class Orchestrator:
     #     except Exception:
     #         logger.exception("record_user_feedback failed")
 
-    def _validate_changes(self) -> List[str]:
-        issues = []
-        try:
-            subprocess.run([sys.executable, "-m", "black", "--check", "."], check=True, capture_output=True)
-        except subprocess.CalledProcessError as e:
-            issues.append("⚠️ Black formatting issues detected")
+    def _validate_changes(self) -> list[str]:
+        """
+        Run lightweight validation. Never raises; returns list of issue strings.
+        """
+        import sys, subprocess
+        issues: list[str] = []
+        repo = str(self.repo_root)
 
+        # Black (optional)
         try:
-            subprocess.run([sys.executable, "-m", "pytest", "-q"], check=True, capture_output=True)
-        except subprocess.CalledProcessError as e:
-            issues.append("⚠️ Some tests failed")
+            r = subprocess.run([sys.executable, "-m", "black", "--check", "."],
+                            cwd=repo, capture_output=True, text=True)
+            if r.returncode != 0:
+                tail = "\n".join((r.stdout or r.stderr or "").splitlines()[-15:])
+                issues.append(f"Black format check failed:\n{tail}")
+        except Exception as e:
+            issues.append(f"Black not run: {e}")
+
+        # Ruff (optional)
+        try:
+            r = subprocess.run([sys.executable, "-m", "ruff", "."],
+                            cwd=repo, capture_output=True, text=True)
+            if r.returncode != 0:
+                tail = "\n".join((r.stdout or r.stderr or "").splitlines()[-15:])
+                issues.append(f"Ruff reported issues:\n{tail}")
+        except Exception as e:
+            issues.append(f"Ruff not run: {e}")
+
+        # Pytest (optional, we do a smoke run; PR body will contain fuller output)
+        try:
+            r = subprocess.run([sys.executable, "-m", "pytest", "-q"],
+                            cwd=repo, capture_output=True, text=True)
+            if r.returncode != 0:
+                tail = "\n".join((r.stdout or r.stderr or "").splitlines()[-15:])
+                issues.append(f"Tests failing:\n{tail}")
+        except Exception as e:
+            issues.append(f"Tests not run: {e}")
+
         return issues
+
 
     def propose_code_change(self, instruction: str) -> str:
         """
         Natural-language → code proposal → branch+commit+PR → notify user.
         """
+        # 1) Build repo index (for LLM context)
+        index = self.code_indexer.scan()
+        index_md = self.code_indexer.to_markdown(index)
 
-        # --- 0) Reset to a clean state before anything else
-        try:
-            self.pr_manager.restore_original_branch()
-        except Exception as e:
-            logger.warning(f"Could not restore original branch: {e}")
+        # 2) Ask LLM for proposal
+        proposal = self.proposal_engine.propose(instruction, index_md=index_md)
 
-        # --- 1) Build repository index for LLM context
-        try:
-            index = self.code_indexer.scan()
-            index_md = self.code_indexer.to_markdown(index)
-        except Exception as e:
-            return f"Failed to scan repository: {e}"
-
-        # --- 2) Ask LLM for proposal
-        try:
-            proposal = self.proposal_engine.propose(instruction, index_md=index_md)
-        except Exception as e:
-            return f"Proposal generation failed: {e}"
-
-        # --- 3) Prepare branch for proposal
+        # 3) Prepare branch
         import re, time
         suffix = re.sub(r"[^a-z0-9_\-]+", "-", proposal.title.lower())[:40]
-        if not suffix:
-            suffix = f"proposal-{int(time.time())}"
+        suffix = suffix or f"proposal-{int(time.time())}"
 
         try:
             branch = self.pr_manager.prepare_branch(suffix)
         except Exception as e:
             return f"Failed to prepare proposal branch: {e}"
 
-        # --- 4) Apply proposal changes
-        results = []
-        failed = []
+        pr_url = ""
         try:
+            # 4) Apply proposal on that branch
             results = self.proposal_engine.apply_proposal(proposal)
             failed = [f"- {c.path}: {msg}" for (c, ok, msg) in results if not ok]
-        except Exception as e:
-            return f"Error while applying proposed changes: {e}"
 
-        # --- 4.5) Validate the result
-        issues = []
-        try:
+            # 4.5) Validation (non-fatal, we include in PR)
             issues = self._validate_changes()
-        except Exception as e:
-            logger.warning(f"Validation step failed: {e}")
 
-        # Collect diagnostics
-        failure_report = ""
-        if failed:
-            failure_report += "⚠️ Some changes could not be applied:\n" + "\n".join(failed) + "\n"
-        if issues:
-            failure_report += "⚠️ Validation issues:\n" + "\n".join(issues) + "\n"
+            # Bail if absolutely nothing applied
+            if not results or (failed and not any(ok for (_, ok, _) in results)):
+                return "Proposal aborted — no changes could be safely applied."
 
-        # Abort if nothing valid was applied
-        if not results or (failed and not any(ok for (_, ok, _) in results)):
-            return "Proposal aborted — no changes could be safely applied."
+            # 5) Commit + push
+            try:
+                self.pr_manager.commit_and_push(branch, proposal.title)
+            except Exception as e:
+                return f"Failed to commit/push PR: {e}"
 
-        # --- 5) Commit, push, open PR
-        try:
-            self.pr_manager.commit_and_push(branch, proposal.title)
-
-            pr_title = proposal.title
-            if failed or issues:
-                pr_title = "[Partial] " + pr_title
-
+            # 6) Open PR
+            pr_title = proposal.title if not (failed or issues) else "[Partial] " + proposal.title
             pr_url = self.pr_manager.open_pr(branch=branch, proposal=proposal)
-        except Exception as e:
-            return f"Failed to commit/push PR: {e}"
 
-        # --- 6) Notify (stdout + event store)
-        report_text = failure_report or "✅ All changes applied successfully."
-        if settings.proposal_notify_stdout:
-            self.notifier.notify("New Code Proposal", f"{pr_title}\n{pr_url}\n\n{report_text}")
+            # 7) Run tests and append to PR body (best-effort)
+            try:
+                self.pr_manager.run_tests_and_update_pr(branch)
+            except Exception:
+                pass
 
-        try:
-            if hasattr(self.store, "add_event"):
-                self.store.add_event(
-                    content=f"[proposal] {pr_title} → {pr_url}\n{report_text}",
-                    importance=0.0,
-                    type_="proposal",
-                )
-        except Exception as e:
-            logger.warning(f"Failed to record proposal event: {e}")
+            # 8) Notify
+            report = []
+            if failed:
+                report.append("⚠️ Some changes could not be applied:\n" + "\n".join(failed))
+            if issues:
+                report.append("⚠️ Validation issues:\n" + "\n".join(issues))
+            report_text = "\n\n".join(report) if report else "✅ All changes applied successfully."
 
-        return f"Proposal opened: {pr_url}\n\n{report_text}"
+            if settings.proposal_notify_stdout:
+                self.notifier.notify("New Code Proposal", f"{pr_title}\n{pr_url}\n\n{report_text}")
+
+            try:
+                if hasattr(self.store, "add_event"):
+                    self.store.add_event(
+                        content=f"[proposal] {pr_title} → {pr_url}\n{report_text}",
+                        importance=0.0,
+                        type_="proposal",
+                    )
+            except Exception:
+                pass
+
+            return f"Proposal opened: {pr_url}\n\n{report_text}"
+        finally:
+            # 9) Always get you back to where you were
+            try:
+                self.pr_manager.restore_original_branch()
+            except Exception:
+                pass
 
 
 

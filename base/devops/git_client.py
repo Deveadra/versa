@@ -1,96 +1,113 @@
+# base/devops/git_client.py
 from __future__ import annotations
-from typing import Optional, List, Union
+from typing import Optional, List, Sequence, Union
 import subprocess
 from pathlib import Path
 from loguru import logger
 
-
 class GitError(RuntimeError):
     pass
 
-
 class GitClient:
     """
-    Small wrapper around git via subprocess to avoid forcing GitPython.
+    Small wrapper around git via subprocess to avoid GitPython dependency.
     Assumes `git` is installed and repo already initialized with a remote.
     """
 
-    def __init__(self, repo_root: str | Path, remote: str = "origin"):
+    def __init__(self, repo_root: Union[str, Path], remote: str = "origin"):
         self.root = Path(repo_root).resolve()
         self.remote = remote
 
-    def _run(self, args: Union[str, List[str]], check: bool = True, allow_warnings: bool = False) -> str:
+    def _run(self, args: Sequence[str] | str, check: bool = True) -> str:
+        # Normalize args -> flat list[str]
         if isinstance(args, str):
             args = args.split()
         else:
-            args = [str(a) for a in args]
+            flat: list[str] = []
+            for a in args:
+                if isinstance(a, (list, tuple)):
+                    flat.extend(map(str, a))
+                else:
+                    flat.append(str(a))
+            args = flat
 
-        logger.debug(f"[git] {' '.join(args)}")
+        # Strip accidental leading "git" because we prepend it below
+        if args and args[0].lower() == "git":
+            args = args[1:]
 
-        result = subprocess.run(
-            ["git"] + args,
+        cmd = ["git"] + list(args)
+        logger.debug(f"[git] {' '.join(cmd)}")
+
+        res = subprocess.run(
+            cmd,
             cwd=self.root,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True
         )
-
-        if result.returncode != 0:
-            if allow_warnings and "warning:" in result.stderr.lower():
-                logger.warning(f"Non-fatal git warning: {result.stderr.strip()}")
-            elif check:
-                raise GitError(result.stderr.strip() or "Unknown git error")
-
-        return result.stdout.strip()
-
+        out = res.stdout.strip()
+        if check and res.returncode != 0:
+            err = res.stderr.strip()
+            raise GitError(err or out or "Unknown git error")
+        return out
 
     def current_branch(self) -> str:
-        """Return the currently checked-out branch name."""
         return self._run(["rev-parse", "--abbrev-ref", "HEAD"])
 
     def has_uncommitted_changes(self) -> bool:
-        """Check if the working directory has uncommitted or untracked changes."""
-        return bool(self._run(["status", "--porcelain"]))
+        return bool(self._run(["status", "--porcelain"], check=False).strip())
 
-    def safe_switch(self, target_branch: str, create: bool = False):
-        """
-        Safely switch branches, stashing and restoring changes if needed.
-        """
-        dirty = self.has_uncommitted_changes()
-        if dirty:
-            logger.info("Uncommitted changes detected — stashing")
-            self._run(["stash", "push", "-u", "-m", "ultron-autosave"])
+    def stash_push(self, message: str = "ultron-autosave") -> None:
+        try:
+            self._run(["stash", "push", "-u", "-m", message])
+        except GitError as e:
+            logger.warning(f"Stash failed (continuing): {e}")
 
-        self.checkout(target_branch, create=create)
-
-        if dirty:
-            try:
-                logger.info("Uncommitted changes detected — stashing")
-                self._run(["stash", "push", "-u", "-m", "ultron-autosave"], allow_warnings=True)
-            except Exception as e:
-                logger.error(f"Failed to apply stashed changes: {e}")
-
-    def ensure_user(self, name: str, email: str) -> None:
-        self._run(["config", "user.name", name])
-        self._run(["config", "user.email", email])
+    def stash_pop(self) -> None:
+        try:
+            self._run(["stash", "pop"])
+        except GitError as e:
+            # Not fatal — conflicts could occur; caller decides next steps.
+            logger.warning(f"Stash pop failed (continuing): {e}")
 
     def fetch(self) -> None:
         self._run(["fetch", self.remote, "--prune"])
 
     def checkout(self, branch: str, create: bool = False, start_point: Optional[str] = None) -> None:
-        if create:
-            if start_point:
-                self._run(["checkout", "-b", branch, f"{self.remote}/{start_point}"])
+        try:
+            if create:
+                if start_point:
+                    self._run(["checkout", "-b", branch, f"{self.remote}/{start_point}"])
+                else:
+                    self._run(["checkout", "-b", branch])
             else:
-                self._run(["checkout", "-b", branch])
-        else:
-            self._run(["checkout", branch])
+                self._run(["checkout", branch])
+        except GitError as e:
+            msg = str(e)
+            if "already exists" in msg or "already on" in msg:
+                # Reuse the branch if already there
+                self._run(["checkout", branch], check=False)
+            else:
+                raise
+
+    def safe_switch(self, target_branch: str, create: bool = False, start_point: Optional[str] = None) -> None:
+        dirty = self.has_uncommitted_changes()
+        if dirty:
+            logger.info("Uncommitted changes detected — stashing")
+            self.stash_push()
+
+        try:
+            self.checkout(target_branch, create=create, start_point=start_point)
+        finally:
+            if dirty:
+                logger.info("Restoring stashed changes")
+                self.stash_pop()
 
     def add_all(self, paths: Optional[List[str]] = None) -> None:
         if not paths:
             self._run(["add", "-A"])
         else:
-            self._run(["add"] + paths)
+            self._run(["add", *paths])
 
     def commit(self, message: str) -> None:
         try:
@@ -107,4 +124,4 @@ class GitClient:
             self._run(["push", self.remote, branch])
 
     def has_changes(self) -> bool:
-        return bool(self._run(["status", "--porcelain"]))
+        return self.has_uncommitted_changes()

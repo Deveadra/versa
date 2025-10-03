@@ -27,6 +27,7 @@ class MemoryStore:
         self.conn.row_factory = sqlite3.Row
         self._fts_enabled = False
         self._ensure_schema()
+        self.init_db()
         self._subscribers = []
 
     # ---------- schema ----------
@@ -242,10 +243,10 @@ class MemoryStore:
 
     # ---------- Legacy helpers for backward compatibility ----------
 
-    def _connect_for_compat() -> sqlite3.Connection:
+    def _connect_for_compat(self) -> sqlite3.Connection:
         return sqlite3.connect(settings.db_path or str(DB_PATH), check_same_thread=False)
 
-    def init_db() -> None:
+    def init_db(self) -> None:
         with _connect_for_compat() as conn:
             MemoryStore(conn)
 

@@ -1,4 +1,5 @@
 # base/self_improve/models.py
+from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional
 

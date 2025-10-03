@@ -1,11 +1,9 @@
-
+# base/self_improve/pr_manager.py
 from __future__ import annotations
 from typing import Optional
 from loguru import logger
 from pathlib import Path
-import os, sys
-import requests
-import subprocess
+import os, sys, subprocess, requests
 
 from base.self_improve.models import Proposal
 from base.devops.git_client import GitClient, GitError
@@ -22,22 +20,67 @@ class PRManager:
         self.client = GitClient(self.root, remote=settings.github_remote_name)
         self.original_branch: Optional[str] = None
 
-    def open_pr(self, branch: str, proposal: Proposal, extra_tests: str = "") -> str:
-        
+    def prepare_branch(self, name_suffix: str) -> str:
+        """
+        Prepare or reuse a proposal branch.
+        - Remember original branch
+        - Fetch + sync default branch
+        - Create new branch off default (or reuse if exists)
+        - Return branch name
+        """
+        base = settings.github_default_branch
+        branch = f"{settings.proposer_branch_prefix}{name_suffix}"
 
+        # Remember where the user was
+        try:
+            self.original_branch = self.client.current_branch()
+        except Exception:
+            self.original_branch = base
+
+        # If already on desired branch, reuse it
+        if self.original_branch == branch:
+            logger.info(f"Already on {branch}, reusing it")
+            return branch
+
+        # Sync default branch
+        self.client.fetch()
+        self.client.safe_switch(base)
+
+        # Try to create branch from base; otherwise reuse
+        try:
+            self.client.checkout(branch, create=True, start_point=base)
+            logger.info(f"Created new branch {branch} from {base}")
+        except GitError as e:
+            if "already exists" in str(e):
+                logger.info(f"Reusing existing branch {branch}")
+                self.client.checkout(branch)
+            else:
+                raise
+
+        return branch
+
+    def commit_and_push(self, branch: str, title: str) -> None:
+        self.client.ensure_user(settings.github_bot_name, settings.github_bot_email)
+        self.client.add_all()
+        if not self.client.has_changes():
+            raise GitError("No changes to commit")
+        self.client.commit(title)
+        self.client.push(branch)
+
+    def open_pr(self, branch: str, proposal: Proposal, extra_tests: str = "") -> str:
         title = proposal.title
         body = f"""## Summary
-    {proposal.description}
+{proposal.description}
 
-    ## Implementation Details
-    {chr(10).join(f"- {ch.path} ({ch.apply_mode})" for ch in proposal.changes)}
+## Implementation Details
+{chr(10).join(f"- {ch.path} ({ch.apply_mode})" for ch in proposal.changes)}
 
-    ## Why This Matters
-    This change was proposed by Ultron to address: *"{title}"*
+## Why This Matters
+This change was proposed by Ultron to address: *"{title}"*
 
-    ## Tests / Validation
-    {extra_tests or "- ⚠️ No tests were run"}
-    """
+## Tests / Validation
+{extra_tests or "- ⚠️ No tests were run"}
+"""
 
         url = f"https://api.github.com/repos/{settings.github_repo}/pulls"
         headers = {"Authorization": f"token {settings.github_token}"}
@@ -56,39 +99,7 @@ class PRManager:
             return ""
         return resp.json().get("html_url", "")
 
-    def commit_and_push(self, branch: str, title: str) -> None:
-        self.client.ensure_user(settings.github_bot_name, settings.github_bot_email)
-        self.client.add_all()
-        if not self.client.has_changes():
-            raise GitError("No changes to commit")
-        self.client.commit(title)
-        self.client.push(branch)
-
-    def prepare_branch(self, name_suffix: str) -> str:
-        branch = settings.proposer_branch_prefix + name_suffix
-        # Remember where the user was
-        self.original_branch = self.client.current_branch()
-
-        branch = settings.proposer_branch_prefix + name_suffix
-        self.client.fetch()
-
-        # Start from default branch
-        self.client.safe_switch(settings.github_default_branch)
-
-        # Create new branch
-        self.client.safe_switch(branch, create=True)
-        
-        # Start from default branch
-        self.client.checkout(settings.github_default_branch)
-        
-        # Create from remote default baseline if exists
-        self.client.checkout(branch, create=True)
-        return branch
-    
     def update_pr_body(self, branch: str, extra: str) -> None:
-        """
-        Append extra info (like test results) to the PR body.
-        """
         url = f"https://api.github.com/repos/{settings.github_repo}/pulls"
         headers = {"Authorization": f"token {settings.github_token}"}
         resp = requests.get(url, headers=headers)
@@ -102,45 +113,33 @@ class PRManager:
             return
 
         pr_number = pr["number"]
-        new_body = pr["body"] + "\n" + extra
+        new_body = (pr.get("body") or "") + "\n" + extra
         update_url = f"{url}/{pr_number}"
-        resp2 = requests.patch(
-            update_url,
-            headers=headers,
-            json={"body": new_body},
-        )
+        resp2 = requests.patch(update_url, headers=headers, json={"body": new_body})
         if resp2.status_code not in (200, 201):
             logger.error(f"Failed to update PR body: {resp2.text}")
-            
+
     def run_tests_and_update_pr(self, branch: str) -> str:
         """
         Run pytest after opening a PR and update its body with results.
+        Does not crash if pytest is missing.
         """
-
         try:
             result = subprocess.run(
                 [sys.executable, "-m", "pytest", "-q"],
+                cwd=str(self.root),
                 capture_output=True,
                 text=True
             )
-
-            # result = subprocess.run(
-            #     ["pytest", "--maxfail=5", "--disable-warnings", "-q"],
-            #     cwd=str(self.root),
-            #     capture_output=True,
-            #     text=True,
-            #     timeout=120
-            # )
-            
             passed = result.returncode == 0
-            summary = result.stdout.strip().splitlines()[-10:]
-            test_report = "\n".join(summary)
+            tail = "\n".join((result.stdout or "").splitlines()[-15:])
+            test_report = tail or (result.stderr or "").strip()
         except Exception as e:
             passed = False
             test_report = f"⚠️ Failed to run tests: {e}"
 
-        body_append = f"\n\n## Test Results\n{'✅ All tests passed' if passed else '❌ Some tests failed'}\n```\n{test_report}\n```"
-
+        stamp = "✅ All tests passed" if passed else "❌ Some tests failed"
+        body_append = f"\n\n## Test Results\n{stamp}\n```\n{test_report}\n```"
         self.update_pr_body(branch, body_append)
         return test_report
 

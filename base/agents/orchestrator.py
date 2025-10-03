@@ -338,12 +338,12 @@ class Orchestrator:
     def _validate_changes(self) -> List[str]:
         issues = []
         try:
-            subprocess.run(["black", "--check", "."], check=True, capture_output=True)
+            subprocess.run([sys.executable, "-m", "black", "--check", "."], check=True, capture_output=True)
         except subprocess.CalledProcessError as e:
             issues.append("⚠️ Black formatting issues detected")
 
         try:
-            subprocess.run(["pytest", "-q"], check=True, capture_output=True)
+            subprocess.run([sys.executable, "-m", "pytest", "-q"], check=True, capture_output=True)
         except subprocess.CalledProcessError as e:
             issues.append("⚠️ Some tests failed")
         return issues
@@ -352,8 +352,7 @@ class Orchestrator:
         """
         Natural-language → code proposal → branch+commit+PR → notify user.
         """
-        self.pr_manager.restore_original_branch()
-        
+
         # 1) Build repository index (for LLM context)
         self.pr_manager.restore_original_branch()
 
@@ -675,18 +674,9 @@ class Orchestrator:
     #     output.append(f"\n\n✅ Auto-fix applied → [PR Link]({pr_url})")
         
     #     return f"Diagnostic complete. I noticed a few things: {preview}.{more}"
-
-    def speak_progress(self, percent: int, desc: str):
+    
     def speak_progress(self, percent: int, desc: str):
         """Speak progress aloud if TTS is available."""
-        steps = [
-            "Running performance benchmarks",
-            "Static code scan",
-            "Indexing repository",
-            "LLM-assisted scan",
-            "Merging results",
-        ]
-        
         steps = [
             "Running performance benchmarks",
             "Static code scan",
@@ -923,7 +913,6 @@ class Orchestrator:
     # High-level user flow with composer
     # ------------------------------------
     def handle_user(self, msg: str) -> str:
-    def handle_user(self, msg: str) -> str:
         """
         Compose: persona + memories + KG; choose tone policy; ask Brain.
         Also routes special commands like 'propose:' and diagnostics.
@@ -931,16 +920,6 @@ class Orchestrator:
         """
         try:
             lower = msg.strip().lower()
-
-            # --- Fast intent routing (short-circuit if matched) ---
-            # --- Fast intent routing (short-circuit if matched) ---
-            if lower.startswith("propose:"):
-                instruction = msg.split(":", 1)[1].strip()
-                return self.propose_code_change(instruction)
-        try:
-            lower = msg.strip().lower()
-
-            # --- Fast intent routing (short-circuit if matched) ---
             # --- Fast intent routing (short-circuit if matched) ---
             if lower.startswith("propose:"):
                 instruction = msg.split(":", 1)[1].strip()
@@ -949,51 +928,36 @@ class Orchestrator:
             if "propose" in lower:
                 # Try to extract what user wants improved
                 instruction = lower.replace("ultron", "").replace("propose", "").strip() or "Apply a small improvement"
-            if "propose" in lower:
-                # Try to extract what user wants improved
-                instruction = lower.replace("ultron", "").replace("propose", "").strip() or "Apply a small improvement"
                 return self.propose_code_change(instruction)
 
-            if any(k in lower for k in ("laggy", "slow", "optimize", "diagnose", "diagnostic", "scan")):
-                auto = any(k in lower for k in ("optimize", "auto", "autofix", "fix"))
             if any(k in lower for k in ("laggy", "slow", "optimize", "diagnose", "diagnostic", "scan")):
                 auto = any(k in lower for k in ("optimize", "auto", "autofix", "fix"))
                 return self.run_diagnostic(auto_fix=auto)
 
             # --- Persist raw text (best-effort) ---
-            # --- Persist raw text (best-effort) ---
             try:
                 if hasattr(self.store, "maybe_store_text"):
-                    self.store.maybe_store_text(msg)
                     self.store.maybe_store_text(msg)
             except Exception:
                 pass
 
             # --- KG ingestion (best-effort) ---
-            # --- KG ingestion (best-effort) ---
             try:
-                self.kg_integrator.ingest_event(msg)
                 self.kg_integrator.ingest_event(msg)
             except Exception:
                 logger.debug("KG ingest skipped.")
 
             # --- Retrieve memories ---
-            # --- Retrieve memories ---
             try:
-                memories = self.retriever.search(msg, k=5)
                 memories = self.retriever.search(msg, k=5)
             except Exception:
                 memories = []
 
             # --- KG context ---
             kg_context = self.query_kg_context(msg)
-            # --- KG context ---
-            kg_context = self.query_kg_context(msg)
 
             # --- Persona primer text ---
-            # --- Persona primer text ---
             try:
-                persona_text = self.primer.build(msg) if self.primer else ""
                 persona_text = self.primer.build(msg) if self.primer else ""
             except Exception:
                 persona_text = ""
@@ -1013,7 +977,6 @@ class Orchestrator:
             prompt = compose_prompt(
                 system_prompt=SYSTEM_PROMPT,
                 user_text=msg,
-                user_text=msg,
                 profile_mgr=self.profile_mgr or ProfileManager(),
                 memory_store=self.store,
                 habit_miner=self.miner or HabitMiner(self.db, self.store, self.store),
@@ -1025,13 +988,9 @@ class Orchestrator:
             )
 
             # --- Call Brain ---
-            # --- Call Brain ---
             try:
                 reply = self.brain.ask_brain(prompt, system_prompt=SYSTEM_PROMPT)
-                reply = self.brain.ask_brain(prompt, system_prompt=SYSTEM_PROMPT)
             except Exception:
-                logger.exception("Brain call failed")
-                reply = "Sorry — my reasoning module hit an error."
                 logger.exception("Brain call failed")
                 reply = "Sorry — my reasoning module hit an error."
 

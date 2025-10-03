@@ -348,70 +348,66 @@ class Orchestrator:
         Natural-language → code proposal → branch+commit+PR → notify user.
         """
         self.pr_manager.restore_original_branch()
-        
-        # 1) Build repository index (for LLM context)
+
+        # 1) Build repo index
         index = self.code_indexer.scan()
         index_md = self.code_indexer.to_markdown(index)
 
-        # 2) Ask the LLM to produce a proposal (title, description, changes)
+        # 2) Ask LLM for proposal
         proposal = self.proposal_engine.propose(instruction, index_md=index_md)
 
-        # 3) Apply locally (bounded by allowlist & size limits inside ProposalEngine)
-        results = self.proposal_engine.apply_proposal(proposal)
+        # 3) Prepare branch
+        import re, time
+        suffix = re.sub(r"[^a-z0-9_\-]+", "-", proposal.title.lower())[:40]
+        suffix = suffix or f"proposal-{int(time.time())}"
+        branch = self.pr_manager.prepare_branch(suffix)
 
-        failed = [r for r in results if not r[1]]
-        if failed:
-            lines = [f"- {c.path}: {msg}" for (c, ok, msg) in failed]
-            return "Some changes could not be applied:\n" + "\n".join(lines)
-        
-        applied = [r for r in results if r[1]]
-        
-        # Collect failure notes
+        # 4) Apply proposal
+        results = self.proposal_engine.apply_proposal(proposal)
+        failed = [f"- {c.path}: {msg}" for (c, ok, msg) in results if not ok]
+
+        # 4.5) Validation
+        issues = self._validate_changes()
+
+        # Collect diagnostics
         failure_report = ""
         if failed:
-            lines = [f"- {c.path}: {msg}" for (c, ok, msg) in failed]
-            failure_report = "⚠️ Some changes could not be applied:\n" + "\n".join(lines)
-
-        # 3.5) Validation step
-        issues = self._validate_changes()
+            failure_report += "⚠️ Some changes could not be applied:\n" + "\n".join(failed) + "\n"
         if issues:
-            failure_report += "\n⚠️ Validation issues:\n" + "\n".join(issues)
+            failure_report += "⚠️ Validation issues:\n" + "\n".join(issues) + "\n"
 
+        # If everything failed, bail out before PR
+        if not results or (failed and not any(ok for (_, ok, _) in results)):
+            return "Proposal aborted — no changes could be safely applied."
 
-        # 4) Create branch, commit, push, open PR
-        suffix = re.sub(r"[^a-z0-9_\-]+", "-", proposal.title.lower())[:40] or f"change-{int(time.time())}"
-        branch = self.pr_manager.prepare_branch(suffix)
+        # 5) Commit + push + PR
         try:
             self.pr_manager.commit_and_push(branch, proposal.title)
-        except Exception as e:
-            return f"Failed to commit/push: {e}"
 
-        try:
-            # Prefix title if there were failures
             pr_title = proposal.title
             if failed or issues:
                 pr_title = "[Partial] " + pr_title
 
-            pr_body = (proposal.description or instruction) + "\n\n" + failure_report
             pr_url = self.pr_manager.open_pr(branch=branch, proposal=proposal)
         except Exception as e:
-            return f"Changes pushed to {branch}, but PR creation failed: {e}"
+            return f"Failed to commit/push PR: {e}"
 
-        # 5) Notify (stdout + memory event)
+        # 6) Notify
+        report_text = failure_report or "✅ All changes applied successfully."
         if settings.proposal_notify_stdout:
-            self.notifier.notify("New Code Proposal", f"{proposal.title}\n{pr_url}\n\n{failure_report}")
+            self.notifier.notify("New Code Proposal", f"{pr_title}\n{pr_url}\n\n{report_text}")
 
         try:
             if hasattr(self.store, "add_event"):
                 self.store.add_event(
-                    content=f"[proposal] {proposal.title} → {pr_url}\n{failure_report}",
+                    content=f"[proposal] {pr_title} → {pr_url}\n{report_text}",
                     importance=0.0,
                     type_="proposal",
                 )
         except Exception:
             pass
 
-        return f"Proposal opened: {pr_url}\n\n{failure_report or '✅ All changes applied successfully.'}"
+        return f"Proposal opened: {pr_url}\n\n{report_text}"
 
 
     def run_diagnostic(self, auto_fix: bool = False, verbose: bool = False) -> str:

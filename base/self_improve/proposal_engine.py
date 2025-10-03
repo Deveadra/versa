@@ -5,6 +5,7 @@ import datetime
 import difflib
 import tempfile, shutil, difflib
 import re
+import os
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -69,11 +70,14 @@ class ProposalEngine:
         """
         Safely write new content to file.
         - Writes to a temp file first
-        - Diffs against existing
-        - Replaces original only if safe
+        - Diffs against existing (if file exists)
+        - Replaces original only if content changed
         """
         try:
-            original = open(path, encoding="utf-8").read()
+            original = ""
+            if Path(path).exists():
+                original = Path(path).read_text(encoding="utf-8", errors="ignore")
+
             diff = list(difflib.unified_diff(
                 original.splitlines(),
                 new_content.splitlines(),
@@ -83,10 +87,13 @@ class ProposalEngine:
             if not diff:
                 return False  # no changes
 
-            # write to temp
+            # write to temp file
             fd, tmp_path = tempfile.mkstemp()
-            with open(fd, "w", encoding="utf-8") as tmpf:
+            with os.fdopen(fd, "w", encoding="utf-8") as tmpf:
                 tmpf.write(new_content)
+
+            # ensure parent directories exist
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
 
             # replace original safely
             shutil.move(tmp_path, path)
@@ -95,23 +102,25 @@ class ProposalEngine:
         except Exception as e:
             logger.error(f"Safe write failed for {path}: {e}")
             return False
-    
-    # def _write(self, relpath: str, content: str) -> None:
-    #     p = self.root / relpath
-    #     p.parent.mkdir(parents=True, exist_ok=True)
-    #     p.write_text(content, encoding="utf-8")
+
+
+    # base/self_improve/proposal_engine.py
 
     def _apply_change(self, change: ProposedChange) -> Tuple[bool, str]:
         try:
             full = self.root / change.path
-            if not full.exists() and change.apply_mode != "full_file":
-                return False, f"Target {change.path} not found for anchor replace"
 
             if change.apply_mode == "full_file":
-                ok = self.safe_write(str(full), change.replacement)
-                return ok, "full_file replaced" if ok else "no changes applied"
+                # Don’t overwrite originals → create .ultron version
+                new_path = full.with_suffix(full.suffix + ".ultron")
+                new_path.parent.mkdir(parents=True, exist_ok=True)
+                new_path.write_text(change.replacement, encoding="utf-8")
+                return True, f"full_file rewrite → {new_path.name} created"
 
             elif change.apply_mode == "replace_block":
+                if not full.exists():
+                    return False, f"Target {change.path} not found for anchor replace"
+
                 old = self._read(change.path)
                 anchor = change.search_anchor or ""
                 if anchor not in old:
@@ -126,6 +135,8 @@ class ProposalEngine:
 
         except Exception as e:
             return False, f"apply error: {e}"
+
+
 
     def propose(self, instruction: str, index_md: str) -> Proposal:
         sys_prompt = PROPOSAL_SYS_PROMPT.format(
@@ -191,12 +202,6 @@ Respond with strictly the JSON schema described.
 
 
     def apply_proposal(self, proposal: Proposal) -> List[Tuple[ProposedChange, bool, str]]:
-        # Ensure branch isolation
-        time = datetime.now().strftime("%Y%m%d%H%M%S")
-        suffix = re.sub(r"[^a-z0-9_\-]+", "-", proposal.title.lower())[:40]
-        safe_suffix = suffix if isinstance(suffix, str) and suffix else f"proposal-{int(time.time())}"
-        branch = self.pr_manager.prepare_branch(safe_suffix) # type: ignore
-        
         applied = []
         total_bytes = 0
         for ch in proposal.changes[: settings.proposer_max_files_per_pr]:
@@ -214,7 +219,6 @@ Respond with strictly the JSON schema described.
                     self._generate_test_stub(ch.path, ch.replacement)
 
         return applied
-
 
 
     def _generate_test_stub(self, path: str, replacement: str) -> None:

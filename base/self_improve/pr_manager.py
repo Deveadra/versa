@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 from loguru import logger
 from pathlib import Path
-import os
+import os, sys
 import requests
 import subprocess
 
@@ -119,12 +119,19 @@ class PRManager:
 
         try:
             result = subprocess.run(
-                ["pytest", "--maxfail=5", "--disable-warnings", "-q"],
-                cwd=str(self.root),
+                [sys.executable, "-m", "pytest", "-q"],
                 capture_output=True,
-                text=True,
-                timeout=120
+                text=True
             )
+
+            # result = subprocess.run(
+            #     ["pytest", "--maxfail=5", "--disable-warnings", "-q"],
+            #     cwd=str(self.root),
+            #     capture_output=True,
+            #     text=True,
+            #     timeout=120
+            # )
+            
             passed = result.returncode == 0
             summary = result.stdout.strip().splitlines()[-10:]
             test_report = "\n".join(summary)

@@ -7,7 +7,7 @@ import os, sys
 import requests
 import subprocess
 
-from base.self_improve.proposal_engine import Proposal
+from base.self_improve.models import Proposal
 from base.devops.git_client import GitClient, GitError
 from config.config import settings
 

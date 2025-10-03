@@ -18,6 +18,7 @@ from typing import List, Dict, Optional, Tuple
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 
+from base.self_improve.models import Proposal, ProposedChange
 from base.self_improve.code_indexer import CodeIndexer
 from base.llm.brain import Brain
 from config.config import settings
@@ -47,19 +48,6 @@ Rules:
 - Prefer 'replace_block' with a reliable 'search_anchor' snippet to find the place to change.
 - NEVER include secrets or tokens.
 """
-
-@dataclass
-class ProposedChange:
-    path: str
-    apply_mode: str           # "replace_block" or "full_file"
-    search_anchor: Optional[str]
-    replacement: str
-
-@dataclass
-class Proposal:
-    title: str
-    description: str
-    changes: List[ProposedChange]
 
 class ProposalEngine:
     def __init__(self, repo_root: str, brain: Optional[Brain] = None):

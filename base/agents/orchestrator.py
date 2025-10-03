@@ -353,28 +353,51 @@ class Orchestrator:
         Natural-language → code proposal → branch+commit+PR → notify user.
         """
 
-        # 1) Build repository index (for LLM context)
-        self.pr_manager.restore_original_branch()
+        # --- 0) Reset to a clean state before anything else
+        try:
+            self.pr_manager.restore_original_branch()
+        except Exception as e:
+            logger.warning(f"Could not restore original branch: {e}")
 
-        # 1) Build repo index
-        index = self.code_indexer.scan()
-        index_md = self.code_indexer.to_markdown(index)
+        # --- 1) Build repository index for LLM context
+        try:
+            index = self.code_indexer.scan()
+            index_md = self.code_indexer.to_markdown(index)
+        except Exception as e:
+            return f"Failed to scan repository: {e}"
 
-        # 2) Ask LLM for proposal
-        proposal = self.proposal_engine.propose(instruction, index_md=index_md)
+        # --- 2) Ask LLM for proposal
+        try:
+            proposal = self.proposal_engine.propose(instruction, index_md=index_md)
+        except Exception as e:
+            return f"Proposal generation failed: {e}"
 
-        # 3) Prepare branch
+        # --- 3) Prepare branch for proposal
         import re, time
         suffix = re.sub(r"[^a-z0-9_\-]+", "-", proposal.title.lower())[:40]
-        suffix = suffix or f"proposal-{int(time.time())}"
-        branch = self.pr_manager.prepare_branch(suffix)
+        if not suffix:
+            suffix = f"proposal-{int(time.time())}"
 
-        # 4) Apply proposal
-        results = self.proposal_engine.apply_proposal(proposal)
-        failed = [f"- {c.path}: {msg}" for (c, ok, msg) in results if not ok]
+        try:
+            branch = self.pr_manager.prepare_branch(suffix)
+        except Exception as e:
+            return f"Failed to prepare proposal branch: {e}"
 
-        # 4.5) Validation
-        issues = self._validate_changes()
+        # --- 4) Apply proposal changes
+        results = []
+        failed = []
+        try:
+            results = self.proposal_engine.apply_proposal(proposal)
+            failed = [f"- {c.path}: {msg}" for (c, ok, msg) in results if not ok]
+        except Exception as e:
+            return f"Error while applying proposed changes: {e}"
+
+        # --- 4.5) Validate the result
+        issues = []
+        try:
+            issues = self._validate_changes()
+        except Exception as e:
+            logger.warning(f"Validation step failed: {e}")
 
         # Collect diagnostics
         failure_report = ""
@@ -383,11 +406,11 @@ class Orchestrator:
         if issues:
             failure_report += "⚠️ Validation issues:\n" + "\n".join(issues) + "\n"
 
-        # If everything failed, bail out before PR
+        # Abort if nothing valid was applied
         if not results or (failed and not any(ok for (_, ok, _) in results)):
             return "Proposal aborted — no changes could be safely applied."
 
-        # 5) Commit + push + PR
+        # --- 5) Commit, push, open PR
         try:
             self.pr_manager.commit_and_push(branch, proposal.title)
 
@@ -399,7 +422,7 @@ class Orchestrator:
         except Exception as e:
             return f"Failed to commit/push PR: {e}"
 
-        # 6) Notify
+        # --- 6) Notify (stdout + event store)
         report_text = failure_report or "✅ All changes applied successfully."
         if settings.proposal_notify_stdout:
             self.notifier.notify("New Code Proposal", f"{pr_title}\n{pr_url}\n\n{report_text}")
@@ -411,10 +434,11 @@ class Orchestrator:
                     importance=0.0,
                     type_="proposal",
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to record proposal event: {e}")
 
         return f"Proposal opened: {pr_url}\n\n{report_text}"
+
 
 
     def run_diagnostic(self, auto_fix: bool = False, verbose: bool = False) -> str:

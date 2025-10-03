@@ -48,6 +48,13 @@ google-auth-httplib2
 google-auth-oauthlib
 google-api-python-client
 
+# Testing
+black
+ruff
+pytest
+pytest-asyncio
+
+
 # # Optional future
 # weaviate-client==3.26.0
 # pymilvus==2.4.4

@@ -18,6 +18,21 @@ class GitClient:
         self.root = Path(repo_root).resolve()
         self.remote = remote
 
+    def ensure_user(self, name: str, email: str) -> None:
+        """
+        Ensure Git has a user identity set for commits.
+        Ensure git commits on this branch are attributed to Ultron (or whatever identity is passed).
+        Does not overwrite your global identity unless explicitly run.
+        """
+        try:
+            # Set local config only (repo scope, not global)
+            self._run(["config", "--local", "user.name", name])
+            self._run(["config", "--local", "user.email", email])
+            logger.debug(f"Configured repo git user: {name} <{email}>")
+        except GitError as e:
+            logger.error(f"Failed to set git user identity: {e}")
+            raise
+
     def _run(self, args: Sequence[str] | str, check: bool = True) -> str:
         # Normalize args -> flat list[str]
         if isinstance(args, str):

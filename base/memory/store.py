@@ -247,16 +247,19 @@ class MemoryStore:
         return sqlite3.connect(settings.db_path or str(DB_PATH), check_same_thread=False)
 
     def init_db(self) -> None:
-        with _connect_for_compat() as conn:
-            MemoryStore(conn)
+        with self._connect_for_compat() as conn:
+            cur = conn.cursor()
+            # run the same schema setup here if needed
+            # or simply no-op since _ensure_schema already covers this
+            conn.commit()
 
-    def save_memory(memory: dict) -> None:
+    def save_memory(self, memory: dict) -> None:
         ts = memory.get("timestamp") or datetime.utcnow().isoformat()
         typ = memory.get("type", "event")
         content = memory.get("content", "")
         response = memory.get("response", "")
 
-        with _connect_for_compat() as conn:
+        with self._connect_for_compat() as conn:
             conn.execute(
                 "INSERT INTO memories(timestamp, type, content, response) VALUES(?, ?, ?, ?)",
                 (ts, typ, content, response),

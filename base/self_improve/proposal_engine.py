@@ -16,19 +16,19 @@ Given the user's natural-language request and a summary of the repository,
 propose a *minimal, safe patch set*.
 
 Return a JSON object with:
-{
+{{
   "title": "...",
   "description": "...",
   "changes": [
-    {
+    {{
       "path": "relative/path.py",
       "apply_mode": "replace_block" | "full_file",
       "search_anchor": "...",
       "replacement": "..."
-    },
+    }},
     ...
   ]
-}
+}}
 
 Rules:
 - Only modify files within the allowlist.
@@ -36,6 +36,7 @@ Rules:
 - Prefer 'replace_block' with a reliable 'search_anchor' snippet to find the place to change.
 - NEVER include secrets or tokens.
 """
+
 
 class ProposalEngine:
     def __init__(self, repo_root: str, brain: Optional[Brain] = None):

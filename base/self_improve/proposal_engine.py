@@ -82,26 +82,47 @@ class ProposalEngine:
             full = self.root / change.path
 
             if change.apply_mode == "full_file":
-                # Avoid destructive overwrite: create sibling .ultron
+                # Always create a .ultron copy, don't overwrite originals
                 new_path = full.with_suffix(full.suffix + ".ultron")
                 new_path.parent.mkdir(parents=True, exist_ok=True)
                 new_path.write_text(change.replacement, encoding="utf-8")
                 return True, f"full_file rewrite → {new_path.name} created"
 
-            if change.apply_mode == "replace_block":
+            elif change.apply_mode == "replace_block":
                 if not full.exists():
-                    return False, f"Target {change.path} not found for anchor replace"
+                    # Fallback: create the file from scratch
+                    full.parent.mkdir(parents=True, exist_ok=True)
+                    full.write_text(change.replacement, encoding="utf-8")
+                    return True, f"file created fresh (no original existed): {change.path}"
+
                 old = self._read(change.path)
                 anchor = change.search_anchor or ""
-                if anchor not in old:
-                    return False, f"Anchor not found in {change.path}"
-                new_content = old.replace(anchor, change.replacement, 1)
-                ok = self.safe_write(str(full), new_content)
-                return ok, "block replaced" if ok else "no changes applied"
 
-            return False, f"Unknown apply_mode {change.apply_mode}"
+                if anchor and anchor in old:
+                    # Anchor found → standard replace
+                    new_content = old.replace(anchor, change.replacement, 1)
+                    ok = self.safe_write(str(full), new_content)
+                    return ok, "block replaced" if ok else "no changes applied"
+
+                else:
+                    # Fallback when anchor missing
+                    logger.warning(f"Anchor not found in {change.path}, falling back to full file rewrite")
+                    backup_path = full.with_suffix(full.suffix + ".bak")
+                    try:
+                        full.replace(backup_path)
+                        logger.info(f"Backed up original file to {backup_path.name}")
+                    except Exception as e:
+                        logger.error(f"Failed to backup original {full}: {e}")
+
+                    full.write_text(change.replacement, encoding="utf-8")
+                    return True, f"anchor missing → replaced entire file {change.path}"
+
+            else:
+                return False, f"Unknown apply_mode {change.apply_mode}"
+
         except Exception as e:
             return False, f"apply error: {e}"
+
 
     def propose(self, instruction: str, index_md: str) -> Proposal:
         sys_prompt = PROPOSAL_SYS_PROMPT.format(

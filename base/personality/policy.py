@@ -1,6 +1,7 @@
 from __future__ import annotations
+
 import random
-from typing import Dict, Any
+from typing import Any
 
 POLICIES = [
     {"id": "casual", "max_words": 120},
@@ -9,12 +10,13 @@ POLICIES = [
     {"id": "succinct", "max_words": 60},
 ]
 
+
 class PolicyBandit:
     def __init__(self):
         self.values = {p["id"]: 0.0 for p in POLICIES}
         self.counts = {p["id"]: 0 for p in POLICIES}
 
-    def select(self, prior: str | None) -> Dict[str, Any]:
+    def select(self, prior: str | None) -> dict[str, Any]:
         if prior and prior in self.values:
             return next(p for p in POLICIES if p["id"] == prior)
         eps = 0.1

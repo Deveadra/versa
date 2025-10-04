@@ -1,11 +1,11 @@
-
 from __future__ import annotations
-from typing import Any, List, Optional
-import numpy as np
+
+from typing import Any
+
 import faiss
 
-from config.config import settings
 from base.memory.store import MemoryStore
+
 from .vector_backend import VectorBackend
 
 
@@ -13,8 +13,8 @@ class VectorRetriever:
     def __init__(
         self,
         store: MemoryStore,
-        embedder: Optional[Any] = None,
-        backend: Optional[VectorBackend] = None,
+        embedder: Any | None = None,
+        backend: VectorBackend | None = None,
         dim: int = 384,
     ):
         self.store = store
@@ -35,7 +35,7 @@ class VectorRetriever:
         if self.backend:
             self.backend.index(texts)
 
-    def search(self, query: str, k: int = 5) -> List[str]:
+    def search(self, query: str, k: int = 5) -> list[str]:
         # Try backend first if available
         if self.backend:
             results = self.backend.search(query, k)

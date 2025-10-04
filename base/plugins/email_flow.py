@@ -1,10 +1,13 @@
-import re
 import random
-from base.core.context import set_context, get_context, clear_context
-from base.plugins.gmail import send_email  # your real Gmail module
+import re
+
 from base.apps import email_prompts as prompts
+from base.core.context import clear_context, get_context, set_context
 from base.core.profile import get_pref
-from base.plugins.gmail import send_email, get_unread_emails
+from base.plugins.gmail import (
+    get_unread_emails,
+    send_email,  # your real Gmail module
+)
 
 
 def parse_quick_email(text: str):
@@ -86,7 +89,7 @@ def handle_email_command(text):
     default_email = get_pref("default_email", None)
 
     if "unread" in text.lower():
-        unread = get_unread_emails(n=5) # account=default_email)
+        unread = get_unread_emails(n=5)  # account=default_email)
         if not unread:
             return "No unread emails.", "You have no unread messages."
 
@@ -99,7 +102,9 @@ def handle_email_command(text):
             sender = str(first)
             subj = ""
 
-        spoken = f"You have {len(unread)} unread. Latest from {sender}" + (f" about {subj}." if subj else ".")
+        spoken = f"You have {len(unread)} unread. Latest from {sender}" + (
+            f" about {subj}." if subj else "."
+        )
         return None, spoken
 
     if "send" in text.lower():
@@ -107,8 +112,8 @@ def handle_email_command(text):
         return None, f"Okay, I’ll send it from {default_email or 'your account'}."
 
     return None, None
-  
-  
+
+
 # def handle_email_command(text: str):
 #     """
 #     Orchestrator: route text to quick parse, flow continuation, or new draft.
@@ -142,5 +147,3 @@ def handle_email_command(text):
 #         return "Who do you want to send it to?", random.choice(prompts.ASK_RECIPIENT_VARIANTS)
 
 #     return None, None
-
-

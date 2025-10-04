@@ -1,18 +1,20 @@
 # base/learning/feedback.py
 from __future__ import annotations
-from typing import Optional, Iterable, Callable, Dict, Any, Union
+
+import json
 import sqlite3
 import threading
 import time
-import json
+from collections.abc import Callable, Iterable
+from typing import Any
 
-from config.config import settings
 from base.database.sqlite import SQLiteConn
-from base.policy.tone_memory import update_tone_memory
 from base.memory.store import MemoryStore
+from base.policy.tone_memory import update_tone_memory
+from config.config import settings
 
 
-def _unwrap_conn(db: Union[SQLiteConn, sqlite3.Connection]) -> SQLiteConn:
+def _unwrap_conn(db: SQLiteConn | sqlite3.Connection) -> SQLiteConn:
     """
     Always normalize to SQLiteConn.
     """
@@ -29,14 +31,13 @@ class Feedback:
     Normalized to always use a sqlite3.Connection under the hood.
     """
 
-    def __init__(self, conn: Union[SQLiteConn, sqlite3.Connection]):
+    def __init__(self, conn: SQLiteConn | sqlite3.Connection):
         self.conn = _unwrap_conn(conn)
         # Secondary store (optional) for cross-module integration
         # self.db = SQLiteConn(settings.db_path)
         self.db: SQLiteConn = _unwrap_conn(conn)
 
-
-    def record(self, usage_id: int, kind: str, note: Optional[str] = None) -> None:
+    def record(self, usage_id: int, kind: str, note: str | None = None) -> None:
         cur = self.conn.cursor()
         cur.execute(
             "INSERT INTO feedback_events (usage_id, kind, note) VALUES (?, ?, ?)",
@@ -47,8 +48,9 @@ class Feedback:
 
 # ---------- Rule-specific feedback (engagement loop) ----------
 
+
 def record_rule_feedback(
-    conn: Union[SQLiteConn, sqlite3.Connection],
+    conn: SQLiteConn | sqlite3.Connection,
     rule_id: int,
     topic_id: str,
     tone: str,
@@ -131,6 +133,7 @@ def record_rule_feedback(
             try:
                 resets = json.loads(rule_row["reset_signals"])
                 from base.policy.context_signals import ContextSignals
+
                 ctx_mgr = ContextSignals(SQLiteConn(settings.db_path))
                 for sig in resets:
                     ctx_mgr.reset(sig, 0)
@@ -139,13 +142,13 @@ def record_rule_feedback(
 
 
 def schedule_signal_check(
-    conn: Union[SQLiteConn, sqlite3.Connection],
+    conn: SQLiteConn | sqlite3.Connection,
     rule_id: int,
     topic_id: str,
     tone: str,
     context: str,
     signal_names: Iterable[str],
-    expect_change: Callable[[Dict[str, Any]], bool],
+    expect_change: Callable[[dict[str, Any]], bool],
     delay: int = 300,
 ) -> None:
     """
@@ -154,8 +157,8 @@ def schedule_signal_check(
 
     db = _unwrap_conn(conn)
 
-    def _fetch_values(names: Iterable[str]) -> Dict[str, Any]:
-        vals: Dict[str, Any] = {}
+    def _fetch_values(names: Iterable[str]) -> dict[str, Any]:
+        vals: dict[str, Any] = {}
         placeholders = ",".join(["?"] * len(list(names)))
         query = f"SELECT name, value FROM context_signals WHERE name IN ({placeholders})"
         cur = db.cursor()
@@ -166,7 +169,7 @@ def schedule_signal_check(
             except Exception:
                 lv = str(v).strip().lower()
                 if lv in ("true", "false"):
-                    vals[n] = (lv == "true")
+                    vals[n] = lv == "true"
                 else:
                     vals[n] = v
         return vals

@@ -1,11 +1,11 @@
-
 import sqlite3
-from typing import Any, Dict, Optional, Union
 from datetime import datetime
+from typing import Any
+
 from base.database.sqlite import SQLiteConn
 
 
-def _unwrap_conn(db: Union[SQLiteConn, sqlite3.Connection]) -> sqlite3.Connection:
+def _unwrap_conn(db: SQLiteConn | sqlite3.Connection) -> sqlite3.Connection:
     if isinstance(db, sqlite3.Connection):
         return db
     if hasattr(db, "conn") and isinstance(db.conn, sqlite3.Connection):
@@ -28,7 +28,7 @@ class ContextSignals:
       - derived: values calculated from other signals
     """
 
-    def __init__(self, conn: Union[SQLiteConn, sqlite3.Connection]):
+    def __init__(self, conn: SQLiteConn | sqlite3.Connection):
         self.conn = _unwrap_conn(conn)
 
     # ---- CRUD ----
@@ -49,12 +49,12 @@ class ContextSignals:
         )
         self.conn.commit()
 
-    def get(self, name: str) -> Optional[str]:
+    def get(self, name: str) -> str | None:
         cur = self.conn.cursor()
         row = cur.execute("SELECT value FROM context_signals WHERE name=?", (name,)).fetchone()
         return row["value"] if row else None
 
-    def all(self) -> Dict[str, Any]:
+    def all(self) -> dict[str, Any]:
         cur = self.conn.cursor()
         rows = cur.execute("SELECT name, value, type FROM context_signals").fetchall()
         return {r["name"]: {"value": r["value"], "type": r["type"]} for r in rows}

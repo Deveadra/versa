@@ -1,6 +1,7 @@
-
 from __future__ import annotations
+
 import re
+
 
 def assess_importance(text: str) -> int:
     """Cheap, tunable heuristic. Start conservative to avoid bloat."""

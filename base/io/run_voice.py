@@ -1,8 +1,5 @@
-
 from base.agents.orchestrator import Orchestrator
-from base.io.voice import record_audio, transcribe, speak
-from base.memory.store import init_db, MemoryStore
-from database.sqlite import SQLiteConn
+from base.io.voice import record_audio, speak, transcribe
 
 if __name__ == "__main__":
     orch = Orchestrator()
@@ -43,10 +40,9 @@ if __name__ == "__main__":
                 if relations:
                     reply = "; ".join(f"{src} {rel} {tgt}" for src, rel, tgt, _, _, _ in relations)
                 else:
-                    reply = f"I don't know any relations for {entity}." 
+                    reply = f"I don't know any relations for {entity}."
                 speak(reply)
                 continue
-
 
             # Default chat
             reply = orch.handle_user(msg)

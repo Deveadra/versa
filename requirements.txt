@@ -53,6 +53,8 @@ black
 ruff
 pytest
 pytest-asyncio
+pytest-xdist
+
 
 
 # # Optional future

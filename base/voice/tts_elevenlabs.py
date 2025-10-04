@@ -1,23 +1,25 @@
 from __future__ import annotations
 
 import logging as logger
-from typing import Iterable, Union, Optional, List
 import os
 import threading
+from collections.abc import Iterable
+from typing import Union
+
 import simpleaudio as sa
 from elevenlabs import ElevenLabs
-from config.config import settings
 
+from config.config import settings
 
 BytesLike = Union[bytes, bytearray, memoryview]
 
 
 class Voice:
-    _instance: Optional["Voice"] = None
+    _instance: Voice | None = None
     _current_playback = None
     _lock = threading.Lock()
 
-    def __init__(self, model_id: Optional[str] = None, output_format: Optional[str] = None):
+    def __init__(self, model_id: str | None = None, output_format: str | None = None):
         if not settings.eleven_api_key or not settings.eleven_voice_id:
             raise RuntimeError("ElevenLabs API key/voice id not configured")
 
@@ -38,7 +40,7 @@ class Voice:
                     logger.info(f"Resolved ElevenLabs voice '{match.name}' → {self.voice_id}")
             except Exception as e:
                 logger.warning(f"Failed to resolve voice name '{self.voice_id}': {e}")
-                
+
         self.client = ElevenLabs(api_key=settings.eleven_api_key)
         self.voice_id = settings.eleven_voice_id
         self.model_id = model_id or os.getenv("ELEVENLABS_MODEL", "eleven_multilingual_v2")
@@ -46,7 +48,7 @@ class Voice:
 
     # Singleton access
     @classmethod
-    def get_instance(cls) -> "Voice":
+    def get_instance(cls) -> Voice:
         if cls._instance is None:
             cls._instance = Voice()
         return cls._instance
@@ -125,7 +127,7 @@ class Voice:
                     yield chunk
 
     @staticmethod
-    def _to_bytes(data: Union[BytesLike, Iterable[bytes]]) -> bytes:
+    def _to_bytes(data: BytesLike | Iterable[bytes]) -> bytes:
         if isinstance(data, (bytes, bytearray, memoryview)):
             return bytes(data)
         return b"".join(data)

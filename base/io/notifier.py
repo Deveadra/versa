@@ -1,5 +1,5 @@
-
 from loguru import logger
+
 
 class Notifier:
     def __init__(self, mode="console"):

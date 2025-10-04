@@ -1,24 +1,29 @@
 # base/self_improve/pr_manager.py
 from __future__ import annotations
-from typing import Optional
-from loguru import logger
-from pathlib import Path
-import os, sys, subprocess, requests
 
-from base.self_improve.models import Proposal
+import subprocess
+import sys
+from pathlib import Path
+
+import requests
+from loguru import logger
+
 from base.devops.git_client import GitClient, GitError
+from base.self_improve.models import Proposal
 from config.config import settings
+
 
 class PRManager:
     """
     Creates a branch, commits applied changes, pushes, opens a PR via GitHub API.
     """
-    def __init__(self, repo_root: str, repo_slug: Optional[str] = None, token: Optional[str] = None):
+
+    def __init__(self, repo_root: str, repo_slug: str | None = None, token: str | None = None):
         self.root = Path(repo_root).resolve()
         self.repo_slug = repo_slug or settings.github_repo
         self.token = token or settings.github_token
         self.client = GitClient(self.root, remote=settings.github_remote_name)
-        self.original_branch: Optional[str] = None
+        self.original_branch: str | None = None
 
     def prepare_branch(self, name_suffix: str) -> str:
         """
@@ -127,9 +132,10 @@ This change was proposed by Ultron to address: *"{title}"*
         try:
             result = subprocess.run(
                 [sys.executable, "-m", "pytest", "-q"],
+                check=False,
                 cwd=str(self.root),
                 capture_output=True,
-                text=True
+                text=True,
             )
             passed = result.returncode == 0
             tail = "\n".join((result.stdout or "").splitlines()[-15:])
@@ -151,3 +157,4 @@ This change was proposed by Ultron to address: *"{title}"*
                 logger.info(f"Restored user branch: {self.original_branch}")
             except Exception as e:
                 logger.error(f"Failed to restore branch: {e}")
+

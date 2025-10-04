@@ -232,3 +232,22 @@ To change the daily consolidation time without touching code, add these to your 
 ULTRON_CRON_HOUR=3
 ULTRON_CRON_MINUTE=0
 ```
+
+# CLI Commands
+
+```bash
+# Full repo, just check (default)
+python scripts/diagnostic_scan.py
+
+# Scan only changed files (working tree + untracked)
+python scripts/diagnostic_scan.py --changed
+
+# Diff against a base ref (e.g., main), plus working tree changes
+python scripts/diagnostic_scan.py --changed --base origin/main
+
+# Apply fixes (format & lint auto-fix) on all files
+python scripts/diagnostic_scan.py --all --fix
+
+# Apply fixes, but only to changed files
+python scripts/diagnostic_scan.py --changed --fix
+```

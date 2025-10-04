@@ -1,9 +1,10 @@
 # base/core/decider.py
-import re
 import hashlib
-from typing import Tuple
-from base.core import context
+import re
+
 from datetime import datetime
+
+from base.core.nlu import parse_diagnostic_intent
 
 # Configurable weights
 WEIGHTS = {
@@ -15,33 +16,33 @@ WEIGHTS = {
     "length": 10,
     "repetition": 25,
     "plugin_priority": 70,
-    "low_value": -50
+    "low_value": -50,
 }
 
 # Example regex checks (lightweight)
 EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 PHONE_RE = re.compile(r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b")
-DATE_RE = re.compile(r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|\d{1,2}/\d{1,2})\b", re.I)
+DATE_RE = re.compile(
+    r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|\d{1,2}/\d{1,2})\b", re.I
+)
 
 # Simple phrase checks
 REMEMBER_PHRASES = ["remember", "don't forget", "note that", "remind me that", "save this"]
-PREFERENCE_PHRASES = ["i like", "i love", "i dislike", "i hate", "my favorite", "i prefer", "i don't like"]
+PREFERENCE_PHRASES = [
+    "i like",
+    "i love",
+    "i dislike",
+    "i hate",
+    "my favorite",
+    "i prefer",
+    "i don't like",
+]
 
 
 class Decider:
     def __init__(self):
         # track repeats in-session
         self.session_repeat_counter = {}
-
-    def decide(self, text: str, plugin_hint: str = "") -> Tuple[int, dict]:
-        """
-        Wrapper around score_text that keeps repeat counts.
-        Returns (score, metadata).
-        """
-        norm = text.strip().lower()
-        self.session_repeat_counter[norm] = self.session_repeat_counter.get(norm, 0) + 1
-        repeat_count = self.session_repeat_counter[norm] - 1
-        return self.score_text(text, plugin_hint, repeat_count)
 
     def _has_named_entity(self, text: str) -> bool:
         return bool(EMAIL_RE.search(text) or PHONE_RE.search(text) or DATE_RE.search(text))
@@ -56,68 +57,14 @@ class Decider:
 
     def _is_explicit_remember(self, text: str) -> bool:
         return any(p in text.lower() for p in REMEMBER_PHRASES)
-
-    def extract_structured_fact(self, text: str):
-        # very small heuristics; expand later
-        m = re.search(r"my name is ([A-Za-z\s'-]+)", text, re.I)
-        if m:
-            return ("user_name", m.group(1).strip())
-        m2 = re.search(r"i live in ([A-Za-z\s]+)", text, re.I)
-        if m2:
-            return ("location", m2.group(1).strip())
-        return None
-
-    def decide_memory(self, user_text: str, reply: str) -> dict | None:
-        """
-        Decide if the exchange is worth remembering.
-        Returns a dict if yes, None if no.
-        """
-        important_keywords = ["my name is", "remember", "birthday", "favorite", "I like", "I don’t like"]
-
-        if any(kw in user_text.lower() for kw in important_keywords):
-            return {
-                "timestamp": datetime.utcnow().isoformat(),
-                "type": "fact",
-                "content": user_text,
-                "response": reply
-            }
-
-        if "I will remember" in reply or "Noted" in reply:
-            return {
-                "timestamp": datetime.utcnow().isoformat(),
-                "type": "acknowledgement",
-                "content": user_text,
-                "response": reply
-            }
-
-        return None
-
-    def handle_user_text(self, text: str, plugin_hint: str = None or ""):
-        norm = text.strip().lower()
-        self.session_repeat_counter[norm] = self.session_repeat_counter.get(norm, 0) + 1
-
-        score, meta = self.score_text(
-            text,
-            plugin_hint=(plugin_hint or ""),
-            repeat_count=self.session_repeat_counter[norm] - 1
-        )
-
-        STORE_THRESHOLD = 60  # tuneable
-        if score >= STORE_THRESHOLD or "explicit_remember" in meta.get("reason", []):
-            key = self.make_fact_key(text, hint=(meta.get("category") or ""))
-            existing = memory.recall_fact(key)
-            if existing is None:
-                value = text.strip()
-                memory.remember_fact(key, value)
-            else:
-                memory.remember_fact(key, existing)  # refresh timestamp
-
-        memory.add_history(text)
-
-    def score_text(self, text: str, plugin_hint: str = "", repeat_count: int = 0) -> Tuple[int, dict]:
+    
+    def score_text(
+        self, text: str, plugin_hint: str = "", repeat_count: int = 0
+    ) -> tuple[int, dict]:
         """
         Compute importance score and suggested memory metadata.
         """
+        intent = parse_diagnostic_intent(text)
         score = 0
         meta = {"category": None, "reason": []}
 
@@ -149,7 +96,31 @@ class Decider:
             score += WEIGHTS["plugin_priority"]
             meta["reason"].append(f"plugin_hint:{plugin_hint}")
 
-        low_value_markers = ["how are you", "what's up", "hello", "hi", "thanks", "thank you", "bye"]
+        low_value_markers = [
+            "how are you",
+            "what's up",
+            "hello",
+            "hi",
+            "thanks",
+            "thank you",
+            "bye",
+        ]
+        
+        if "diagnostic" in text.lower() or "scan" in text.lower():
+            score += WEIGHTS["direct_command"]
+            meta["reason"].append("diagnostic_command")
+            meta["category"] = "action"
+
+        if intent:
+            # Prefer WEIGHTS if present, else use a sane bump
+            bump = WEIGHTS["direct_command"] if "WEIGHTS" in globals() and "direct_command" in WEIGHTS else 2.0
+            score += bump
+            # Ensure meta has the fields you use elsewhere
+            meta.setdefault("reason", []).append("diagnostic_command")
+            meta["category"] = "action"
+            meta["intent"] = "diagnostic"
+            meta["intent_payload"] = {"mode": intent["mode"], "fix": intent["fix"], "confidence": intent["confidence"]}
+            
         if any(m in text.lower() for m in low_value_markers):
             score += WEIGHTS["low_value"]
             meta["reason"].append("low_value_marker")
@@ -164,6 +135,82 @@ class Decider:
             meta["category"] = "short_history"
 
         return score, meta
+    
+    def decide(self, text: str, plugin_hint: str = "") -> tuple[int, dict]:
+        """
+        Wrapper around score_text that keeps repeat counts.
+        Returns (score, metadata).
+        """
+        norm = text.strip().lower()
+        self.session_repeat_counter[norm] = self.session_repeat_counter.get(norm, 0) + 1
+        repeat_count = self.session_repeat_counter[norm] - 1
+        return self.score_text(text, plugin_hint, repeat_count)
+
+    def extract_structured_fact(self, text: str):
+        # very small heuristics; expand later
+        m = re.search(r"my name is ([A-Za-z\s'-]+)", text, re.I)
+        if m:
+            return ("user_name", m.group(1).strip())
+        m2 = re.search(r"i live in ([A-Za-z\s]+)", text, re.I)
+        if m2:
+            return ("location", m2.group(1).strip())
+        return None
+
+    def decide_memory(self, user_text: str, reply: str) -> dict | None:
+        """
+        Decide if the exchange is worth remembering.
+        Returns a dict if yes, None if no.
+        """
+        important_keywords = [
+            "my name is",
+            "remember",
+            "birthday",
+            "favorite",
+            "I like",
+            "I don’t like",
+        ]
+
+        if any(kw in user_text.lower() for kw in important_keywords):
+            return {
+                "timestamp": datetime.utcnow().isoformat(),
+                "type": "fact",
+                "content": user_text,
+                "response": reply,
+            }
+
+        if "I will remember" in reply or "Noted" in reply:
+            return {
+                "timestamp": datetime.utcnow().isoformat(),
+                "type": "acknowledgement",
+                "content": user_text,
+                "response": reply,
+            }
+
+        return None
+
+    def handle_user_text(self, text: str, plugin_hint: str = None or ""):
+        norm = text.strip().lower()
+        self.session_repeat_counter[norm] = self.session_repeat_counter.get(norm, 0) + 1
+
+        score, meta = self.score_text(
+            text,
+            plugin_hint=(plugin_hint or ""),
+            repeat_count=self.session_repeat_counter[norm] - 1,
+        )
+
+        STORE_THRESHOLD = 60  # tuneable
+        if score >= STORE_THRESHOLD or "explicit_remember" in meta.get("reason", []):
+            key = self.make_fact_key(text, hint=(meta.get("category") or ""))
+            existing = memory.recall_fact(key)
+            if existing is None:
+                value = text.strip()
+                memory.remember_fact(key, value)
+            else:
+                memory.remember_fact(key, existing)  # refresh timestamp
+
+        memory.add_history(text)
+
+    
 
     def make_fact_key(self, text: str, hint: str = "") -> str:
         base = (hint or "") + "|" + text.strip().lower()

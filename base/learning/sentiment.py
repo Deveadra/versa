@@ -1,6 +1,7 @@
 # base/learning/sentiment.py
 from __future__ import annotations
-from textblob import TextBlob # type: ignore
+
+from textblob import TextBlob  # type: ignore
 
 
 def quick_polarity(text: str) -> float:

@@ -1,12 +1,13 @@
 # assistant/cli/review_cli.py
 from __future__ import annotations
+
 import argparse
+
 from tabulate import tabulate
 
-from base.learning import review
 from base.database.sqlite import SQLiteConn
+from base.learning import review
 from config.config import settings
-
 
 REMINDER = """
 Available commands:
@@ -41,27 +42,52 @@ def cmd_list(conn):
     if not rows:
         print("✅ No pending proposals.")
     else:
-        print(tabulate(
-            [(r["id"], r["name"], r["topic_id"], _fmt_conf(r.get("confidence")), _fmt_conf(r.get("score"))) for r in rows],
-            headers=["ID", "Name", "Topic", "Confidence", "Score"]
-        ))
+        print(
+            tabulate(
+                [
+                    (
+                        r["id"],
+                        r["name"],
+                        r["topic_id"],
+                        _fmt_conf(r.get("confidence")),
+                        _fmt_conf(r.get("score")),
+                    )
+                    for r in rows
+                ],
+                headers=["ID", "Name", "Topic", "Confidence", "Score"],
+            )
+        )
     _print_reminder()
 
 
 def cmd_list_approved(conn):
     cur = conn.execute(
         "SELECT * FROM proposed_rules WHERE status='approved' ORDER BY approved_at NULLS LAST, created_at"
-        if "NULLS" in conn.execute("SELECT 'x'").fetchone()[0]  # naive guard; SQLite doesn't support NULLS LAST
+        if "NULLS"
+        in conn.execute("SELECT 'x'").fetchone()[
+            0
+        ]  # naive guard; SQLite doesn't support NULLS LAST
         else "SELECT * FROM proposed_rules WHERE status='approved' ORDER BY COALESCE(approved_at, created_at)"
     )
     rows = [dict(r) for r in cur.fetchall()]
     if not rows:
         print("✅ No approved proposals queued for tonight.")
     else:
-        print(tabulate(
-            [(r["id"], r["name"], r["topic_id"], _fmt_conf(r.get("confidence")), _fmt_conf(r.get("score"))) for r in rows],
-            headers=["ID", "Name", "Topic", "Confidence", "Score"]
-        ))
+        print(
+            tabulate(
+                [
+                    (
+                        r["id"],
+                        r["name"],
+                        r["topic_id"],
+                        _fmt_conf(r.get("confidence")),
+                        _fmt_conf(r.get("score")),
+                    )
+                    for r in rows
+                ],
+                headers=["ID", "Name", "Topic", "Confidence", "Score"],
+            )
+        )
     _print_reminder()
 
 
@@ -70,10 +96,12 @@ def cmd_history(conn):
     if not rows:
         print("No proposal history yet.")
     else:
-        print(tabulate(
-            [(r["id"], r["name"], r["topic_id"], r["status"]) for r in rows],
-            headers=["ID", "Name", "Topic", "Status"]
-        ))
+        print(
+            tabulate(
+                [(r["id"], r["name"], r["topic_id"], r["status"]) for r in rows],
+                headers=["ID", "Name", "Topic", "Status"],
+            )
+        )
     _print_reminder()
 
 

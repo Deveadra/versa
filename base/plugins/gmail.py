@@ -1,8 +1,9 @@
 import os
 import pickle
-from googleapiclient.discovery import build
+
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
 TOKEN_PATH = "token_gmail.pickle"
@@ -35,7 +36,12 @@ def get_unread_emails(n=5):
         return "[Mock] No Gmail service available."
 
     # account = _service.users().getProfile(userId="me").execute().get("emailAddress", "unknown")
-    results = _service.users().messages().list(userId="me", labelIds=["INBOX"], q="is:unread", maxResults=n).execute()
+    results = (
+        _service.users()
+        .messages()
+        .list(userId="me", labelIds=["INBOX"], q="is:unread", maxResults=n)
+        .execute()
+    )
     messages = results.get("messages", [])
     if not messages:
         return "No unread emails."
@@ -52,8 +58,8 @@ def get_unread_emails(n=5):
 
 def send_email(recipient, subject, body):
     """Send an email via Gmail (fallback to mock if unavailable)."""
-    from email.mime.text import MIMEText
     import base64
+    from email.mime.text import MIMEText
 
     global _service
     if not _service:

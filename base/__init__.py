@@ -9,10 +9,8 @@ Modules:
 - plugins: Extensible plugin system (system stats, spotify, lights, calendar, email)
 """
 
-
 __version__ = "0.1.0"
 
 
-from .core import core
-from .core import audio
+from .core import audio, core
 from .llm import brain

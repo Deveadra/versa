@@ -1,13 +1,17 @@
 import os
-import requests
 import random
 import time
 
-from base.core.profile import get_pref
-from base.core.audio import stream_speak
-# from base.devices.home_assistant import call_service, get_state
-from base.apps.media_smart_home_prompts import ASK_DEVICE_VARIANTS, ASK_ACTION_VARIANTS, CONFIRM_VARIANTS, CANCEL_VARIANTS
+import requests
 
+# from base.devices.home_assistant import call_service, get_state
+from base.apps.media_smart_home_prompts import (
+    ASK_ACTION_VARIANTS,
+    ASK_DEVICE_VARIANTS,
+    CANCEL_VARIANTS,
+    CONFIRM_VARIANTS,
+)
+from base.core.audio import stream_speak
 
 HA_URL = os.getenv("HA_URL", "http://homeassistant.local:8123/api")
 HA_TOKEN = os.getenv("HA_TOKEN")
@@ -16,7 +20,7 @@ headers = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/j
 
 media_state = {"device": None, "action": None, "confirm": False}
 
-    
+
 def handle_media_command(text):
     text_lower = text.lower()
 
@@ -32,11 +36,15 @@ def handle_media_command(text):
     if "play" in text_lower and "spotify" in text_lower:
         query = text_lower.replace("play", "").replace("spotify", "").strip()
         # For simplicity: assume playlist/track IDs mapped manually in HA or config
-        call_service("media_player", "play_media", {
-            "entity_id": "media_player.spotify",
-            "media_content_type": "music",
-            "media_content_id": query
-        })
+        call_service(
+            "media_player",
+            "play_media",
+            {
+                "entity_id": "media_player.spotify",
+                "media_content_type": "music",
+                "media_content_id": query,
+            },
+        )
         return None, f"Playing {query} on Spotify."
 
     if "pause music" in text_lower or "stop music" in text_lower:
@@ -54,6 +62,7 @@ def check_presence(entity="device_tracker.your_phone"):
         return r.json()["state"]
     return None
 
+
 def presence_monitor():
     last_state = None
     while True:
@@ -65,7 +74,8 @@ def presence_monitor():
                 stream_speak("Goodbye. I’ll keep things ready until you return.")
             last_state = state
         time.sleep(10)  # poll every 10s
-        
+
+
 def call_service(domain, service, entity_id=None, data=None):
     """Generic helper to call HA services."""
     url = f"{HA_URL}/services/{domain}/{service}"
@@ -114,7 +124,9 @@ def control_thermostat(action, entity_id="climate.living_room"):
 
 # --- Conversation Flow ---
 def has_pending():
-    return any(v is None for k, v in media_state.items() if k != "confirm") or media_state["confirm"]
+    return (
+        any(v is None for k, v in media_state.items() if k != "confirm") or media_state["confirm"]
+    )
 
 
 def is_media_command(text: str) -> bool:

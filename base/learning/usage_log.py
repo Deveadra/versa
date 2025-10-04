@@ -1,19 +1,23 @@
 from __future__ import annotations
-from dataclasses import dataclass
-from typing import Optional, Dict, Any
+
 import json
+from dataclasses import dataclass
+from typing import Any
 
 from loguru import logger
+
 from base.database.sqlite import SQLiteConn
+
 
 @dataclass
 class UsageEvent:
-    user_text: Optional[str]
-    normalized_intent: Optional[str]
-    resolved_action: Optional[str]
-    params: Dict[str, Any]
-    success: Optional[bool]
-    latency_ms: Optional[int]
+    user_text: str | None
+    normalized_intent: str | None
+    resolved_action: str | None
+    params: dict[str, Any]
+    success: bool | None
+    latency_ms: int | None
+
 
 class UsageLogger:
     def __init__(self, conn: SQLiteConn):

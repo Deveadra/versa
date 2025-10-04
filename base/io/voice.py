@@ -1,19 +1,17 @@
-
 import os
-import io
-import sounddevice as sd
-import numpy as np
 import tempfile
+
+import numpy as np
 import openai
-from playsound import playsound
+import sounddevice as sd
 from elevenlabs import ElevenLabs
 
 from config.config import settings
 
 # Tune these once, globally
-SD_RATE = 16000      # 16 kHz is fine for voice and low-latency
+SD_RATE = 16000  # 16 kHz is fine for voice and low-latency
 SD_CHANNELS = 1
-SD_DTYPE = "int16"   # match the server's PCM format
+SD_DTYPE = "int16"  # match the server's PCM format
 
 
 # sd.default.latency = ("low", "low")
@@ -22,16 +20,19 @@ SD_DTYPE = "int16"   # match the server's PCM format
 # sa.play_buffer(pcm, num_channels=1, bytes_per_sample=2, sample_rate=16000)  # non-blocking
 
 
-
 def record_audio(duration: int = 5) -> str:
     """Record from microphone and save to wav temp file"""
     print("🎙️ Recording... speak now")
-    audio = sd.rec(int(duration * SD_RATE), samplerate=SD_RATE, channels=SD_CHANNELS, dtype=np.int16)
+    audio = sd.rec(
+        int(duration * SD_RATE), samplerate=SD_RATE, channels=SD_CHANNELS, dtype=np.int16
+    )
     sd.wait()
     temp = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
     import soundfile as sf
+
     sf.write(temp.name, audio, SD_RATE)
     return temp.name
+
 
 def transcribe(file_path: str) -> str:
     """Send audio file to Whisper for STT"""
@@ -39,6 +40,7 @@ def transcribe(file_path: str) -> str:
     with open(file_path, "rb") as f:
         result = client.audio.transcriptions.create(model="whisper-1", file=f)
     return result.text.strip()
+
 
 def speak(text: str) -> None:
     """Low-latency TTS: stream PCM chunks directly to speaker."""
@@ -55,7 +57,7 @@ def speak(text: str) -> None:
         voice_id=settings.eleven_voice_id,
         model_id=model_id,
         text=text,
-        output_format="pcm_16000",   # 16kHz, 16-bit, mono PCM
+        output_format="pcm_16000",  # 16kHz, 16-bit, mono PCM
     )
 
     # result may be bytes or an iterator of bytes; handle both.
@@ -65,7 +67,7 @@ def speak(text: str) -> None:
         if isinstance(result, (bytes, bytearray, memoryview)):
             out.write(bytes(result))
         else:
-            for chunk in result:      # iterator of PCM chunks
+            for chunk in result:  # iterator of PCM chunks
                 if not chunk:
                     continue
-                out.write(chunk)      # stream straight to device
+                out.write(chunk)  # stream straight to device

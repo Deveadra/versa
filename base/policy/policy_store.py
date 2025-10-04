@@ -1,18 +1,16 @@
 # assistant/base/policy/policy_store.py
 from __future__ import annotations
-import sqlite3
 
+import sqlite3
 from dataclasses import dataclass
-from typing import Optional, Dict, Any, Tuple
-from datetime import datetime, timedelta
-from loguru import logger
+from datetime import datetime
+from typing import Any
 
 from base.policy.context_manager import ContextManager
 
-
-
 POLICIES = ("principled", "advocate", "adaptive")
 OVERRIDE_TYPES = ("hard", "soft", "preference")
+
 
 @dataclass
 class Topic:
@@ -20,14 +18,14 @@ class Topic:
     policy: str
     conviction: float = 0.75  # 0..1
 
+
 class PolicyStore:
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
         self.ctx_mgr = ContextManager(self.conn)
 
-
     # ---------- CRUD ----------
-    def get_topic(self, topic_id: str) -> Optional[Topic]:
+    def get_topic(self, topic_id: str) -> Topic | None:
         row = self.conn.execute(
             "SELECT topic_id, policy, conviction FROM topics WHERE topic_id=?",
             (topic_id,),
@@ -50,7 +48,13 @@ class PolicyStore:
         )
         self.conn.commit()
 
-    def set_override(self, topic_id: str, type_: str, reason: Optional[str] = None, expires_at: Optional[datetime] = None):
+    def set_override(
+        self,
+        topic_id: str,
+        type_: str,
+        reason: str | None = None,
+        expires_at: datetime | None = None,
+    ):
         assert type_ in OVERRIDE_TYPES
         self.conn.execute(
             "INSERT INTO topic_overrides(topic_id, type, reason, expires_at, created_at) VALUES(?,?,?,?,CURRENT_TIMESTAMP)",
@@ -62,7 +66,7 @@ class PolicyStore:
         self.conn.execute("DELETE FROM topic_overrides WHERE topic_id=?", (topic_id,))
         self.conn.commit()
 
-    def latest_override(self, topic_id: str) -> Optional[dict]:
+    def latest_override(self, topic_id: str) -> dict | None:
         row = self.conn.execute(
             "SELECT * FROM topic_overrides WHERE topic_id=? ORDER BY id DESC LIMIT 1",
             (topic_id,),
@@ -107,10 +111,19 @@ class PolicyStore:
         row = self.conn.execute(
             "SELECT * FROM topic_state WHERE topic_id=?", (topic_id,)
         ).fetchone()
-        return dict(row) if row else {"topic_id": topic_id, "ignore_count": 0, "escalation_count": 0, "last_mentioned": None}
+        return (
+            dict(row)
+            if row
+            else {
+                "topic_id": topic_id,
+                "ignore_count": 0,
+                "escalation_count": 0,
+                "last_mentioned": None,
+            }
+        )
 
     # ---------- evaluation ----------
-    def should_speak(self, topic_id: str, context_signals: Optional[Dict[str,Any]] = None):
+    def should_speak(self, topic_id: str, context_signals: dict[str, Any] | None = None):
         if context_signals is None:
             # load all signals + derived
             context_signals = {**self.ctx_mgr.all_signals(), **self.ctx_mgr.eval_derived_signals()}
@@ -148,10 +161,14 @@ class PolicyStore:
 
         # base conviction (0..1), boosted by context relevance
         ctx = 0.0
-        if context_signals.get("long_sitting"): ctx += 0.5
-        if context_signals.get("approaching_bedtime"): ctx += 0.6
-        if context_signals.get("health_risk"): ctx += 0.7
-        if context_signals.get("time_window_bonus"): ctx += 0.3
+        if context_signals.get("long_sitting"):
+            ctx += 0.5
+        if context_signals.get("approaching_bedtime"):
+            ctx += 0.6
+        if context_signals.get("health_risk"):
+            ctx += 0.7
+        if context_signals.get("time_window_bonus"):
+            ctx += 0.3
 
         # recent feedback nudge
         fb_row = self.conn.execute(

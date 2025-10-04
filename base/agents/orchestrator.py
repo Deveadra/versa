@@ -1,60 +1,58 @@
 #!/usr/bin/env python
 from __future__ import annotations
 
-import sqlite3, re, shutil, sys
-import numpy as np
-import dateparser
-import subprocess
 import json
+import numpy as np
 import re
-import time
+import sqlite3
 import subprocess
-from tqdm import tqdm
-from tqdm import tqdm
+import sys
+import time
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dateutil import parser as dateparser
-from pathlib import Path
-from typing import Optional, Any, cast, List
-
 from loguru import logger
 from openai import OpenAI
+from pathlib import Path
+from tqdm import tqdm
+from types import SimpleNamespace
+from typing import Any, cast, Dict, List, Optional
 
-from config.config import settings
-from base.database.sqlite import SQLiteConn
-from base.memory.store import MemoryStore
-from base.memory.faiss_backend import FAISSBackend
-from base.memory.consolidation import Consolidator
-from base.learning.habit_miner import HabitMiner
-from base.learning.usage_log import UsageLogger, UsageEvent
-from base.learning.profile_enrichment import ProfileEnricher
-from base.learning.feedback import Feedback
-from base.learning.sentiment import quick_polarity
+from base.agents.scheduler import Scheduler
+from base.calendar.rrule_helpers import rrule_from_phrase
+from base.calendar.store import CalendarStore
+from base.core.decider import Decider
 from base.core.plugin_manager import PluginManager
 from base.core.profile_manager import ProfileManager
-from base.core.decider import Decider
-from base.personality.tone_adapter import ToneAdapter
-from base.llm.prompts import SYSTEM_PROMPT, build_prompt
-from base.llm.prompt_composer import compose_prompt
+from base.database.sqlite import SQLiteConn
+from base.kg.integration import KGIntegrator
+from base.kg.store import KGStore
+from base.learning.feedback import Feedback
+from base.learning.habit_miner import HabitMiner
+from base.learning.persona_primer import PersonaPrimer
+from base.learning.policy_store import read_policy_assignment
+from base.learning.profile_enrichment import ProfileEnricher
+from base.learning.sentiment import quick_polarity
+from base.learning.usage_log import UsageEvent, UsageLogger
 from base.llm.brain import Brain
+from base.llm.prompt_composer import compose_prompt
+from base.llm.prompts import SYSTEM_PROMPT
+from base.memory.consolidation import Consolidator
+from base.memory.faiss_backend import FAISSBackend
 from base.memory.retrieval import VectorRetriever
+from base.memory.store import MemoryStore
+from base.personality.tone_adapter import ToneAdapter
+from base.self_improve.code_indexer import CodeIndexer
+from base.self_improve.diagnostic_engine import DiagnosticEngine
+from base.self_improve.models import Proposal, ProposedChange
+from base.self_improve.pr_manager import PRManager
+from base.self_improve.proposal_engine import ProposalEngine
 from base.utils.embeddings import get_embedder
 from base.utils.timeparse import extract_time_from_text
-from base.agents.scheduler import Scheduler
-from base.kg.store import KGStore
-from base.kg.integration import KGIntegrator
-from base.calendar.store import CalendarStore
-from base.learning.persona_primer import PersonaPrimer
-from base.calendar.rrule_helpers import rrule_from_phrase
-from base.self_improve.code_indexer import CodeIndexer
-from base.self_improve.proposal_engine import ProposalEngine
-from base.self_improve.pr_manager import PRManager
+from base.voice.tts_elevenlabs import Voice
 from config.config import settings
-from base.self_improve.diagnostic_engine import DiagnosticEngine
-from base.voice.tts_elevenlabs import Voice
-from base.voice.tts_elevenlabs import Voice
-# from base.self_improve.diagnostic_engine import benchmark_action
 
+# from base.self_improve.diagnostic_engine import benchmark_action
 
 
 db_conn = SQLiteConn(settings.db_path)
@@ -65,14 +63,6 @@ vdb = FAISSBackend(embedder, dim=dim, normalize=True)
 memory = MemoryStore(db_conn)
 habits = HabitMiner(db_conn, memory, store)
 memory.subscribe(lambda **kwargs: habits.learn(kwargs["content"], kwargs["ts"]))
-
-
-from base.llm.prompt_composer import compose_prompt
-from base.llm.retriever import DbRetriever
-from base.learning.feedback import Feedback
-from base.learning.policy_store import write_policy_assignment, read_policy_assignment
-from base.learning.sentiment import quick_polarity
-from base.personality.tone_adapter import ToneAdapter
 
 
 
@@ -108,6 +98,7 @@ Respond ONLY in this JSON schema:
 }
 """
 
+
 class ConsoleNotifier:
     def notify(self, title: str, message: str):
         print(f"\n[NOTIFY] {title}: {message}\n")
@@ -126,7 +117,7 @@ class Orchestrator:
         self.notifier = ConsoleNotifier()
         self.voice = Voice.get_instance()
         self.voice = Voice.get_instance()
-        
+
         # --- DB / stores
         self.db: SQLiteConn = db or SQLiteConn(settings.db_path)
         self.store: MemoryStore = store or memory or MemoryStore(self.db.conn)
@@ -141,7 +132,7 @@ class Orchestrator:
             backend=FAISSBackend(self.embedder, dim=self.embed_dim, normalize=True),
             dim=self.embed_dim,
         )
-        
+
         # Mentorship / proposal components
         self.repo_root = Path(".").resolve()
         self.code_indexer = CodeIndexer(
@@ -226,7 +217,7 @@ class Orchestrator:
             minute=settings.consolidation_minute,
         )
         self.scheduler.start()
-        
+
         logger.info("Orchestrator initialized")
 
     # ------------------------------------------------------------
@@ -255,16 +246,16 @@ class Orchestrator:
             msg = str(e)
         latency = (time.perf_counter() - start) * 1000.0
         # return result, elapsed
-        return {"label": label, "latency_ms": latency, "ok": ok, "msg": msg}        
+        return {"label": label, "latency_ms": latency, "ok": ok, "msg": msg}
         # return result, elapsed
-        return {"label": label, "latency_ms": latency, "ok": ok, "msg": msg}        
+        return {"label": label, "latency_ms": latency, "ok": ok, "msg": msg}
 
     def _run_action(self, user_text: str, intent: str, action: str, params: dict) -> Any:
         """
         Runs a concrete action (e.g., a plugin call), logs usage, and
         triggers lightweight learning/enrichment in the background.
         """
-        import time
+
         t0 = time.time()
         success = None
         result = None
@@ -280,14 +271,16 @@ class Orchestrator:
         finally:
             try:
                 if self.usage_logger:
-                    usage_id = self.usage_logger.log(UsageEvent(
-                        user_text=user_text,
-                        normalized_intent=intent,
-                        resolved_action=action,
-                        params=params,
-                        success=success,
-                        latency_ms=int((time.time() - t0) * 1000),
-                    ))
+                    usage_id = self.usage_logger.log(
+                        UsageEvent(
+                            user_text=user_text,
+                            normalized_intent=intent,
+                            resolved_action=action,
+                            params=params,
+                            success=success,
+                            latency_ms=int((time.time() - t0) * 1000),
+                        )
+                    )
                     # remember which policy produced the reply for this usage, if applicable
                     policy_id = getattr(self, "last_policy_id", None)
                     if policy_id is not None:
@@ -307,7 +300,7 @@ class Orchestrator:
     # ----------------------------------------
     # Low-confidence confirmation, feedback IO
     # ----------------------------------------
-    
+
     # def ask_confirmation_if_unsure(self, suggestion: str, confidence: float, usage_id: int | None = None) -> Optional[dict]:
     #     """
     #     If we’re not confident, return a UX prompt payload the caller can surface.
@@ -335,18 +328,25 @@ class Orchestrator:
     #     except Exception:
     #         logger.exception("record_user_feedback failed")
 
+
+
     def _validate_changes(self) -> list[str]:
         """
         Run lightweight validation. Never raises; returns list of issue strings.
         """
-        import sys, subprocess
+        
         issues: list[str] = []
         repo = str(self.repo_root)
 
         # Black (optional)
         try:
-            r = subprocess.run([sys.executable, "-m", "black", "--check", "."],
-                            cwd=repo, capture_output=True, text=True)
+            r = subprocess.run(
+                [sys.executable, "-m", "black", "--check", "."],
+                check=False,
+                cwd=repo,
+                capture_output=True,
+                text=True,
+            )
             if r.returncode != 0:
                 tail = "\n".join((r.stdout or r.stderr or "").splitlines()[-15:])
                 issues.append(f"Black format check failed:\n{tail}")
@@ -355,8 +355,13 @@ class Orchestrator:
 
         # Ruff (optional)
         try:
-            r = subprocess.run([sys.executable, "-m", "ruff", "."],
-                            cwd=repo, capture_output=True, text=True)
+            r = subprocess.run(
+                [sys.executable, "-m", "ruff", "."],
+                check=False,
+                cwd=repo,
+                capture_output=True,
+                text=True,
+            )
             if r.returncode != 0:
                 tail = "\n".join((r.stdout or r.stderr or "").splitlines()[-15:])
                 issues.append(f"Ruff reported issues:\n{tail}")
@@ -365,8 +370,13 @@ class Orchestrator:
 
         # Pytest (optional, we do a smoke run; PR body will contain fuller output)
         try:
-            r = subprocess.run([sys.executable, "-m", "pytest", "-q"],
-                            cwd=repo, capture_output=True, text=True)
+            r = subprocess.run(
+                [sys.executable, "-m", "pytest", "-q"],
+                check=False,
+                cwd=repo,
+                capture_output=True,
+                text=True,
+            )
             if r.returncode != 0:
                 tail = "\n".join((r.stdout or r.stderr or "").splitlines()[-15:])
                 issues.append(f"Tests failing:\n{tail}")
@@ -374,7 +384,6 @@ class Orchestrator:
             issues.append(f"Tests not run: {e}")
 
         return issues
-
 
     def propose_code_change(self, instruction: str) -> str:
         """
@@ -388,7 +397,7 @@ class Orchestrator:
         proposal = self.proposal_engine.propose(instruction, index_md=index_md)
 
         # 3) Prepare branch
-        import re, time
+
         suffix = re.sub(r"[^a-z0-9_\-]+", "-", proposal.title.lower())[:40]
         suffix = suffix or f"proposal-{int(time.time())}"
 
@@ -454,21 +463,158 @@ class Orchestrator:
                 self.pr_manager.restore_original_branch()
             except Exception:
                 pass
+    
+    def _git_run(self, args: List[str], cwd: Optional[Path] = None) -> tuple[int, str, str]:
+        p = subprocess.run(args, cwd=str(cwd or self.repo_root), capture_output=True, text=True)
+        return p.returncode, p.stdout.strip(), p.stderr.strip()
 
+    def _git_changed_paths(self) -> list[str]:
+        # Keep this helper in Orchestrator; used to list changed files before commit
+        import subprocess
+        p = subprocess.run(["git", "status", "--porcelain"], cwd=str(self.repo_root),
+                        capture_output=True, text=True)
+        if p.returncode != 0:
+            return []
+        out = []
+        for line in (p.stdout or "").splitlines():
+            if not line.strip():
+                continue
+            out.append(line[3:].strip())
+        return out
 
+    def _append_feedback_loop(
+        self,
+        *,
+        mode: str,
+        fix: bool,
+        base: str | None,
+        diag_output: str,
+        issues: list[dict],
+        benchmarks: list[dict],
+        laggy: bool,
+    ) -> str | None:
+        # Only run the feedback loop when auto-fixing was requested.
+        if not fix:
+            return None
 
-    def run_diagnostic(self, auto_fix: bool = False, verbose: bool = False) -> str:
+        changed_files = self._git_changed_paths()
+        if not changed_files:
+            return None  # Nothing changed on disk → nothing to propose
+
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        title = "chore(diagnostics): auto-fix & hygiene"
+        desc = (
+            f"Automated diagnostics (mode={mode}, fix={fix}, lag={'yes' if laggy else 'no'}).\n\n"
+            "This PR contains auto-fixes from Black/Ruff and minor hygiene changes detected by the diagnostic run."
+        )
+
+        mgr = PRManager(repo_root=str(self.repo_root))
+        branch = mgr.prepare_branch(name_suffix=f"diag-autofix-{ts}")  # creates/switches safely
+
+        # Build a typed Proposal for PR body (for humans). These changes are descriptive only.
+        changes: list[ProposedChange] = [
+            ProposedChange(
+                path=str(p),                 # keep as repo-relative if your status returns that
+                apply_mode="full_file",      # valid value per dataclass comment
+                search_anchor=None,          # not applicable to autofix summary
+                replacement="(autofix applied in working tree)"
+            )
+            for p in changed_files
+        ]
+        proposal = Proposal(title=title, description=desc, changes=changes)
+
+        # Commit & push (commit_and_push raises if no changes)
+        mgr.commit_and_push(branch, title)
+
+        # Open PR; include a short tail of tool output for context
+        tail = (diag_output or "")[-2000:]
+        pr_url = mgr.open_pr(branch, proposal, extra_tests=f"```\n{tail}\n```") or ""
+
+        # Restore original branch best-effort
+        try:
+            mgr.restore_original_branch()
+        except Exception:
+            pass
+
+        return f"\nAuto-fix branch: {branch}\nPR: {pr_url or '(opened, but URL not returned)'}"
+
+    def _git_default_branch(self) -> str:
+        # Try to resolve origin/HEAD → origin/main|master
+        rc, out, err = self._git_run(["git", "symbolic-ref", "refs/remotes/origin/HEAD"])
+        if rc == 0 and out:
+            # refs/remotes/origin/main → main
+            return out.rsplit("/", 1)[-1]
+        # Fallbacks
+        for cand in ("main", "master"):
+            rc, out, _ = self._git_run(["git", "rev-parse", f"origin/{cand}"])
+            if rc == 0:
+                return cand
+        return "main"
+
+    def _git_current_branch(self) -> str:
+        rc, out, _ = self._git_run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+        return out or "HEAD"
+
+    def _git_ensure_branch(self, branch: str) -> None:
+        # If already on it, nothing to do
+        if self._git_current_branch() == branch:
+            return
+        # Try create new branch off current HEAD
+        rc, _, _ = self._git_run(["git", "checkout", "-b", branch])
+        if rc != 0:
+            # Branch may exist; try switch
+            self._git_run(["git", "checkout", branch])
+
+    def _git_commit_all(self, message: str) -> bool:
+        self._git_run(["git", "add", "-A"])
+        rc, out, err = self._git_run(["git", "commit", "-m", message])
+        # If no changes to commit, commit exits non-zero; treat as no-op
+        return rc == 0
+
+    def _git_push_branch(self, branch: str) -> bool:
+        rc, out, err = self._git_run(["git", "push", "-u", "origin", branch])
+        return rc == 0
+
+    def _remote_compare_url(self, branch: str, base: Optional[str] = None) -> Optional[str]:
+        rc, out, _ = self._git_run(["git", "config", "--get", "remote.origin.url"])
+        if rc != 0 or not out:
+            return None
+        url = out
+        # Normalize to https://github.com/user/repo
+        if url.startswith("git@github.com:"):
+            url = "https://github.com/" + url.split(":", 1)[1]
+        url = url.replace(".git", "")
+        base_branch = base or self._git_default_branch()
+        return f"{url}/compare/{base_branch}...{branch}?expand=1"
+
+    def _try_open_pr_via_manager(self, branch: str, title: str, body: str) -> Optional[str]:
+        # Best-effort: use your PR manager if available
+        try:
+            from base.self_improve.pr_manager import PRManager  # type: ignore
+        except Exception:
+            return None
+        try:
+            mgr = PRManager(repo_root=str(self.repo_root))
+            # Ensure branch is prepared only once in your flow; here we assume we're already on the branch.
+            pr_url = mgr.create_pr(title=title, body=body, branch_name=branch)
+            return pr_url
+        except Exception:
+            return None
+
+    def run_diagnostic(self, mode: str = "changed", fix: bool = False, base: str | None = None, verbose: bool = False) -> str:
         """
         Run a self-diagnostic scan on the repo with progress bar and conversational reporting.
-        Run a self-diagnostic scan with:
-        - Progress bar in terminal
-        - Spoken progress milestones (20%, 40%, 60%, 80%, 100%)
-        - Conversational reporting at end
-        Run a self-diagnostic scan with:
-        - Progress bar in terminal
-        - Spoken progress milestones (20%, 40%, 60%, 80%, 100%)
-        - Conversational reporting at end
+        Steps:
+        - Run diagnostic_scan.py (Black, Ruff, Pytest, Syntax)
+        - Performance benchmarks
+        - Static code scan
+        - Indexing repository
+        - LLM-assisted scan
+        - Merge results
+        Provides conversational summary at the end.
         """
+        fast = (mode == "changed") and (not fix)
+        started_at = datetime.now(timezone.utc)
         structured = {"issues": []}
         steps = [
             "Running performance benchmarks",
@@ -478,29 +624,57 @@ class Orchestrator:
             "Merging results",
         ]
 
+        # --- Run tightened diagnostic script first --- 
+        script = Path(__file__).resolve().parents[2] / "scripts" / "diagnostic_scan.py"
+        if not script.exists():
+            return "⚠️ Diagnostic script not found."
+
+        cmd = [sys.executable, str(script)]
+        cmd.append("--all" if mode == "all" else "--changed")
+        if fix:
+            cmd.append("--fix")
+        if base:
+            cmd.extend(["--base", base])
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            diag_output = result.stdout.strip() or result.stderr.strip()
+        except Exception as e:
+            return f"⚠️ Diagnostics failed: {e}"
+
+        logger.info(f"Diagnostics:\n{diag_output}")
         print("\nUltron: Beginning self-diagnostic.\n")
 
-        # Progress bar (tqdm) across main stages
-        with tqdm(total=len(steps), bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]") as pbar:
-            
+        diag_output = result.stdout.strip() or result.stderr.strip()
+
+        # --- Progress bar (tqdm) across main stages ---
+        with tqdm(
+            total=len(steps), bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
+        ) as pbar:
+
             # --- 1. Performance benchmarks ---
             benchmarks = []
             try:
-                benchmarks.append(self.benchmark_action("Memory Search", self.store.keyword_search, "test"))
-                benchmarks.append(self.benchmark_action("Embedding Encode", self.embedder.encode, ["benchmark string"]))
-                benchmarks.append(self.benchmark_action("Brain Response", self.brain.ask_brain, "ping", system_prompt="diag"))
+                benchmarks.append(
+                    self.benchmark_action("Memory Search", self.store.keyword_search, "test")
+                )
+                benchmarks.append(
+                    self.benchmark_action("Embedding Encode", self.embedder.encode, ["benchmark string"])
+                )
+                benchmarks.append(
+                    self.benchmark_action("Brain Response", self.brain.ask_brain, "ping", system_prompt="diag")
+                )
             except Exception as e:
                 logger.error(f"Benchmarking failed: {e}")
             pbar.set_description(steps[0])
             pbar.update(1)
 
-            # Lag detection
             laggy = any(b["latency_ms"] > 300 for b in benchmarks)
             if laggy:
                 structured["issues"].append({
                     "file": "performance",
                     "summary": "High latency detected",
-                    "suggestion": "Optimize embedding, DB retrieval, or caching."
+                    "suggestion": "Optimize embedding, DB retrieval, or caching.",
                 })
 
             # --- 2. Static scan ---
@@ -515,8 +689,33 @@ class Orchestrator:
             index_md = self.code_indexer.to_markdown(index)
             pbar.set_description(steps[2])
             pbar.update(1)
+            
+            # --- 3. Index repository ---
+            if fast:
+                index_md = "(fast-mode: index skipped)"
+            else:
+                index = self.code_indexer.scan(incremental=True)   # see Section C below
+                index_md = self.code_indexer.to_markdown(index)
+            pbar.set_description(steps[2]); pbar.update(1)
 
-            # --- 4. LLM scan ---
+            # --- 4. LLM-assisted scan ---
+            if fast:
+                report = {"summary": "LLM scan skipped (fast mode)", "issues": []}
+            else:
+                user_prompt = f"Run a full self-diagnostic scan.\n\nRepository index:\n{index_md}"
+                raw = self.brain.ask_brain(user_prompt, system_prompt=DIAGNOSTIC_SYS_PROMPT)
+                try:
+                    if raw.startswith("```"):
+                        raw = re.sub(r"^```[a-zA-Z]*\n", "", raw).rstrip("`").strip()
+                    report = json.loads(raw)
+                except Exception as e:
+                    logger.error(f"Diagnostic parse error: {e} | Raw: {raw[:200]}")
+                    report = {"summary": "LLM parse failed", "issues": []}
+            structured["issues"].extend(report.get("issues", []))
+            pbar.set_description(steps[3]); pbar.update(1)
+
+
+            # --- 4. LLM-assisted scan ---
             user_prompt = f"""Run a full self-diagnostic scan.\n\nRepository index:\n{index_md}"""
             raw = self.brain.ask_brain(user_prompt, system_prompt=DIAGNOSTIC_SYS_PROMPT)
             try:
@@ -535,186 +734,112 @@ class Orchestrator:
             log_payload = {"issues": issues, "fixable": bool(issues)}
             logger.info(f"[diagnostic] structured={log_payload}")
             if hasattr(self.store, "add_event"):
-                self.store.add_event(content=f"[diagnostic] {log_payload}", importance=0.0, type_="diagnostic")
+                self.store.add_event(
+                    content=f"[diagnostic] {log_payload}", importance=0.0, type_="diagnostic"
+                )
             pbar.set_description(steps[4])
             pbar.update(1)
+        duration_ms = (datetime.now(timezone.utc) - started_at).total_seconds() * 1000.0
 
-        # Conversational reporting
+        try:
+            self.store.add_diagnostic_event(
+                mode=mode,
+                fix=fix,
+                base=base,
+                diag_output=diag_output,
+                issues=issues,                 # collected from static + LLM scan
+                benchmarks=benchmarks,         # from step 1
+                laggy=laggy,                   # derived from benchmarks
+                started_at_iso=started_at.isoformat(),
+                duration_ms=duration_ms,
+            )
+        except Exception as e:
+            logger.error(f"Failed to persist diagnostic event: {e}")
+
+        # --- Conversational reporting ---
         if not issues and not laggy:
-            return "Diagnostic complete. Everything looks clean — no glaring issues."
+            return diag_output + "\nDiagnostic complete. Everything looks clean — no glaring issues."
 
         if laggy:
             lag_summary = "; ".join(f"{b['label']} {b['latency_ms']:.1f}ms" for b in benchmarks)
-            return f"Diagnostic complete. ⚠️ I noticed lag: {lag_summary}. I’ve already proposed an optimization."
+            return diag_output + f"\nDiagnostic complete. ⚠️ I noticed lag: {lag_summary}. Optimization suggested."
+
+        # ===== Feedback loop: auto-propose fixes (only when fix=True) =====
+        if fix:
+            changed = self._git_changed_paths()
+            if changed:
+                ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+                branch = f"diag/autofix/{ts}"
+                self._git_ensure_branch(branch)
+
+                commit_msg = "chore(diagnostics): auto-fix (ruff --fix, black) and housekeeping"
+                committed = self._git_commit_all(commit_msg)
+
+                if committed:
+                    pushed = self._git_push_branch(branch)
+                    title = "chore(diagnostics): auto-fix & hygiene"
+                    # Build a compact PR body
+                    preview = "; ".join(
+                        f"{i.get('file','?')}: {i.get('summary', i.get('issue','?'))}" for i in issues[:5]
+                    )
+                    more = "" if len(issues) <= 5 else f"\n…plus {len(issues)-5} more findings."
+                    body = (
+                        "Automated diagnostics completed.\n\n"
+                        f"**Mode:** {mode}  |  **Fix:** {fix}  |  **Lag:** {'yes' if laggy else 'no'}\n\n"
+                        "### Summary\n"
+                        f"- Benchmarks: {', '.join(f'{b['label']} {b['latency_ms']:.1f}ms' for b in benchmarks) or 'n/a'}\n"
+                        f"- Issues (sample): {preview or 'none'}{more}\n\n"
+                        "### Tool Output (tail)\n"
+                        f"```\n{(diag_output or '')[-2000:]}\n```"
+                    )
+
+                    pr_url = None
+                    if pushed:
+                        pr_url = self._try_open_pr_via_manager(branch, title, body) or self._remote_compare_url(branch, base)
+
+                    # Record in memory for recall
+                    try:
+                        self.store.add_event(
+                            content=json.dumps({
+                                "type": "diagnostic_pr",
+                                "branch": branch,
+                                "pushed": pushed,
+                                "pr_url": pr_url,
+                                "title": title,
+                                "body_preview": body[:1000],
+                                "created_at": datetime.now(timezone.utc).isoformat(),
+                            }),
+                            importance=0.0,
+                            type_="diagnostic",
+                        )
+                    except Exception:
+                        pass
+
+                    # Append a friendly tail to the conversational response
+                    tail = f"\nAuto-fix branch: {branch}"
+                    if pr_url:
+                        tail += f"\nPR ready: {pr_url}"
+                    else:
+                        tail += "\nPR not auto-created; use the compare link above or open manually."
+                    # Combine with your existing return text
+                    return (diag_output + "\n" if diag_output else "") + \
+                        (f"Diagnostic complete. I found: " +
+                            "; ".join(f"{i['file']}: {i.get('summary', i.get('issue','?'))}" for i in issues[:3]) +
+                            ("" if len(issues) <= 3 else f" …and {len(issues)-3} more.")
+                        ) + tail
+                else:
+                    # Nothing actually staged/committed (possible if fix tools made no changes)
+                    pass
+            else:
+                # No file changes detected; nothing to propose.
+                pass
+        # ===== End feedback loop =====
 
         preview = "; ".join(f"{i['file']}: {i.get('summary', i.get('issue','?'))}" for i in issues[:3])
         more = "" if len(issues) <= 3 else f" …and {len(issues)-3} more."
-        return f"Diagnostic complete. I found: {preview}{more}"
-
-    # def run_diagnostic(self, auto_fix: bool = False, verbose: bool = False) -> str:
-    #     """
-    #     Run a self-diagnostic scan on the repo.
-    #     - Conversational summary to user.
-    #     - Logs structured results for later.
-    #     - If auto_fix=True, automatically propose a PR with corrections.
-    #     """
-    #     # ex.
-    #     # _, latency = self.benchmark_action("retriever.search", self.retriever.search, "hello", 3)
-    #     # benchmarks = [{"label": "retriever.search", "latency_ms": latency}]
+        return diag_output + f"\nDiagnostic complete. I found: {preview}{more}"
 
 
-    #     # --- Performance benchmarks ---
-    #     benchmarks = []
-    #     try:
-    #         benchmarks.append(self.benchmark_action("Memory Search", self.store.keyword_search, "test"))
-    #         benchmarks.append(self.benchmark_action("Embedding Encode", self.embedder.encode, ["benchmark string"]))
-    #         benchmarks.append(self.benchmark_action("Brain Response", self.brain.ask_brain, "ping", system_prompt="diag"))
-    #     except Exception as e:
-    #         logger.error(f"Benchmarking failed: {e}")
-
-
-    #     # Laggy detection (simple thresholds)
-    #     laggy = any(b["latency_ms"] > 300 for b in benchmarks)  # 300ms threshold
-    #     if laggy:
-    #         structured.setdefault("issues", []).append({
-    #             "file": "performance",
-    #             "summary": "High latency detected",
-    #             "suggestion": "Optimize embedding, DB retrieval, or caching."
-    #         })
-
-    #         # Auto-trigger self-optimization proposal
-    #         try:
-    #             logger.info("Lag detected — initiating optimization proposal")
-    #             pr_msg = self.propose_code_change("optimize performance")
-    #             # Add the PR link to structured results
-    #             structured.setdefault("recommendations", []).append(pr_msg)
-    #         except Exception as e:
-    #             logger.error(f"Failed to auto-propose optimization: {e}")
-
-            
-            
-    #     # 1. Local static scan
-    #     engine = DiagnosticEngine(repo_root=str(self.repo_root))
-    #     _, structured = engine.scan()
-
-    #     # 2. LLM-assisted scan for higher-level issues
-    #     index = self.code_indexer.scan()
-    #     index_md = self.code_indexer.to_markdown(index)
-
-    #     user_prompt = f"""Run a full self-diagnostic scan.
-
-    # Repository index:
-    # {index_md}
-    # """
-    #     raw = self.brain.ask_brain(user_prompt, system_prompt=DIAGNOSTIC_SYS_PROMPT)
-
-    #     # Defensive JSON parse of LLM report
-    #     report = {}
-    #     try:
-    #         if raw.startswith("```"):
-    #             raw = re.sub(r"^```[a-zA-Z]*\n", "", raw).rstrip("`").strip()
-    #         report = json.loads(raw)
-    #     except Exception as e:
-    #         logger.error(f"Diagnostic parse error: {e} | Raw: {raw[:200]}")
-    #         report = {"summary": "LLM parse failed", "issues": []}
-
-    #     # Merge: local + LLM issues
-    #     issues = structured.get("issues", []) + report.get("issues", [])
-
-    #     # Log structured results
-    #     try:
-    #         log_payload = {"issues": issues, "fixable": bool(issues)}
-    #         logger.info(f"[diagnostic] structured={log_payload}")
-    #         if hasattr(self.store, "add_event"):
-    #             self.store.add_event(
-    #                 content=f"[diagnostic] {log_payload}",
-    #                 importance=0.0,
-    #                 type_="diagnostic",
-    #             )
-    #     except Exception:
-    #         logger.debug("Failed to persist diagnostic results")
-
-    #     # === Auto-fix path ===
-    #     if auto_fix and issues:
-    #         try:
-    #             proposal = self.proposal_engine.propose(
-    #                 "Fix issues discovered during diagnostic scan", index_md=index_md
-    #             )
-    #             results = self.proposal_engine.apply_proposal(proposal)
-
-    #             failed = [f"- {c.path}: {msg}" for (c, ok, msg) in results if not ok]
-
-    #             suffix = f"diagnostic-{int(time.time())}"
-    #             branch = self.pr_manager.prepare_branch(suffix)
-    #             self.pr_manager.commit_and_push(branch, proposal.title)
-    #             pr_url = self.pr_manager.open_pr(branch, proposal=proposal, extra_tests=self.run_tests_in_branch(branch))
-
-    #             if failed:
-    #                 return f"Diagnostic complete. Applied fixes, but some failed:\n" + "\n".join(failed) + \
-    #                     f"\n✅ Auto-fix PR opened → {pr_url}"
-    #             else:
-    #                 return f"Diagnostic complete. All fixes applied successfully.\n✅ Auto-fix PR opened → {pr_url}"
-
-    #         except Exception as e:
-    #             return f"Diagnostic complete. Auto-fix failed: {e}"
-
-    #     # === Conversational / Report path ===
-    #     if not issues and not laggy:
-    #         return "Diagnostic complete. Everything looks clean — no glaring issues to address."
-
-    #     if laggy:
-    #         lag_summary = "; ".join(f"{b['label']} took {b['latency_ms']} ms" for b in benchmarks)
-    #         return f"Diagnostic complete. I noticed lag: {lag_summary}. I’ve already opened a proposal to optimize performance."
-
-    #     if verbose:
-    #         summary = report.get("summary", "No summary provided.")
-    #         recs = report.get("recommendations", [])
-    #         out = [f"### Diagnostic Report\n\n**Summary:** {summary}\n"]
-    #         out.append("\n**Issues Found:**\n")
-    #         for i in issues:
-    #             out.append(f"- {i.get('file','?')}: {i.get('summary', i.get('issue','?'))}")
-    #         if recs:
-    #             out.append("\n**Recommendations:**\n")
-    #             out.extend(f"- {r}" for r in recs)
-    #         return "\n".join(out)
-
-    #     # Short conversational mode
-    #     proposal = self.proposal_engine.propose(
-    #         "Fix issues discovered during diagnostic scan", index_md=index_md
-    #     )
-    #     preview = "; ".join(f"{i['file']}: {i.get('summary', i.get('issue','?'))}" for i in issues[:3])
-    #     more = "" if len(issues) <= 3 else f" …and {len(issues)-3} more."
-    #     suffix = f"diagnostic-{int(time.time())}"
-    #     branch = self.pr_manager.prepare_branch(suffix)
-    #     self.pr_manager.commit_and_push(branch, proposal.title)
-    #     pr_url = self.pr_manager.open_pr(branch, proposal=proposal)
-
-    #     # --- NEW: Run pytest suite and capture results ---
-    #     try:
-    #         result = subprocess.run(
-    #             ["pytest", "--maxfail=5", "--disable-warnings", "-q"],
-    #             cwd=str(self.repo_root),
-    #             capture_output=True,
-    #             text=True,
-    #             timeout=120
-    #         )
-    #         passed = result.returncode == 0
-    #         test_summary = result.stdout.strip().splitlines()[-10:]  # last lines only
-    #         test_report = "\n".join(test_summary)
-    #     except Exception as e:
-    #         passed = False
-    #         test_report = f"⚠️ Failed to run tests: {e}"
-
-    #     # --- Update PR body with test results ---
-    #     self.pr_manager.update_pr_body(
-    #         branch=branch,
-    #         extra=f"\n\n## Test Results\n{'✅ All tests passed' if passed else '❌ Some tests failed'}\n```\n{test_report}\n```"
-    #     )
-        
-    #     output.append(f"\n\n✅ Auto-fix applied → [PR Link]({pr_url})")
-        
-    #     return f"Diagnostic complete. I noticed a few things: {preview}.{more}"
-    
     def speak_progress(self, percent: int, desc: str):
         """Speak progress aloud if TTS is available."""
         steps = [
@@ -724,7 +849,7 @@ class Orchestrator:
             "LLM-assisted scan",
             "Merging results",
         ]
-        
+
         try:
             if percent % 20 == 0:  # only speak at milestones
                 msg = f"Diagnostic {percent}% complete. {desc}."
@@ -739,24 +864,40 @@ class Orchestrator:
         if hasattr(self, "voice"):
             self.voice.say("Beginning self-diagnostic.")
 
-        with tqdm(total=len(steps), bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]") as pbar:
+        with tqdm(
+            total=len(steps), bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
+        ) as pbar:
             for idx, step in enumerate(steps, start=1):
                 # --- STEP EXECUTION ---
                 if step == "Running performance benchmarks":
                     benchmarks = []
                     try:
-                        benchmarks.append(self.benchmark_action("Memory Search", self.store.keyword_search, "test"))
-                        benchmarks.append(self.benchmark_action("Embedding Encode", self.embedder.encode, ["benchmark string"]))
-                        benchmarks.append(self.benchmark_action("Brain Response", self.brain.ask_brain, "ping", system_prompt="diag"))
+                        benchmarks.append(
+                            self.benchmark_action(
+                                "Memory Search", self.store.keyword_search, "test"
+                            )
+                        )
+                        benchmarks.append(
+                            self.benchmark_action(
+                                "Embedding Encode", self.embedder.encode, ["benchmark string"]
+                            )
+                        )
+                        benchmarks.append(
+                            self.benchmark_action(
+                                "Brain Response", self.brain.ask_brain, "ping", system_prompt="diag"
+                            )
+                        )
                     except Exception as e:
                         logger.error(f"Benchmarking failed: {e}")
                     laggy = any(b["latency_ms"] > 300 for b in benchmarks)
                     if laggy:
-                        structured["issues"].append({
-                            "file": "performance",
-                            "summary": "High latency detected",
-                            "suggestion": "Optimize embedding, DB retrieval, or caching."
-                        })
+                        structured["issues"].append(
+                            {
+                                "file": "performance",
+                                "summary": "High latency detected",
+                                "suggestion": "Optimize embedding, DB retrieval, or caching.",
+                            }
+                        )
 
                 elif step == "Static code scan":
                     engine = DiagnosticEngine(repo_root=str(self.repo_root))
@@ -768,7 +909,9 @@ class Orchestrator:
                     index_md = self.code_indexer.to_markdown(index)
 
                 elif step == "LLM-assisted scan":
-                    user_prompt = f"""Run a full self-diagnostic scan.\n\nRepository index:\n{index_md}"""
+                    user_prompt = (
+                        f"""Run a full self-diagnostic scan.\n\nRepository index:\n{index_md}"""
+                    )
                     raw = self.brain.ask_brain(user_prompt, system_prompt=DIAGNOSTIC_SYS_PROMPT)
                     try:
                         if raw.startswith("```"):
@@ -784,7 +927,11 @@ class Orchestrator:
                     log_payload = {"issues": issues, "fixable": bool(issues)}
                     logger.info(f"[diagnostic] structured={log_payload}")
                     if hasattr(self.store, "add_event"):
-                        self.store.add_event(content=f"[diagnostic] {log_payload}", importance=0.0, type_="diagnostic")
+                        self.store.add_event(
+                            content=f"[diagnostic] {log_payload}",
+                            importance=0.0,
+                            type_="diagnostic",
+                        )
 
                 # --- PROGRESS UPDATE ---
                 pbar.set_description(step)
@@ -802,7 +949,9 @@ class Orchestrator:
             lag_summary = "; ".join(f"{b['label']} {b['latency_ms']:.1f}ms" for b in benchmarks)
             msg = f"Diagnostic complete. ⚠️ I noticed lag: {lag_summary}. Optimization proposed."
         else:
-            preview = "; ".join(f"{i['file']}: {i.get('summary', i.get('issue','?'))}" for i in issues[:3])
+            preview = "; ".join(
+                f"{i['file']}: {i.get('summary', i.get('issue','?'))}" for i in issues[:3]
+            )
             more = "" if len(issues) <= 3 else f" …and {len(issues)-3} more."
             msg = f"Diagnostic complete. I found: {preview}{more}"
 
@@ -810,23 +959,23 @@ class Orchestrator:
         if hasattr(self, "voice"):
             self.voice.say(msg)
         return msg
-    
 
     def run_tests_in_branch(self, branch: str) -> str:
         """Run pytest inside the repo and return results as a string."""
         try:
             result = subprocess.run(
                 ["pytest", "--maxfail=5", "--disable-warnings", "-q"],
+                check=False,
                 cwd=str(self.repo_root),
                 capture_output=True,
                 text=True,
-                timeout=300
+                timeout=300,
             )
             output = result.stdout + "\n" + result.stderr
             return f"Exit code {result.returncode}\n```\n{output}\n```"
         except Exception as e:
             return f"⚠️ Test run failed: {e}"
-        
+
     # -------------------------
     # Facts (semantic de-dupe)
     # -------------------------
@@ -920,14 +1069,16 @@ class Orchestrator:
         Index recent events for the semantic retriever.
         """
         try:
-            cur = self.db.conn.execute("SELECT content FROM events ORDER BY id DESC LIMIT ?", (limit,))
+            cur = self.db.conn.execute(
+                "SELECT content FROM events ORDER BY id DESC LIMIT ?", (limit,)
+            )
             texts = [r[0] for r in cur.fetchall() if r and r[0]]
             if texts:
                 self.retriever.index_texts(texts)
         except Exception:
             logger.exception("ingest_bootstrap failed")
 
-    def _retrieve_context(self, user_text: str, k: int = 4) -> List[str]:
+    def _retrieve_context(self, user_text: str, k: int = 4) -> list[str]:
         try:
             hits = self.store.keyword_search(user_text, limit=k)
             return hits or []
@@ -941,7 +1092,7 @@ class Orchestrator:
         except Exception as e:
             logger.debug(f"maybe_store_text skipped: {e}")
 
-    def _compose_messages(self, user_text: str, memories: List[str]):
+    def _compose_messages(self, user_text: str, memories: list[str]):
         context_lines = "\n".join(f"- {m}" for m in memories) if memories else ""
         memory_block = f"\nRelevant notes:\n{context_lines}\n" if context_lines else ""
         user_content = f"{user_text}\n{memory_block}".strip()
@@ -949,6 +1100,7 @@ class Orchestrator:
             {"role": "system", "content": ULTRON_SYSTEM_PROMPT},
             {"role": "user", "content": user_content},
         ]
+
     # ------------------------------------
     # High-level user flow with composer
     # ------------------------------------
@@ -967,10 +1119,15 @@ class Orchestrator:
 
             if "propose" in lower:
                 # Try to extract what user wants improved
-                instruction = lower.replace("ultron", "").replace("propose", "").strip() or "Apply a small improvement"
+                instruction = (
+                    lower.replace("ultron", "").replace("propose", "").strip()
+                    or "Apply a small improvement"
+                )
                 return self.propose_code_change(instruction)
 
-            if any(k in lower for k in ("laggy", "slow", "optimize", "diagnose", "diagnostic", "scan")):
+            if any(
+                k in lower for k in ("laggy", "slow", "optimize", "diagnose", "diagnostic", "scan")
+            ):
                 auto = any(k in lower for k in ("optimize", "auto", "autofix", "fix"))
                 return self.run_diagnostic(auto_fix=auto)
 
@@ -1063,9 +1220,6 @@ class Orchestrator:
             logger.exception("handle_user failed")
             return "Sorry — something went wrong while composing my reply."
 
-
-
-
     # -------------------------------------
     # Quick single-fact memory query (cos)
     # -------------------------------------
@@ -1099,7 +1253,9 @@ class Orchestrator:
     # ------------------------------------
     def add_event_from_natural(self, text: str) -> str:
         try:
-            title_match = re.search(r"(?:add|schedule)\s+(.+?)\s+(every|weekly|daily|monthly)", text, flags=re.I)
+            title_match = re.search(
+                r"(?:add|schedule)\s+(.+?)\s+(every|weekly|daily|monthly)", text, flags=re.I
+            )
             title = title_match.group(1).strip().title() if title_match else "Untitled Event"
 
             recur_match = re.search(r"(every .+|daily .+|weekly .+|monthly .+)", text, flags=re.I)
@@ -1128,7 +1284,7 @@ class Orchestrator:
     # -----------------------
     # Knowledge Graph helper
     # -----------------------
-    def _parse_dt_or_none(self, s: Optional[str]) -> Optional[datetime]:
+    def _parse_dt_or_none(self, s: str | None) -> datetime | None:
         if not s:
             return None
         try:
@@ -1145,14 +1301,35 @@ class Orchestrator:
             tokens = user_text.lower().split()
             now_iso = datetime.utcnow().isoformat()
 
-            ask_past = any(p in user_text.lower() for p in ["used to", "was my", "were my", "formerly", "in the past"])
-            ask_future = any(p in user_text.lower() for p in ["will", "next", "in", "upcoming", "future"])
+            ask_past = any(
+                p in user_text.lower()
+                for p in ["used to", "was my", "were my", "formerly", "in the past"]
+            )
+            ask_future = any(
+                p in user_text.lower() for p in ["will", "next", "in", "upcoming", "future"]
+            )
 
             time_start, time_end = extract_time_from_text(user_text)
 
             # Calendar lens (agenda)
-            if any(x in tokens for x in ["upcoming", "schedule", "meetings", "agenda", "calendar", "next", "week", "month"]):
-                events = self.calendar.expand(time_start, time_end) if (time_start and time_end) else self.query_upcoming_events(14)
+            if any(
+                x in tokens
+                for x in [
+                    "upcoming",
+                    "schedule",
+                    "meetings",
+                    "agenda",
+                    "calendar",
+                    "next",
+                    "week",
+                    "month",
+                ]
+            ):
+                events = (
+                    self.calendar.expand(time_start, time_end)
+                    if (time_start and time_end)
+                    else self.query_upcoming_events(14)
+                )
                 if events:
                     lines = []
                     for ev in events[:20]:
@@ -1175,7 +1352,9 @@ class Orchestrator:
                 if rels:
                     facts: list[str] = []
                     for src, rel, tgt, conf, vfrom, vto in rels:
-                        facts.append(f"{src} will {rel.replace('_',' ')} {tgt} (starting {vfrom}{' until ' + vto if vto else ''})")
+                        facts.append(
+                            f"{src} will {rel.replace('_',' ')} {tgt} (starting {vfrom}{' until ' + vto if vto else ''})"
+                        )
                     return "Knowledge Graph Future Facts:\n" + "\n".join(facts)
 
             # Time-bounded KG
@@ -1189,20 +1368,25 @@ class Orchestrator:
                         vf = self._parse_dt_or_none(vfrom)
                         vt = self._parse_dt_or_none(vto)
                         if ts is not None and te is not None:
-                            too_new = (vf is not None and vf > te)
-                            expired = (vt is not None and vt < ts)
+                            too_new = vf is not None and vf > te
+                            expired = vt is not None and vt < ts
                             if too_new or expired:
                                 continue
                         now_dt = datetime.utcnow()
                         is_active = (vt is None) or (vt >= now_dt)
                         tense = "is" if is_active else "was"
-                        facts.append(f"{src} {tense} {rel.replace('_',' ')} {tgt} (from {vfrom} until {vto or 'present'})")
+                        facts.append(
+                            f"{src} {tense} {rel.replace('_',' ')} {tgt} (from {vfrom} until {vto or 'present'})"
+                        )
                     if facts:
                         return "Knowledge Graph Time-Bounded Facts:\n" + "\n".join(facts)
 
             # Multi-hop reasoning
             if hasattr(self.kg_store, "multi_hop"):
-                paths = self.kg_store.multi_hop(entity, max_hops=3, direction="both", at_time=now_iso) or []
+                paths = (
+                    self.kg_store.multi_hop(entity, max_hops=3, direction="both", at_time=now_iso)
+                    or []
+                )
                 formatted: list[str] = []
                 now_dt = datetime.utcnow()
                 for path in paths:
@@ -1222,7 +1406,6 @@ class Orchestrator:
             logger.debug("query_kg_context failed (non-fatal).")
             return ""
 
-
     def ask_confirmation_if_unsure(self, suggestion: str, confidence: float, usage_id: int = None):
         """Return a confirmation prompt if confidence is low; caller sends it to user UI/REPL."""
         try:
@@ -1239,7 +1422,7 @@ class Orchestrator:
 
     def record_user_feedback(self, usage_id: int, text: str):
         pid = None
-        if hasattr(self, 'policy_by_usage_id') and usage_id in self.policy_by_usage_id:
+        if hasattr(self, "policy_by_usage_id") and usage_id in self.policy_by_usage_id:
             pid = self.policy_by_usage_id.get(usage_id)
 
         # fallback to DB lookup if not found in memory (this makes the mapping durable)
@@ -1251,12 +1434,12 @@ class Orchestrator:
 
         # fallback to last_policy_id if still nothing
         if not pid:
-            pid = getattr(self, 'last_policy_id', None)
+            pid = getattr(self, "last_policy_id", None)
 
         """Record feedback, update events, reward the tone bandit, and optionally reinforce habits/facts."""
         try:
             # 1) polarity
-            score = quick_polarity(text)   # [-1,1]
+            score = quick_polarity(text)  # [-1,1]
             kind = "confirm" if score > 0.2 else "dislike" if score < -0.2 else "note"
 
             # 2) record in DB
@@ -1284,7 +1467,6 @@ class Orchestrator:
     # Simpler "message in → message out" high-level IO
     # ------------------------------------------------
     def handle_user_message(self, text: str, system_prompt: str = "You are Ultron.") -> str:
-
         """
         A lighter pipeline than handle_user(); uses compose_prompt but skips KG when safe.
         """
@@ -1347,7 +1529,11 @@ class Orchestrator:
                 if maybe:
                     self.store.add_event(
                         f"{maybe['type']}: {maybe['content']} | reply: {maybe.get('response','')}",
-                        importance=float(self.decider.decide(text)[0]) if hasattr(self.decider, "score") else 0.0,
+                        importance=(
+                            float(self.decider.decide(text)[0])
+                            if hasattr(self.decider, "score")
+                            else 0.0
+                        ),
                         type_=maybe["type"],
                     )
             except Exception:
@@ -1367,7 +1553,9 @@ class Orchestrator:
         """
         try:
             normalized = text.strip().lower()
-            if any(w in normalized for w in ["yes", "correct", "good", "right", "ok", "yep", "works"]):
+            if any(
+                w in normalized for w in ["yes", "correct", "good", "right", "ok", "yep", "works"]
+            ):
                 if self.miner:
                     self.miner.reinforce(last_action)
                 return "Got it. I’ll remember to do it that way."
@@ -1413,10 +1601,9 @@ class Orchestrator:
                 return f"I’ve forgotten {deleted} memory entries containing '{user_text}'."
             return f"I couldn’t find any memories containing '{user_text}'."
 
-        except Exception as e:
+        except Exception:
             logger.exception("forget_memory failed")
             return "Sorry — I couldn’t forget that memory."
-
 
     # ------------------
     # Fallback chat API

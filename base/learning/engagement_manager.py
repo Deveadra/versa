@@ -1,25 +1,20 @@
-
 # base/learning/engagement_manager.py
 from __future__ import annotations
+
 import random
 from datetime import datetime, timedelta
-from typing import Optional, Dict, List, Any
+from typing import Any
 
 from loguru import logger
 
-from base.calendar.calendar import get_upcoming_events
-from base.llm.brain import ask_brain, ask_jarvis_stream
-from base.memory.store import MemoryStore
-from base.learning.habit_miner import HabitMiner
-from base.policy.policy_store import PolicyStore
 from base.core.profile_manager import ProfileManager
-from base.llm.prompt_composer import compose_prompt
-from base.policy.rule_engine import evaluate_condition, derive_expectation, choose_tone
 from base.database.sqlite import SQLiteConn
+from base.learning.habit_miner import HabitMiner
 from base.learning.sentiment import quick_polarity
-from base.policy.tone_memory import get_tone, choose_tone_for_topic
-from base.policy.consequence_linker import style_complaint
-from base.learning.mood_engine import MoodEngine
+from base.llm.brain import ask_brain
+from base.memory.store import MemoryStore
+from base.policy.policy_store import PolicyStore
+from base.policy.rule_engine import choose_tone, evaluate_condition
 
 
 class EngagementManager:
@@ -47,12 +42,12 @@ class EngagementManager:
         # Ensure policy operates on the raw sqlite connection
         self.policy = PolicyStore(self.db.conn)
         self.profile_mgr = profile_mgr
-        self.last_engagement: Optional[datetime] = None
+        self.last_engagement: datetime | None = None
         self.min_gap = timedelta(minutes=28)  # don’t nag too often
         self.blocked = set()  # explicit opt-outs
 
     # ---------------- helpers ----------------
-    def _load_signals(self) -> Dict[str, Dict[str, Any]]:
+    def _load_signals(self) -> dict[str, dict[str, Any]]:
         """
         Merge base + derived signals and normalize them into dict payloads.
         This keeps the structure uniform: Dict[str, Dict[str, Any]]
@@ -61,7 +56,7 @@ class EngagementManager:
         raw = self.policy.ctx_mgr.all_signals()
         raw |= self.policy.ctx_mgr.eval_derived_signals()
 
-        signals: Dict[str, Dict[str, Any]] = {}
+        signals: dict[str, dict[str, Any]] = {}
         for k, v in raw.items():
             if isinstance(v, dict):
                 signals[k] = v
@@ -71,14 +66,14 @@ class EngagementManager:
         return signals
 
     # ---------------- events builder ----------------
-    def collect_engagement_events(self) -> List[dict]:
+    def collect_engagement_events(self) -> list[dict]:
         """
         Collect all eligible engagement events across rules.
         Returns structured events like:
             {"topic": str, "tone": str, "context": str, "rule_id": int, "score": float}
         """
         signals = self._load_signals()
-        events: List[dict] = []
+        events: list[dict] = []
 
         rules = self.policy.conn.execute(
             "SELECT * FROM engagement_rules WHERE enabled=1 ORDER BY priority ASC, id ASC"
@@ -105,13 +100,15 @@ class EngagementManager:
             for k, v in (bindings or {}).items():
                 context_line = context_line.replace(f"{{{{{k}}}}}", str(v))
 
-            events.append({
-                "topic": r["topic_id"],
-                "tone": meta.get("tone", tone),
-                "context": context_line.strip(),
-                "rule_id": r["id"],
-                "score": float(meta.get("score", severity)),
-            })
+            events.append(
+                {
+                    "topic": r["topic_id"],
+                    "tone": meta.get("tone", tone),
+                    "context": context_line.strip(),
+                    "rule_id": r["id"],
+                    "score": float(meta.get("score", severity)),
+                }
+            )
 
             # Track stats & mentions (self-learning)
             self._mark_fired(r["id"])
@@ -123,7 +120,7 @@ class EngagementManager:
         return events
 
     # ---------------- decide + speak ----------------
-    def check_for_engagement(self) -> Optional[str]:
+    def check_for_engagement(self) -> str | None:
         """
         Decide on the single best engagement event and generate Ultron's line.
         Uses collect_engagement_events internally with tie-breaking.
@@ -153,7 +150,8 @@ class EngagementManager:
 
         # Step 3: if still tied on score+tone, randomize for variety
         equally_good = [
-            e for e in top_events
+            e
+            for e in top_events
             if e.get("score", 0.0) == best["score"] and e.get("tone") == best["tone"]
         ]
         if len(equally_good) > 1:
@@ -219,7 +217,7 @@ class EngagementManager:
 
         # Sentiment check with normalization
         recent = self.memory.keyword_search("", limit=5) or []
-        texts: List[str] = []
+        texts: list[str] = []
         for item in recent:
             if isinstance(item, str):
                 texts.append(item)
@@ -231,7 +229,7 @@ class EngagementManager:
                 texts.append(str(item))
 
         if texts:
-            scores: List[float] = [float(quick_polarity(t)) for t in texts]
+            scores: list[float] = [float(quick_polarity(t)) for t in texts]
             avg_mood = sum(scores) / len(scores)
             if avg_mood < -0.3:
                 logger.info("Engagement trigger: negative sentiment")
@@ -260,7 +258,7 @@ class EngagementManager:
         ]
         return random.choice(curiosities)
 
-    def maybe_engage(self) -> Optional[str]:
+    def maybe_engage(self) -> str | None:
         if self.should_engage():
             return self.generate_engagement()
         return None

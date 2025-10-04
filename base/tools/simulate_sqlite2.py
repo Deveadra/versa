@@ -1,21 +1,22 @@
 # Simple simulator that logs events to a local sqlite (no repo imports required)
-import sqlite3
+import json
 import os
 import random
-import json
+import sqlite3
 
-DB = '/tmp/ultron_local_sim.db'
+DB = "/tmp/ultron_local_sim.db"
 
 try:
-  os.remove(DB)
+    os.remove(DB)
 except Exception:
-  pass
+    pass
 
 conn = sqlite3.connect(DB)
 conn.row_factory = sqlite3.Row
 cur = conn.cursor()
 
-cur.executescript("""
+cur.executescript(
+    """
 CREATE TABLE IF NOT EXISTS usage_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_text TEXT,
@@ -40,17 +41,18 @@ CREATE TABLE IF NOT EXISTS facts (
   value TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
-""")
+"""
+)
 conn.commit()
 
 for i in range(50):
-  svc = random.choices(['spotify', 'youtube_music'], weights=[0.8, 0.2])[0]
-  genre = random.choices(['lo-fi', 'jazz', 'vaporwave'], weights=[0.7, 0.2, 0.1])[0]
-  params = json.dumps({'service': svc, 'genre': genre})
-  cur.execute(
-    "INSERT INTO usage_log (user_text, normalized_intent, resolved_action, params_json, success, latency_ms) VALUES (?, ?, ?, ?, ?, ?)",
-    (f'Play {genre}', 'music.play', 'play:music', params, 1, random.randint(30, 300))
-  )
+    svc = random.choices(["spotify", "youtube_music"], weights=[0.8, 0.2])[0]
+    genre = random.choices(["lo-fi", "jazz", "vaporwave"], weights=[0.7, 0.2, 0.1])[0]
+    params = json.dumps({"service": svc, "genre": genre})
+    cur.execute(
+        "INSERT INTO usage_log (user_text, normalized_intent, resolved_action, params_json, success, latency_ms) VALUES (?, ?, ?, ?, ?, ?)",
+        (f"Play {genre}", "music.play", "play:music", params, 1, random.randint(30, 300)),
+    )
 
 conn.commit()
-print('Wrote 50 simulated usage events to', DB)
+print("Wrote 50 simulated usage events to", DB)

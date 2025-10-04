@@ -1,22 +1,25 @@
 # base/llm/brain.py
 from __future__ import annotations
-import os
-from typing import List, cast, Optional
 
+import os
+from typing import cast
+
+from loguru import logger
 from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
-from loguru import logger
 
-from ..core.core import messages, reset_session, JARVIS_PROMPT, CURRENT_PERSONALITY, PERSONALITIES
 from base.core.audio import stream_speak
 from base.plugins import PLUGINS
-from config.config import settings
 from base.voice.tts_elevenlabs import Voice
+from config.config import settings
+
+from ..core.core import PERSONALITIES, messages
 
 # ---------- OpenAI client / model ----------
 _CLIENT = OpenAI(api_key=settings.openai_api_key)  # new SDK
 _MODEL = settings.openai_model or os.getenv("BRAIN_MODEL", "gpt-4o-mini")
 # complete = cast(OpenAI, _CLIENT).chat.completions.create
+
 
 def _check_vocal_cue(user_text: str) -> str | None:
     lowered = user_text.lower()
@@ -28,7 +31,7 @@ def _check_vocal_cue(user_text: str) -> str | None:
 
 
 class Brain:
-    def __init__(self, client: Optional[OpenAI] = None, model: Optional[str] = None):
+    def __init__(self, client: OpenAI | None = None, model: str | None = None):
         self.client = client or _CLIENT
         self.model = model or _MODEL
         self.voice = Voice.get_instance()
@@ -46,7 +49,9 @@ class Brain:
         JARVIS_PROMPT = CURRENT_PERSONALITY["prompt"]
 
     # -------- ask (text or json) -----------
-    def ask_brain(self, prompt: str, system_prompt: str | None = None, response_format: str = "text") -> str:
+    def ask_brain(
+        self, prompt: str, system_prompt: str | None = None, response_format: str = "text"
+    ) -> str:
         """
         Send a prompt to OpenAI. Supports text or JSON output.
         """
@@ -94,7 +99,9 @@ class Brain:
                 return fn()
 
         messages.append({"role": "user", "content": user_text})
-        typed_msgs: List[ChatCompletionMessageParam] = cast(List[ChatCompletionMessageParam], messages)
+        typed_msgs: list[ChatCompletionMessageParam] = cast(
+            list[ChatCompletionMessageParam], messages
+        )
 
         stream = self.client.chat.completions.create(
             model=self.model,
@@ -124,8 +131,10 @@ class Brain:
 # ---------- Singleton + module-level wrappers ----------
 _brain = Brain()
 
+
 def ask_brain(prompt: str, system_prompt: str | None = None, response_format: str = "text") -> str:
     return _brain.ask_brain(prompt, system_prompt=system_prompt, response_format=response_format)
+
 
 def ask_jarvis_stream(user_text: str) -> str:
     return _brain.ask_jarvis_stream(user_text)

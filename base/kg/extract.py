@@ -1,16 +1,18 @@
-
 import re
+
 import spacy
+
 try:
     nlp = spacy.load("en_core_web_sm")
 except OSError:
     from spacy.cli.download import download
+
     download("en_core_web_sm")
     nlp = spacy.load("en_core_web_sm")
-    
+
+from .entities import DEFAULT_TYPE
 from .relations import RELATION_SYNONYMS
 from .store import KGStore
-from .entities import ENTITY_TYPES, DEFAULT_TYPE
 
 nlp = spacy.load("en_core_web_sm")
 
@@ -36,8 +38,10 @@ NER_TO_KG = {
     "LANGUAGE": "Concept",
 }
 
+
 def infer_type(ent_label: str) -> str:
     return NER_TO_KG.get(ent_label.upper(), DEFAULT_TYPE)
+
 
 def process_text(store: KGStore, text: str):
     doc = nlp(text)

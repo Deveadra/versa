@@ -1,16 +1,21 @@
+from calendar.calendar import get_upcoming_events
 
-from base.core.stylizer import stylize_response
 from base.core.profile import get_pref
-from calendar.calendar import get_upcoming_events, add_event
+from base.core.stylizer import stylize_response
 
 # Structured state for calendar event creation
 event_state = {"title": None, "date": None, "time": None, "confirm": False}
 
+
 def has_pending():
-    return any(v is None for k, v in event_state.items() if k != "confirm") or event_state["confirm"]
+    return (
+        any(v is None for k, v in event_state.items() if k != "confirm") or event_state["confirm"]
+    )
+
 
 def is_calendar_command(text: str) -> bool:
     return "add event" in text.lower() or "new event" in text.lower() or "calendar" in text.lower()
+
 
 def handle_calendar_command(text):
     default_calendar = get_pref("default_calendar", "primary") or "primary"
@@ -52,6 +57,7 @@ def handle(text, personality=None, mode="default"):
         return stylize_response(personality, mode, "calendar", data)
 
     return f"Next event: {next_event['title']} at {next_event['time']}"
+
 
 # def handle(text: str, active_plugins):
 #     global event_state

@@ -1,10 +1,9 @@
 from __future__ import annotations
-from typing import Dict, Any, Optional, List
-from loguru import logger
+
 from base.core.profile_manager import ProfileManager
-from base.learning.habit_miner import HabitMiner
 from base.database.sqlite import SQLiteConn
-import json
+from base.learning.habit_miner import HabitMiner
+
 
 class PersonaPrimer:
     def __init__(self, profile_mgr: ProfileManager, miner: HabitMiner, db: SQLiteConn):
@@ -18,36 +17,38 @@ class PersonaPrimer:
             profile = self.pm.load_profile() if self.pm else {}
         except Exception:
             profile = {}
-        pieces: List[str] = []
+        pieces: list[str] = []
         # basic profile fields
-        if profile.get('name'):
+        if profile.get("name"):
             pieces.append(f"Name: {profile.get('name')}")
-        if profile.get('preferred_player'):
+        if profile.get("preferred_player"):
             pieces.append(f"preferred_player: {profile.get('preferred_player')}")
-        if profile.get('favorite_music'):
+        if profile.get("favorite_music"):
             pieces.append(f"favorite_music: {profile.get('favorite_music')}")
-        if profile.get('greeting_style'):
+        if profile.get("greeting_style"):
             pieces.append(f"greeting_style: {profile.get('greeting_style')}")
-        if profile.get('sleep_time'):
+        if profile.get("sleep_time"):
             pieces.append(f"sleep_time: {profile.get('sleep_time')}")
         # top habits
         try:
             if self.miner:
-                top_music = self.miner.top('music.service=', 1)
+                top_music = self.miner.top("music.service=", 1)
                 if top_music:
-                    pieces.append('habit: ' + top_music[0]['key'])
-                top_genre = self.miner.top('music.genre=', 1)
+                    pieces.append("habit: " + top_music[0]["key"])
+                top_genre = self.miner.top("music.genre=", 1)
                 if top_genre:
-                    pieces.append('habit: ' + top_genre[0]['key'])
-                top_greet = self.miner.top('ux.greeting_style=', 1)
+                    pieces.append("habit: " + top_genre[0]["key"])
+                top_greet = self.miner.top("ux.greeting_style=", 1)
                 if top_greet:
-                    pieces.append('habit: ' + top_greet[0]['key'])
+                    pieces.append("habit: " + top_greet[0]["key"])
         except Exception:
             pass
         # lightweight facts: pick top 3 most recently reinforced facts
         try:
             c = self.db.conn.cursor()
-            c.execute("SELECT key, value FROM facts ORDER BY COALESCE(last_reinforced, created_at) DESC LIMIT 3")
+            c.execute(
+                "SELECT key, value FROM facts ORDER BY COALESCE(last_reinforced, created_at) DESC LIMIT 3"
+            )
             rows = c.fetchall()
             for r in rows:
                 pieces.append(f"fact: {r['key']}={r['value']}")
@@ -55,6 +56,6 @@ class PersonaPrimer:
             pass
         # limit to reasonable length
         if not pieces:
-            return ''
+            return ""
         # join into a short block
-        return '\n'.join(pieces[:6])
+        return "\n".join(pieces[:6])

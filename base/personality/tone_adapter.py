@@ -1,10 +1,13 @@
 # assistant/base/personality/tone_adapter.py (augment)
 from __future__ import annotations
-from typing import Dict, Any
+
+from typing import Any
+
 from .policy import PolicyBandit
 
+
 class ToneAdapter:
-    def __init__(self, profile: Dict[str, Any]):
+    def __init__(self, profile: dict[str, Any]):
         self.profile = profile
         self.bandit = PolicyBandit()
 
@@ -16,7 +19,7 @@ class ToneAdapter:
             return "Be patient, warm, and reassuring."
         return "Use your usual adaptive style."
 
-    def choose_policy(self) -> Dict[str, Any]:
+    def choose_policy(self) -> dict[str, Any]:
         prior = self.profile.get("greeting_style")
         return self.bandit.select(prior)
 

@@ -1,19 +1,18 @@
-
 # base/learning/habit_miner.py
 from __future__ import annotations
-import json
-import datetime
-import math
 
-from pathlib import Path
+import datetime
+import json
+import math
 from collections import Counter, defaultdict
-from typing import List, Dict, Any, Optional
-from loguru import logger
 from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+from loguru import logger
+
 from base.database.sqlite import SQLiteConn
 from base.memory.store import MemoryStore
-
-
 
 PROFILE_PATH = Path("config/user_profile.json")
 
@@ -35,11 +34,12 @@ def _time_bucket(ts: str) -> str:
     else:
         return "late at night"
 
+
 class HabitMiner:
     def __init__(self, db: SQLiteConn, memory, store: MemoryStore):
         self.db = db
         self.memory = memory
-        self.habits: List[Dict[str, Any]] = []  # cache
+        self.habits: list[dict[str, Any]] = []  # cache
         self.store = store
 
     def load_profile(self) -> dict:
@@ -52,22 +52,20 @@ class HabitMiner:
 
     def save_profile(self, profile: dict) -> None:
         PROFILE_PATH.write_text(json.dumps(profile, indent=2), encoding="utf-8")
-        
-    def learn(self, event: str, ts: Optional[str] = None) -> None:
+
+    def learn(self, event: str, ts: str | None = None) -> None:
         """Record an event and try to identify recurring patterns."""
         timestamp = datetime.fromisoformat(ts) if ts else datetime.utcnow()
         self.habits.append({"action": event, "time": timestamp.time()})
         logger.debug(f"HabitMiner.learn: Added habit candidate {event} at {timestamp}")
 
-    def extract_candidates(self, days: int = 30) -> List[tuple[str, str]]:
+    def extract_candidates(self, days: int = 30) -> list[tuple[str, str]]:
         """Pull recent events from memory with timestamps."""
         cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
-        cur = self.store.conn.execute(
-            "SELECT content, ts FROM events WHERE ts >= ?", (cutoff,)
-        )
+        cur = self.store.conn.execute("SELECT content, ts FROM events WHERE ts >= ?", (cutoff,))
         return [(r["content"], r["ts"]) for r in cur.fetchall()]
 
-    def summarize(self, candidates: List[tuple[str, str]], top_k: int = 5) -> List[str]:
+    def summarize(self, candidates: list[tuple[str, str]], top_k: int = 5) -> list[str]:
         """
         Collapse repeated behaviors into short natural-language summaries,
         grouped by time of day.
@@ -84,12 +82,12 @@ class HabitMiner:
                 summaries.append(f'User often says: "{content}" {bucket} (seen {count} times)')
         return summaries
 
-    def get_summaries(self, days: int = 30, top_k: int = 5) -> List[str]:
+    def get_summaries(self, days: int = 30, top_k: int = 5) -> list[str]:
         """Convenience wrapper to fetch recent events and return summaries."""
         candidates = self.extract_candidates(days=days)
         return self.summarize(candidates, top_k=top_k)
 
-    def predict_next(self, action: str) -> Optional[datetime]:
+    def predict_next(self, action: str) -> datetime | None:
         """Very simple predictor: use the last recorded time for the action."""
         times = [h["time"] for h in self.habits if h["action"] == action]
         if not times:
@@ -98,7 +96,7 @@ class HabitMiner:
         now = datetime.utcnow()
         return datetime.combine(now.date(), last_time)
 
-    def check_upcoming(self, minutes: int = 30) -> List[Dict[str, Any]]:
+    def check_upcoming(self, minutes: int = 30) -> list[dict[str, Any]]:
         """
         Return habits likely to occur within the next `minutes`.
         Right now this is naive: looks at last seen time and compares to current time.
@@ -126,7 +124,7 @@ class HabitMiner:
         rows = cur.fetchall()
         commands = []
         tod_hist = defaultdict(int)  # hour bucket histogram
-        
+
         for r in rows:
             text = (r[0] or "").lower()
             ts = r[1] or ""
@@ -145,8 +143,8 @@ class HabitMiner:
 
         if commands:
             c = Counter(commands)
-            profile["most_used_commands"] = [k for k,_ in c.most_common(5)]
-            
+            profile["most_used_commands"] = [k for k, _ in c.most_common(5)]
+
         phrases = [r[0] for r in cur.fetchall()]
         if phrases:
             cleaned = [p.lower().replace("play", "").strip() for p in phrases]
@@ -177,7 +175,12 @@ class HabitMiner:
 
         # --- mine routines by time-of-day ---
         # store buckets like: morning/afternoon/evening/night
-        buckets = {"morning": range(5,12), "afternoon": range(12,18), "evening": range(18,23), "night": tuple(list(range(23,24))+list(range(0,5)))}
+        buckets = {
+            "morning": range(5, 12),
+            "afternoon": range(12, 18),
+            "evening": range(18, 23),
+            "night": tuple(list(range(23, 24)) + list(range(0, 5))),
+        }
         rout = {}
         if "music" in commands:
             # naïve example: if evenings dominate total events and music used recently, we assume evening music habit
@@ -193,14 +196,14 @@ class HabitMiner:
         # # ---- Save changes ----
         # self.save_profile(profile)
         # return profile
-    
+
     def reinforce(self, action: str) -> None:
         """
         Strengthen confidence in a habit/behavior and immediately enrich profile.
         """
-        
+
         profile = self.load_profile()
-        
+
         profile["reinforcements"] = profile.get("reinforcements", {})
         profile["reinforcements"][action] = profile["reinforcements"].get(action, 0) + 1
         self.save_profile(profile)
@@ -210,9 +213,9 @@ class HabitMiner:
         """
         Penalize or mark a behavior as needing correction and update profile.
         """
-        
+
         profile = self.load_profile()
-        
+
         profile["adjustments"] = profile.get("adjustments", {})
         profile["adjustments"][action] = profile["adjustments"].get(action, 0) + 1
         self.save_profile(profile)
@@ -227,20 +230,12 @@ class HabitMiner:
         profile = self.load_profile()
 
         if profile.get("reinforcements"):
-            strong = sorted(
-                profile["reinforcements"].items(),
-                key=lambda kv: kv[1],
-                reverse=True
-            )
+            strong = sorted(profile["reinforcements"].items(), key=lambda kv: kv[1], reverse=True)
             for action, count in strong[:3]:
                 summary_lines.append(f"Reinforced preference: {action} (x{count}).")
 
         if profile.get("adjustments"):
-            weak = sorted(
-                profile["adjustments"].items(),
-                key=lambda kv: kv[1],
-                reverse=True
-            )
+            weak = sorted(profile["adjustments"].items(), key=lambda kv: kv[1], reverse=True)
             for action, count in weak[:3]:
                 summary_lines.append(f"Adjusted/avoided: {action} (x{count}).")
 
@@ -248,14 +243,13 @@ class HabitMiner:
         if summary_lines:
             profile["persona_summary"] = "\n".join(summary_lines)
             self.save_profile(profile)
-            
-    
+
     def export_summary(self) -> str:
         """
         Summarize mined habits/preferences into a natural-language block.
         Returns an empty string if nothing useful is stored.
         """
-        
+
         habits = []
         profile = self.load_profile()
         lines = []
@@ -276,7 +270,7 @@ class HabitMiner:
 
         # # Add more here as HabitMiner grows
         # return "\n".join(habits) if habits else ""
-        
+
         cmds = profile.get("most_used_commands") or []
         if cmds:
             lines.append("Frequently used domains: " + ", ".join(cmds) + ".")
@@ -290,11 +284,12 @@ class HabitMiner:
             lines.append(profile["persona_summary"])
 
         # crisp preference flags
-        if profile.get("tone_bias") == "succinct" or "Dislikes long answers" in profile.get("persona_summary",""):
+        if profile.get("tone_bias") == "succinct" or "Dislikes long answers" in profile.get(
+            "persona_summary", ""
+        ):
             lines.append("Dislikes long answers.")
 
         return "\n".join(lines)
-    
 
     def prune_habits(self) -> None:
         """
@@ -305,22 +300,21 @@ class HabitMiner:
         """
         profile = self.load_profile()
         reinf = profile.get("reinforcements", {})
-        adj   = profile.get("adjustments", {})
+        adj = profile.get("adjustments", {})
 
         # Decay counts
         reinf = {k: v - 1 for k, v in reinf.items() if v > 1}
-        adj   = {k: v - 1 for k, v in adj.items() if v > 1}
+        adj = {k: v - 1 for k, v in adj.items() if v > 1}
 
         # Keep only strong habits
         reinf = {k: v for k, v in reinf.items() if v >= 3}
-        adj   = {k: v for k, v in adj.items() if v >= 3}
+        adj = {k: v for k, v in adj.items() if v >= 3}
 
         profile["reinforcements"] = reinf
         profile["adjustments"] = adj
 
         # Refresh persona summary
         self._update_persona_summary()
-
 
     def _decay_factor(self, days_delta: float) -> float:
         return math.exp(-math.log(2) * (days_delta / 30.0))
@@ -387,4 +381,4 @@ class HabitMiner:
             (f"{prefix}%", n),
         )
         cols = ["key", "count", "score"]
-        return [dict(zip(cols, r)) for r in c.fetchall()]
+        return [dict(zip(cols, r, strict=False)) for r in c.fetchall()]

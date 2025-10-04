@@ -1,14 +1,20 @@
-import struct, tempfile, threading, sounddevice as sd, soundfile as sf
 import os
-import pvporcupine
+import struct
+import tempfile
+import threading
 import time
 
+import pvporcupine
+import sounddevice as sd
+import soundfile as sf
 from playsound import playsound
 from pvporcupine import create
-from .core import JarvisState, state, stop_playback, pick_ack, CURRENT_PERSONALITY
 from TTS.api import TTS
 
+from .core import JarvisState, pick_ack, state, stop_playback
+
 tts = TTS("tts_models/en/jenny/jenny")
+
 
 def listen_until_silence(threshold=0.01, timeout=8, samplerate=16000):
     print("[Listening...]")
@@ -36,14 +42,15 @@ def listen_until_silence(threshold=0.01, timeout=8, samplerate=16000):
 def stream_speak(text):
     global stop_playback
     stop_playback = False
+
     def _play():
         global stop_playback
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
             tts.tts_to_file(text=text, file_path=tmp.name)
             if not stop_playback:
                 playsound(tmp.name)
-    threading.Thread(target=_play, daemon=True).start()
 
+    threading.Thread(target=_play, daemon=True).start()
 
 
 def interrupt():
@@ -52,7 +59,9 @@ def interrupt():
     ack = pick_ack("stop")
     stream_speak(ack)
 
+
 # 💡 print("DEBUG PICOVOICE KEY:", os.getenv("PICOVOICE_API_KEY"))
+
 
 def listen_for_wake_word():
     """
@@ -74,11 +83,16 @@ def listen_for_wake_word():
         porcupine = create(
             access_key=access_key,
             # access_key=os.getenv("PICOVOICE_API_KEY"),
-            keywords=["jarvis"]
+            keywords=["jarvis"],
         )
         print("[DEBUG] Porcupine initialized successfully.")
 
-        pa = sd.RawInputStream(samplerate=porcupine.sample_rate, blocksize=porcupine.frame_length, channels=1, dtype="int16")
+        pa = sd.RawInputStream(
+            samplerate=porcupine.sample_rate,
+            blocksize=porcupine.frame_length,
+            channels=1,
+            dtype="int16",
+        )
         pa.start()
         print("[Idle... say 'Jarvis' to wake me up.]")
         while state == JarvisState.IDLE:
@@ -88,7 +102,7 @@ def listen_for_wake_word():
                 pa.stop()
                 return
         return porcupine
-    
+
     except pvporcupine.PorcupineActivationError as e:
         raise RuntimeError(
             f"Porcupine activation failed: {e}\n"
@@ -102,7 +116,4 @@ def listen_for_wake_word():
         ) from e
 
     except Exception as e:
-        raise RuntimeError(
-            f"Unexpected error initializing Porcupine: {e}"
-        ) from e
-
+        raise RuntimeError(f"Unexpected error initializing Porcupine: {e}") from e

@@ -1,20 +1,25 @@
 # assistant/base/learning/review.py
 from __future__ import annotations
-import sqlite3
-from typing import List, Dict, Any
-from loguru import logger
-from pathlib import Path
-from datetime import datetime
-from base.voice.tts_elevenlabs import Voice
 
+import sqlite3
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from loguru import logger
+
+from base.voice.tts_elevenlabs import Voice
 
 LOG_DIR = Path("logs/morning_reviews")
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
+
 def _format_pending_lines(rows):
     lines = []
     for p in rows:
-        conf = f"{float(p.get('confidence', 0.0)):.2f}" if p.get("confidence") is not None else "n/a"
+        conf = (
+            f"{float(p.get('confidence', 0.0)):.2f}" if p.get("confidence") is not None else "n/a"
+        )
         score = f"{float(p.get('score', 0.0)):.2f}" if p.get("score") is not None else "n/a"
         lines.append(
             f"[{p['id']}] {p['name']}  topic={p['topic_id']}  (confidence={conf}, score={score})"
@@ -22,6 +27,7 @@ def _format_pending_lines(rows):
         if p.get("rationale"):
             lines.append(f"   ↳ {p['rationale']}")
     return lines
+
 
 def write_morning_digest(conn, speak: bool = True) -> str:
     """
@@ -92,9 +98,9 @@ def summarize_pending_text(conn) -> str:
     if not rows:
         return "No proposals waiting for review."
     return "\n".join(_format_pending_lines(rows))
-  
-  
-def list_pending(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
+
+
+def list_pending(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     """Return all pending proposals (status='pending')."""
     cur = conn.execute("SELECT * FROM proposed_rules WHERE status='pending'")
     return [dict(r) for r in cur.fetchall()]
@@ -102,52 +108,68 @@ def list_pending(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
 
 def approve_rule(conn: sqlite3.Connection, name: str) -> None:
     """Mark a proposal as approved for next nightly cycle."""
-    conn.execute("""
+    conn.execute(
+        """
         UPDATE proposed_rules
         SET status='approved', approved_at=datetime('now')
         WHERE name=? AND status='pending'
-    """, (name,))
-    conn.execute("""
+    """,
+        (name,),
+    )
+    conn.execute(
+        """
         INSERT INTO audit_log (created_at, rationale)
         VALUES (datetime('now'), ?)
-    """, (f"Rule '{name}' approved by user"))
+    """,
+        (f"Rule '{name}' approved by user"),
+    )
     conn.commit()
     logger.info(f"Approved rule '{name}'.")
 
 
 def deny_rule(conn: sqlite3.Connection, name: str) -> None:
     """Deny a proposal permanently."""
-    conn.execute("""
+    conn.execute(
+        """
         UPDATE proposed_rules
         SET status='denied', denied_at=datetime('now')
         WHERE name=? AND status='pending'
-    """, (name,))
-    conn.execute("""
+    """,
+        (name,),
+    )
+    conn.execute(
+        """
         INSERT INTO audit_log (created_at, rationale)
         VALUES (datetime('now'), ?)
-    """, (f"Rule '{name}' denied by user"))
+    """,
+        (f"Rule '{name}' denied by user"),
+    )
     conn.commit()
     logger.info(f"Denied rule '{name}'.")
 
 
 def revert_rule(conn: sqlite3.Connection, name: str) -> None:
     """Schedule a rule to be removed on next nightly cycle."""
-    conn.execute("""
+    conn.execute(
+        """
         UPDATE proposed_rules
         SET status='reverted', reverted_at=datetime('now')
         WHERE name=? AND status!='pending'
-    """, (name,))
-    conn.execute("""
+    """,
+        (name,),
+    )
+    conn.execute(
+        """
         INSERT INTO audit_log (created_at, rationale)
         VALUES (datetime('now'), ?)
-    """, (f"Rule '{name}' marked for revert by user"))
+    """,
+        (f"Rule '{name}' marked for revert by user"),
+    )
     conn.commit()
     logger.info(f"Rule '{name}' scheduled for revert.")
 
 
-def list_history(conn: sqlite3.Connection, limit: int = 20) -> List[Dict[str, Any]]:
+def list_history(conn: sqlite3.Connection, limit: int = 20) -> list[dict[str, Any]]:
     """Show the last N proposals (any status)."""
-    cur = conn.execute(
-        "SELECT * FROM proposed_rules ORDER BY rowid DESC LIMIT ?", (limit,)
-    )
+    cur = conn.execute("SELECT * FROM proposed_rules ORDER BY rowid DESC LIMIT ?", (limit,))
     return [dict(r) for r in cur.fetchall()]

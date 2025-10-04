@@ -1,8 +1,8 @@
 import random
 import re
-from base.apps import email_prompts as prompts
-from base.core.context import set_context, get_context, clear_context
 
+from base.apps import email_prompts as prompts
+from base.core.context import clear_context, get_context, set_context
 
 # Conversation state for email composition
 email_pending = {"recipient": None, "subject": None, "body": None, "confirm": False}
@@ -45,8 +45,9 @@ def handle_email_command(text):
             draft["body"] = text
             set_context("email_draft", draft)
             return "Say 'send it' when you’re ready.", "Draft complete. Say 'send it' to send."
-    
+
     return None, None
+
 
 # from base.core.stylizer import stylize_response
 
@@ -57,8 +58,13 @@ def handle_email_command(text):
 #     {"from": "bob@example.com", "subject": "Invoice update"}
 # ]
 
+
 def has_pending():
-    return any(v is None for k, v in email_pending.items() if k != "confirm") and any(v is not None for v in email_pending.values()) or email_pending["confirm"]
+    return (
+        any(v is None for k, v in email_pending.items() if k != "confirm")
+        and any(v is not None for v in email_pending.values())
+        or email_pending["confirm"]
+    )
 
 
 def is_email_command(text: str) -> bool:
@@ -85,6 +91,7 @@ def is_email_command(text: str) -> bool:
 #         return stylize_response(personality, mode, "email", data)
 
 #     return f"You have {unread_count} unread emails. Latest from {latest['from']} about {latest['subject']}."
+
 
 def handle(text: str, active_plugins):
     """
@@ -144,18 +151,18 @@ def handle(text: str, active_plugins):
             confirm_prompt = random.choice(prompts.ASK_CONFIRM_VARIANTS).format(
                 subject=subject, body=body
             )
-            email_pending.update({
-                "recipient": recipient,
-                "subject": subject,
-                "body": body,
-                "confirm": True
-            })
+            email_pending.update(
+                {"recipient": recipient, "subject": subject, "body": body, "confirm": True}
+            )
             return None, confirm_prompt
         elif recipient and not subject:
             email_pending["recipient"] = recipient
             return None, random.choice(prompts.ASK_SUBJECT_VARIANTS)
         else:
-            return "I couldn't parse the full email. Please specify recipient, subject, and body.", None
+            return (
+                "I couldn't parse the full email. Please specify recipient, subject, and body.",
+                None,
+            )
 
     except Exception as e:
         return f"Error parsing send email command: {e}", None

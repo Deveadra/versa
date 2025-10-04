@@ -1,6 +1,6 @@
 import sqlite3
 from datetime import datetime
-from typing import Optional
+
 from base.database.sqlite import SQLiteConn
 
 
@@ -8,7 +8,9 @@ def get_tone(conn: sqlite3.Connection, topic_id: str, base_tone: str) -> str:
     """
     Decide which tone to use, factoring in last tone + outcome.
     """
-    row = conn.execute("SELECT last_tone, last_outcome FROM tone_memory WHERE topic_id=?", (topic_id,)).fetchone()
+    row = conn.execute(
+        "SELECT last_tone, last_outcome FROM tone_memory WHERE topic_id=?", (topic_id,)
+    ).fetchone()
     if not row:
         return base_tone  # no history → stick with policy decision
 
@@ -32,31 +34,48 @@ def get_tone(conn: sqlite3.Connection, topic_id: str, base_tone: str) -> str:
 
     return base_tone
 
-def update_tone_memory(conn: SQLiteConn, topic_id: str, tone: str, outcome: str, consequence: Optional[str] = None):
+
+def update_tone_memory(
+    conn: SQLiteConn, topic_id: str, tone: str, outcome: str, consequence: str | None = None
+):
     cur = conn.cursor()
-    row = cur.execute("SELECT id, ignored_count, acted_count FROM tone_memory WHERE topic_id=? AND tone=?",
-                      (topic_id, tone)).fetchone()
+    row = cur.execute(
+        "SELECT id, ignored_count, acted_count FROM tone_memory WHERE topic_id=? AND tone=?",
+        (topic_id, tone),
+    ).fetchone()
 
     if row:
         ignored = row["ignored_count"] + (1 if outcome == "ignored" else 0)
         acted = row["acted_count"] + (1 if outcome == "acted" else 0)
-        cur.execute("""
+        cur.execute(
+            """
             UPDATE tone_memory
             SET ignored_count=?, acted_count=?, consequence_note=?, last_updated=?
             WHERE id=?
-        """, (ignored, acted, consequence or row.get("consequence_note"), datetime.utcnow().isoformat(), row["id"]))
+        """,
+            (
+                ignored,
+                acted,
+                consequence or row.get("consequence_note"),
+                datetime.utcnow().isoformat(),
+                row["id"],
+            ),
+        )
     else:
-        cur.execute("""
+        cur.execute(
+            """
             INSERT INTO tone_memory (topic_id, tone, ignored_count, acted_count, consequence_note, last_updated)
             VALUES (?, ?, ?, ?, ?, ?)
-        """, (
-            topic_id,
-            tone,
-            1 if outcome == "ignored" else 0,
-            1 if outcome == "acted" else 0,
-            consequence,
-            datetime.utcnow().isoformat()
-        ))
+        """,
+            (
+                topic_id,
+                tone,
+                1 if outcome == "ignored" else 0,
+                1 if outcome == "acted" else 0,
+                consequence,
+                datetime.utcnow().isoformat(),
+            ),
+        )
     conn.commit()
 
 
@@ -67,8 +86,10 @@ def choose_tone_for_topic(conn: SQLiteConn, topic_id: str) -> str:
     - If acted often → stay genuine.
     """
     cur = conn.cursor()
-    rows = cur.execute("SELECT tone, ignored_count, acted_count, consequence_note FROM tone_memory WHERE topic_id=?",
-                       (topic_id,)).fetchall()
+    rows = cur.execute(
+        "SELECT tone, ignored_count, acted_count, consequence_note FROM tone_memory WHERE topic_id=?",
+        (topic_id,),
+    ).fetchall()
     if not rows:
         return "genuine"
 

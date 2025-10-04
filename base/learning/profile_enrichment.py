@@ -1,15 +1,19 @@
 from __future__ import annotations
-from typing import Dict, Any
+
+from typing import Any
+
 from loguru import logger
-from base.core.profile_manager import ProfileManager, handle_profile_command
+
+from base.core.profile_manager import ProfileManager
 from base.learning.habit_miner import HabitMiner
+
 
 class ProfileEnricher:
     def __init__(self, pm: ProfileManager, miner: HabitMiner):
         self.pm = pm
         self.miner = miner
 
-    def run(self) -> Dict[str, Any]:
+    def run(self) -> dict[str, Any]:
         profile = self.pm.load_profile()
         top_svc = self.miner.top("music.service=", 1)
         if top_svc:
@@ -32,5 +36,7 @@ class ProfileEnricher:
             profile.setdefault("sleep_time", st)
             profile["sleep_time"] = st
         self.pm.save_profile(profile)
-        logger.info("ProfileEnricher wrote fields: preferred_player, favorite_music, greeting_style, sleep_time")
+        logger.info(
+            "ProfileEnricher wrote fields: preferred_player, favorite_music, greeting_style, sleep_time"
+        )
         return profile

@@ -7,6 +7,7 @@ PERSONALITIES_DIR = os.path.join(os.path.dirname(__file__))
 # Cache to avoid reloading from disk repeatedly
 _loaded_personalities = {}
 
+
 def load_personality(base: str, mode: str = "default"):
     """
     Load a specific personality base (e.g., 'jarvis', 'ultron') and mode
@@ -22,7 +23,7 @@ def load_personality(base: str, mode: str = "default"):
     if not os.path.exists(path):
         raise FileNotFoundError(f"Personality file not found: {path}")
 
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         data = json.load(f)
 
     _loaded_personalities[key] = data
@@ -34,7 +35,8 @@ def list_available_bases():
     Return all available bases (folders) under personalities.
     """
     return [
-        name for name in os.listdir(PERSONALITIES_DIR)
+        name
+        for name in os.listdir(PERSONALITIES_DIR)
         if os.path.isdir(os.path.join(PERSONALITIES_DIR, name))
     ]
 
@@ -46,8 +48,4 @@ def list_modes(base: str):
     base_path = os.path.join(PERSONALITIES_DIR, base)
     if not os.path.exists(base_path):
         return []
-    return [
-        os.path.splitext(f)[0]
-        for f in os.listdir(base_path)
-        if f.endswith(".json")
-    ]
+    return [os.path.splitext(f)[0] for f in os.listdir(base_path) if f.endswith(".json")]

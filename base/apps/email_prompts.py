@@ -62,6 +62,5 @@ CANCEL_SEND_VARIANTS = [
     "The email has been discarded.",
     "No problem, I won’t send it.",
     "Okay, draft deleted.",
-    "Cancelled the message.", 
+    "Cancelled the message.",
 ]
-

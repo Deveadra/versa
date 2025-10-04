@@ -1,9 +1,13 @@
-
 from __future__ import annotations
-import re, os, ast
-import time, tracemalloc
+
+import ast
+import re
+import time
+import tracemalloc
 from pathlib import Path
+
 from loguru import logger
+
 
 class DiagnosticEngine:
     def __init__(self, repo_root: str):
@@ -24,7 +28,9 @@ class DiagnosticEngine:
                 try:
                     ast.parse(text)
                 except SyntaxError as e:
-                    issues.append({"file": str(pyfile), "summary": f"Syntax error at line {e.lineno}"})
+                    issues.append(
+                        {"file": str(pyfile), "summary": f"Syntax error at line {e.lineno}"}
+                    )
                 # Style scan: trailing whitespace
                 if re.search(r"[ \t]+$", text, re.M):
                     issues.append({"file": str(pyfile), "summary": "Trailing whitespace"})
@@ -34,23 +40,23 @@ class DiagnosticEngine:
         structured = {"issues": issues, "fixable": bool(issues)}
         return "Scan complete", structured
 
-    def benchmark_action(self,label: str, func, *args, **kwargs) -> dict:
-      """Run func, measure latency and memory, return stats + output."""
-      start = time.perf_counter()
-      tracemalloc.start()
-      try:
-          result = func(*args, **kwargs)
-      finally:
-          current, peak = tracemalloc.get_traced_memory()
-          tracemalloc.stop()
-      end = time.perf_counter()
-      return {
-          "label": label,
-          "latency_ms": round((end - start) * 1000, 2),
-          "mem_kb": round(peak / 1024, 2),
-          "result": str(result)[:200]  # preview
-      }
-      
+    def benchmark_action(self, label: str, func, *args, **kwargs) -> dict:
+        """Run func, measure latency and memory, return stats + output."""
+        start = time.perf_counter()
+        tracemalloc.start()
+        try:
+            result = func(*args, **kwargs)
+        finally:
+            current, peak = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+        end = time.perf_counter()
+        return {
+            "label": label,
+            "latency_ms": round((end - start) * 1000, 2),
+            "mem_kb": round(peak / 1024, 2),
+            "result": str(result)[:200],  # preview
+        }
+
     def apply_fixes(self, structured):
         """
         Try to auto-fix simple issues like whitespace.

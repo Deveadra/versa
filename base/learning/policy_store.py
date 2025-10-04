@@ -1,7 +1,7 @@
-
 from __future__ import annotations
-from typing import Optional
+
 from base.database.sqlite import SQLiteConn
+
 
 def write_policy_assignment(conn: SQLiteConn, usage_id: int, policy_id: str):
     """Persist mapping usage_id -> policy_id."""
@@ -12,7 +12,8 @@ def write_policy_assignment(conn: SQLiteConn, usage_id: int, policy_id: str):
     )
     conn.conn.commit()
 
-def read_policy_assignment(conn: SQLiteConn, usage_id: int) -> Optional[str]:
+
+def read_policy_assignment(conn: SQLiteConn, usage_id: int) -> str | None:
     """Return policy_id previously stored for this usage_id, or None."""
     c = conn.cursor()
     c.execute("SELECT policy_id FROM policy_assignments WHERE usage_id = ?", (usage_id,))

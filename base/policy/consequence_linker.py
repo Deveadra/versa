@@ -1,10 +1,8 @@
-
 import json
 import random
 import re
-from datetime import datetime
-from base.policy.tone_memory import update_tone_memory
 
+from base.policy.tone_memory import update_tone_memory
 
 # Hardcoded bootstrap map — acts as seed knowledge
 CONSEQUENCE_MAP = {
@@ -100,36 +98,39 @@ def link_consequence(conn, user_text: str):
         return False
 
     # Find a recent ignored rule for this topic (last 24h)
-    row = cur.execute("""
+    row = cur.execute(
+        """
         SELECT rule_id FROM rule_history
         WHERE topic_id=? AND outcome='ignored'
           AND timestamp > datetime('now','-1 day')
         ORDER BY timestamp DESC
         LIMIT 1
-    """, (topic,)).fetchone()
+    """,
+        (topic,),
+    ).fetchone()
 
     if row:
         update_tone_memory(
             conn,
             topic_id=topic,
-            tone="genuine",   # TODO: retrieve actual tone from tone_memory
+            tone="genuine",  # TODO: retrieve actual tone from tone_memory
             outcome="ignored",
-            consequence=f"user reported {keyword}"
+            consequence=f"user reported {keyword}",
         )
         return True
 
     # If no ignored rule, still track it in complaint_clusters
-    cur.execute("""
+    cur.execute(
+        """
         INSERT INTO complaint_clusters (cluster, topic_id, examples, last_updated, last_example)
         VALUES (?, ?, ?, datetime('now'), ?)
         ON CONFLICT(cluster, topic_id) DO UPDATE SET
             examples=?,
             last_example=?,
             last_updated=datetime('now')
-    """, (
-        keyword, topic, json.dumps([user_text]), user_text,
-        json.dumps([user_text]), user_text
-    ))
+    """,
+        (keyword, topic, json.dumps([user_text]), user_text, json.dumps([user_text]), user_text),
+    )
     conn.commit()
 
     return False

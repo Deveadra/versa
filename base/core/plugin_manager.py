@@ -1,4 +1,3 @@
-
 class PluginManager:
     def __init__(self):
         self.plugins = {}
@@ -13,11 +12,7 @@ class PluginManager:
             keywords: list of trigger keywords
             flow: whether this plugin supports multi-step interactions
         """
-        self.plugins[name] = {
-            "handler": handler,
-            "keywords": keywords or [],
-            "flow": flow
-        }
+        self.plugins[name] = {"handler": handler, "keywords": keywords or [], "flow": flow}
 
     def handle(self, text, plugins, personality=None, mode="default"):
         """

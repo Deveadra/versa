@@ -1,5 +1,7 @@
 import psutil
+
 from base.core.stylizer import stylize_response
+
 
 def get_system_stats(personality=None, mode="default"):
     cpu = psutil.cpu_percent(interval=1)

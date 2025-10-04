@@ -1,16 +1,16 @@
 # base/memory/store.py
 from __future__ import annotations
 
+import json
 import sqlite3
-from pathlib import Path
+import time
 from datetime import datetime, timedelta
-from typing import List, Tuple, Optional
-from loguru import logger
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from base.database.sqlite import SQLiteConn
 from base.memory.scoring import assess_importance
 from config.config import settings
-
 
 DB_PATH = Path("memory.db")
 
@@ -31,7 +31,7 @@ class MemoryStore:
         self._subscribers = []
 
     # ---------- schema ----------
-        # ---------- schema ----------
+    # ---------- schema ----------
     def _ensure_schema(self) -> None:
         cur = self.conn.cursor()
 
@@ -102,6 +102,7 @@ class MemoryStore:
             self._fts_enabled = True
         except sqlite3.OperationalError as e:
             from loguru import logger
+
             logger.error(f"FTS init failed: {e}")
             self._fts_enabled = False
 
@@ -121,23 +122,29 @@ class MemoryStore:
         )
         self.conn.commit()
 
-    def list_facts(self) -> List[Tuple[str, str]]:
+    def list_facts(self) -> list[tuple[str, str]]:
         cur = self.conn.execute("SELECT key, value FROM facts ORDER BY key")
         return [(r["key"], r["value"]) for r in cur.fetchall()]
 
     def forget(self, topic: str) -> int:
         """Delete facts and events containing the given topic string."""
-        n1 = self.conn.execute(
-            "DELETE FROM facts WHERE key LIKE ? OR value LIKE ?",
-            (f"%{topic}%", f"%{topic}%"),
-        ).rowcount or 0
-        n2 = self.conn.execute(
-            "DELETE FROM events WHERE content LIKE ?",
-            (f"%{topic}%",),
-        ).rowcount or 0
+        n1 = (
+            self.conn.execute(
+                "DELETE FROM facts WHERE key LIKE ? OR value LIKE ?",
+                (f"%{topic}%", f"%{topic}%"),
+            ).rowcount
+            or 0
+        )
+        n2 = (
+            self.conn.execute(
+                "DELETE FROM events WHERE content LIKE ?",
+                (f"%{topic}%",),
+            ).rowcount
+            or 0
+        )
         self.conn.commit()
         return n1 + n2
-    
+
     def subscribe(self, callback):
         """
         Register a callback to be called whenever a new event is added.
@@ -166,17 +173,119 @@ class MemoryStore:
                 self._fts_enabled = False
 
         self.conn.commit()
-        
+
         for cb in self._subscribers:
             try:
                 cb(content=content, ts=ts, type_=type_, importance=importance)
             except Exception as e:
                 from loguru import logger
+
                 logger.error(f"Subscriber failed: {e}")
-                
+
         return int(rowid)
 
-    def maybe_store_text(self, text: str, explicit_type: Optional[str] = None) -> bool:
+    def add_diagnostic_event(
+        self,
+        *,
+        mode: str,
+        fix: bool,
+        base: Optional[str],
+        diag_output: str,
+        issues: List[Dict[str, Any]],
+        benchmarks: List[Dict[str, Any]],
+        laggy: bool,
+        started_at_iso: str,
+        duration_ms: float,
+    ) -> None:
+        """
+        Persist a structured diagnostic record into memory.
+        Uses the existing event log mechanism so nothing else in your stack breaks.
+        """
+        payload = {
+            "type": "diagnostic",
+            "mode": mode,
+            "fix": fix,
+            "base": base,
+            "tool_output": diag_output[-8000:],  # cap to avoid massive blobs
+            "issues": issues,
+            "benchmarks": benchmarks,
+            "laggy": laggy,
+            "started_at": started_at_iso,
+            "duration_ms": duration_ms,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "version": 1,
+        }
+        # Important: keep the same event API your code already uses
+        # (content text field + type_ discriminator).
+        try:
+            self.add_event(
+                content=json.dumps(payload, ensure_ascii=False),
+                importance=0.0,
+                type_="diagnostic",
+            )
+        except Exception as e:
+            # Graceful fallback: don't crash the run; keep an audit trail.
+            try:
+                with open("diagnostics.log", "a", encoding="utf-8") as f:
+                    f.write(json.dumps({"fallback": True, **payload}) + "\n")
+            except Exception:
+                pass
+
+    def recent_diagnostics(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Return the most recent diagnostic events (decoded).
+        Falls back to reading diagnostics.log if the event store is unavailable.
+        """
+        out: List[Dict[str, Any]] = []
+        try:
+            # If you have a native list_events(type_=...) use it here.
+            # Otherwise this uses a common content/type_ pattern.
+            rows = self.list_events(type_="diagnostic", limit=limit)  # <-- your existing helper if present
+            for r in rows:
+                # r["content"] expected to be a JSON string from add_diagnostic_event
+                try:
+                    out.append(json.loads(r.get("content", "{}")))
+                except Exception:
+                    continue
+            return out
+        except Exception:
+            # Fallback to file if DB listing fails
+            try:
+                with open("diagnostics.log", "r", encoding="utf-8") as f:
+                    lines = f.readlines()[-limit:]
+                for ln in lines:
+                    try:
+                        out.append(json.loads(ln))
+                    except Exception:
+                        continue
+                return out
+            except Exception:
+                return out  # empty if nothing works
+
+    def last_diagnostic(self) -> Optional[Dict[str, Any]]:
+        items = self.recent_diagnostics(limit=1)
+        return items[0] if items else None
+
+    def diagnostics_since(self, iso_timestamp: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """
+        Filter diagnostics since a given ISO timestamp.
+        """
+        try:
+            since = datetime.fromisoformat(iso_timestamp.replace("Z", "+00:00"))
+        except Exception:
+            return self.recent_diagnostics(limit=limit)
+
+        results: List[Dict[str, Any]] = []
+        for ev in self.recent_diagnostics(limit=limit):
+            try:
+                ts = datetime.fromisoformat(ev.get("created_at", "").replace("Z", "+00:00"))
+                if ts >= since:
+                    results.append(ev)
+            except Exception:
+                continue
+        return results
+
+    def maybe_store_text(self, text: str, explicit_type: str | None = None) -> bool:
         score = assess_importance(text)
         if score < settings.importance_threshold:
             return False
@@ -192,7 +301,7 @@ class MemoryStore:
             (cutoff, float(settings.importance_threshold)),
         )
         self.conn.commit()
-        
+
         return int(cur.rowcount or 0)
 
     # ---------- retrieval ----------
@@ -230,14 +339,12 @@ class MemoryStore:
         """
         try:
             cur = self.conn.execute(
-                "SELECT * FROM memories WHERE content MATCH ? LIMIT ?",
-                (query, limit)
+                "SELECT * FROM memories WHERE content MATCH ? LIMIT ?", (query, limit)
             )
             return [dict(r) for r in cur.fetchall()]
         except Exception:
             cur = self.conn.execute(
-                "SELECT * FROM memories WHERE content LIKE ? LIMIT ?",
-                (f"%{query}%", limit)
+                "SELECT * FROM memories WHERE content LIKE ? LIMIT ?", (f"%{query}%", limit)
             )
             return [dict(r) for r in cur.fetchall()]
 

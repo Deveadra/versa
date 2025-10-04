@@ -1,16 +1,14 @@
-
 from __future__ import annotations
-from typing import List, Tuple, Set, Optional
-from ..database.sqlite import SQLiteConn
-from .models import Entity, Relation
+
 from datetime import datetime
-from .entities import ENTITY_TYPES, DEFAULT_TYPE
-from .relations import RELATION_SYNONYMS, RELATION_INVERSES, RELATION_CONSTRAINTS
 
-
+from ..database.sqlite import SQLiteConn
+from .entities import DEFAULT_TYPE, ENTITY_TYPES
+from .relations import RELATION_CONSTRAINTS, RELATION_INVERSES, RELATION_SYNONYMS
 
 # A uniform row type for relations everywhere
-RelationRow = Tuple[str, str, str, float, Optional[str], Optional[str]]
+RelationRow = tuple[str, str, str, float, str | None, str | None]
+
 
 class KGStore:
     def __init__(self, db: SQLiteConn):
@@ -59,9 +57,7 @@ class KGStore:
             # row["id"] is Any; cast via int()
             return int(row["id"])
 
-        cur = self.db.conn.execute(
-            "INSERT INTO entities(name, type) VALUES(?, ?)", (name, type_)
-        )
+        cur = self.db.conn.execute("INSERT INTO entities(name, type) VALUES(?, ?)", (name, type_))
         self.db.conn.commit()
         return int(cur.lastrowid)  # type: ignore[attr-defined] # lastrowid is int|None in typeshed; after INSERT it's not None
 
@@ -125,7 +121,6 @@ class KGStore:
         self.db.conn.commit()
         return rid
 
-
     def add_alias(self, entity_id: int, alias: str) -> None:
         self.db.conn.execute(
             "INSERT INTO aliases(entity_id, alias) VALUES(?, ?)",
@@ -152,7 +147,7 @@ class KGStore:
         return None
 
     # ---------- queries (all return 6-tuples) ----------
-    def query_relations(self, entity_name: str, at_time: str | None = None) -> List[RelationRow]:
+    def query_relations(self, entity_name: str, at_time: str | None = None) -> list[RelationRow]:
         sql = """
         SELECT e1.name, r.relation, e2.name, r.confidence, r.valid_from, r.valid_to
         FROM relations r
@@ -169,7 +164,7 @@ class KGStore:
         rows = cur.fetchall()
         return [(row[0], row[1], row[2], float(row[3]), row[4], row[5]) for row in rows]
 
-    def query_relations_incoming(self, entity_name: str) -> List[RelationRow]:
+    def query_relations_incoming(self, entity_name: str) -> list[RelationRow]:
         """Incoming edges to entity_name (same 6-field shape)."""
         sql = """
         SELECT e1.name, r.relation, e2.name, r.confidence, r.valid_from, r.valid_to
@@ -182,7 +177,9 @@ class KGStore:
         rows = cur.fetchall()
         return [(row[0], row[1], row[2], float(row[3]), row[4], row[5]) for row in rows]
 
-    def query_past_relations(self, entity_name: str, relation_type: str | None = None) -> List[RelationRow]:
+    def query_past_relations(
+        self, entity_name: str, relation_type: str | None = None
+    ) -> list[RelationRow]:
         sql = """
         SELECT e1.name, r.relation, e2.name, r.confidence, r.valid_from, r.valid_to
         FROM relations r
@@ -199,7 +196,7 @@ class KGStore:
         rows = cur.fetchall()
         return [(row[0], row[1], row[2], float(row[3]), row[4], row[5]) for row in rows]
 
-    def query_future_relations(self, entity_name: str) -> List[RelationRow]:
+    def query_future_relations(self, entity_name: str) -> list[RelationRow]:
         now = datetime.utcnow().isoformat()
         sql = """
         SELECT e1.name, r.relation, e2.name, r.confidence, r.valid_from, r.valid_to
@@ -213,7 +210,7 @@ class KGStore:
         return [(row[0], row[1], row[2], float(row[3]), row[4], row[5]) for row in rows]
 
     # ---------- traversal ----------
-    def _neighbors(self, entity_name: str, direction: str) -> List[RelationRow]:
+    def _neighbors(self, entity_name: str, direction: str) -> list[RelationRow]:
         if direction == "out":
             return self.query_relations(entity_name)
         if direction == "in":
@@ -227,11 +224,11 @@ class KGStore:
         max_hops: int = 3,
         direction: str = "both",
         at_time: str | None = None,
-    ) -> List[List[RelationRow]]:
-        paths: List[List[RelationRow]] = []
-        visited: Set[RelationRow] = set()
+    ) -> list[list[RelationRow]]:
+        paths: list[list[RelationRow]] = []
+        visited: set[RelationRow] = set()
 
-        def dfs(current: str, path: List[RelationRow], depth: int) -> None:
+        def dfs(current: str, path: list[RelationRow], depth: int) -> None:
             if depth > max_hops:
                 return
             neighbors = self._neighbors(current, direction)

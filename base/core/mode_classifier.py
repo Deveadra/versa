@@ -1,13 +1,12 @@
-import re
 import random
+import re
 
 # Global memory (lives until process ends)
 _last_input = None
 _repeat_count = 0
 
-from typing import Tuple
 
-def classify_mode(user_text: str, last_mode: str = "default") -> Tuple[str, bool]:
+def classify_mode(user_text: str, last_mode: str = "default") -> tuple[str, bool]:
     """
     Returns (mode, repeat_triggered) tuple.
     """
@@ -31,8 +30,9 @@ def classify_mode(user_text: str, last_mode: str = "default") -> Tuple[str, bool
         return "formal", False
 
     # Sarcasm triggers
-    if any(word in text for word in ["duh", "obvious", "really", "seriously", "bruh"]) \
-       or re.search(r"\bwhat is 2\s*\+\s*2\b", text):
+    if any(word in text for word in ["duh", "obvious", "really", "seriously", "bruh"]) or re.search(
+        r"\bwhat is 2\s*\+\s*2\b", text
+    ):
         if random.random() < 0.7:
             return "sarcastic", False
 

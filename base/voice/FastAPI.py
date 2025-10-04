@@ -1,16 +1,18 @@
+import base64
+import io
 
+import soundfile as sf
 from fastapi import FastAPI
 from pydantic import BaseModel
 from TTS.api import TTS
-import base64
-import io
-import soundfile as sf
 
 app = FastAPI()
 tts = TTS(model_path="path/to/ultron_model", gpu=True)
 
+
 class SpeakRequest(BaseModel):
     text: str
+
 
 @app.post("/speak")
 def speak(req: SpeakRequest):

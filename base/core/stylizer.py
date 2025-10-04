@@ -1,5 +1,6 @@
 import random
 
+
 def stylize_response(personality: dict, mode: str, category: str, data: dict) -> str:
     """
     Returns a personality-aware line for plugin results.

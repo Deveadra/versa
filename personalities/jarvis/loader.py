@@ -4,14 +4,16 @@ import random
 
 BASE_DIR = os.path.dirname(__file__)
 
+
 def load_personality(mode: str):
     """Load voicelines from the given mode's JSON file."""
     file_path = os.path.join(BASE_DIR, f"{mode}.json")
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Personality file not found: {file_path}")
 
-    with open(file_path, "r", encoding="utf-8") as f:
+    with open(file_path, encoding="utf-8") as f:
         return json.load(f)
+
 
 def get_line(mode: str, category: str):
     """Return a random line from the specified mode and category."""

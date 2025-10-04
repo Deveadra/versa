@@ -1,16 +1,17 @@
-
 from __future__ import annotations
-from typing import Any, Dict, Optional
+
 import os
+from typing import Any
 
 # reuse your existing helpers
 from base.core.profile import (
-    get_profile,
     get_persona,
-    update_profile,
     get_pref,
+    get_profile,
     set_pref,
+    update_profile,
 )
+
 
 def handle_profile_command(text: str):
     text_lower = text.lower()
@@ -38,7 +39,10 @@ def handle_profile_command(text: str):
         return "I didn’t catch the email address.", "Which address should I use?"
 
     if "what's my" in text_lower and "profile" in text_lower:
-        return None, f"Your name is {get_pref('name','Unknown')}, timezone {get_pref('timezone','UTC')}."
+        return (
+            None,
+            f"Your name is {get_pref('name','Unknown')}, timezone {get_pref('timezone','UTC')}.",
+        )
 
     return None, None
 
@@ -49,7 +53,7 @@ class ProfileManager:
     Lets you optionally override the profile file path via env.
     """
 
-    def __init__(self, profile_path: Optional[str] = None) -> None:
+    def __init__(self, profile_path: str | None = None) -> None:
         if profile_path:
             os.environ["USER_PROFILE_PATH"] = profile_path  # used by base.core.profile
 
@@ -65,11 +69,11 @@ class ProfileManager:
     def get_persona(self) -> str:
         profile = self.load_profile()
         return get_persona(profile)
-    
-    def load_profile(self) -> Dict[str, Any]:
+
+    def load_profile(self) -> dict[str, Any]:
         return get_profile()
 
-    def save_profile(self, updates: Dict[str, Any]) -> Dict[str, Any]:
+    def save_profile(self, updates: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(updates, dict):
             raise TypeError("updates must be a dict")
         return update_profile(updates)
@@ -78,5 +82,5 @@ class ProfileManager:
     def get(self, key: str, default: Any = None) -> Any:
         return get_pref(key, default)
 
-    def set(self, key: str, value: Any) -> Dict[str, Any]:
+    def set(self, key: str, value: Any) -> dict[str, Any]:
         return set_pref(key, value)

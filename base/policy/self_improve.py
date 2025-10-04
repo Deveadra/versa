@@ -1,18 +1,23 @@
 # base/learning/self_improve.py
 from __future__ import annotations
-import sqlite3, json, math
-from datetime import datetime, timedelta
-from typing import List, Dict, Any, Iterable
+
+import json
+import math
+import sqlite3
+from collections.abc import Iterable
+from typing import Any
+
 from loguru import logger
 
-
 # ---------- helpers ----------
+
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
     row = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1", (name,)
     ).fetchone()
     return bool(row)
+
 
 def _row_get(row: sqlite3.Row, key: str, default: Any = None) -> Any:
     # sqlite3.Row is mapping-like but doesn't have .get()
@@ -21,7 +26,10 @@ def _row_get(row: sqlite3.Row, key: str, default: Any = None) -> Any:
     except Exception:
         return default
 
-def _log_audit(conn: sqlite3.Connection, rule: Dict[str, Any], rationale: str, details: dict) -> None:
+
+def _log_audit(
+    conn: sqlite3.Connection, rule: dict[str, Any], rationale: str, details: dict
+) -> None:
     conn.execute(
         """
         INSERT INTO rule_audit(rule_name, topic_id, rationale, details_json, created_at)
@@ -31,8 +39,10 @@ def _log_audit(conn: sqlite3.Connection, rule: Dict[str, Any], rationale: str, d
     )
     conn.commit()
 
+
 def _canonical_rule_name(prefix: str, topic_id: str) -> str:
     return f"{prefix}_{topic_id}".replace(" ", "_").lower()
+
 
 def _similar_rule_exists(conn: sqlite3.Connection, topic_id: str, needle: str) -> bool:
     # Very light de-dupe: avoid proposing a rule if another mentions same topic & operator already
@@ -41,6 +51,7 @@ def _similar_rule_exists(conn: sqlite3.Connection, topic_id: str, needle: str) -
         (topic_id, f"%{needle}%"),
     ).fetchone()
     return bool(row)
+
 
 def _mean_std(vals: Iterable[float]) -> tuple[float, float]:
     vals = list(vals)
@@ -53,23 +64,27 @@ def _mean_std(vals: Iterable[float]) -> tuple[float, float]:
 
 # ---------- core ----------
 
-def propose_new_rules(policy) -> List[Dict[str, Any]]:
+
+def propose_new_rules(policy) -> list[dict[str, Any]]:
     """
     Scan signal + feedback history and propose new/adjusted rules.
     Returns a list of **ranked** rule dicts (each includes 'score' and 'confidence').
     Nothing is inserted here—use insert_proposed_rules() to persist.
     """
     conn: sqlite3.Connection = policy.conn  # policy.conn should be raw sqlite3.Connection
-    proposals: List[Dict[str, Any]] = []
+    proposals: list[dict[str, Any]] = []
     seen_names: set[str] = set()
 
     # === Heuristic 1: high-variance / frequently changing signals ===
     # Prefer true history if available (signal_log: name, value, ts); else fall back to presence in context_signals.
     if _table_exists(conn, "signal_log"):
         # Look at the last 50 points per signal
-        sig_names = [r["name"] for r in conn.execute(
-            "SELECT DISTINCT name FROM signal_log WHERE ts > datetime('now','-14 days')"
-        ).fetchall()]
+        sig_names = [
+            r["name"]
+            for r in conn.execute(
+                "SELECT DISTINCT name FROM signal_log WHERE ts > datetime('now','-14 days')"
+            ).fetchall()
+        ]
 
         for name in sig_names:
             rows = conn.execute(
@@ -98,7 +113,9 @@ def propose_new_rules(policy) -> List[Dict[str, Any]]:
             thr = mu + 1.5 * sd
             cond = {
                 "cond": {"gt": [f"signal:{name}", round(thr, 2)]},
-                "severity": {"between": [f"signal:{name}", round(mu + 0.5 * sd, 2), round(mu + 2.0 * sd, 2)]},
+                "severity": {
+                    "between": [f"signal:{name}", round(mu + 0.5 * sd, 2), round(mu + 2.0 * sd, 2)]
+                },
                 "bindings": {f"{name}_val": f"signal:{name}"},
             }
             tone = {
@@ -124,7 +141,12 @@ def propose_new_rules(policy) -> List[Dict[str, Any]]:
             }
             if _similar_rule_exists(conn, name, '"gt"') or rule["name"] in seen_names:
                 continue
-            _log_audit(conn, rule, f"High variance for '{name}' (μ={mu:.2f}, σ={sd:.2f}); proposing spike rule.", {"mu": mu, "sd": sd})
+            _log_audit(
+                conn,
+                rule,
+                f"High variance for '{name}' (μ={mu:.2f}, σ={sd:.2f}); proposing spike rule.",
+                {"mu": mu, "sd": sd},
+            )
             seen_names.add(rule["name"])
             proposals.append(rule)
 
@@ -164,7 +186,12 @@ def propose_new_rules(policy) -> List[Dict[str, Any]]:
                 "confidence": 0.5,
                 "score": 0.55,
             }
-            _log_audit(conn, rule, f"Frequent updates for '{name}' (no variance data). Proposed simple gap rule.", {"name": name, "observations": _row_get(s, "n", 0)})
+            _log_audit(
+                conn,
+                rule,
+                f"Frequent updates for '{name}' (no variance data). Proposed simple gap rule.",
+                {"name": name, "observations": _row_get(s, "n", 0)},
+            )
             seen_names.add(rule["name"])
             proposals.append(rule)
 
@@ -271,7 +298,7 @@ def propose_new_rules(policy) -> List[Dict[str, Any]]:
     return proposals
 
 
-def insert_proposed_rules(conn: sqlite3.Connection, rules: List[Dict[str, Any]]) -> None:
+def insert_proposed_rules(conn: sqlite3.Connection, rules: list[dict[str, Any]]) -> None:
     """
     Insert proposed rules idempotently. Expects each rule to contain:
     name, topic_id, condition, tone_strategy; optional priority, cooldown_seconds, max_per_day, context_template.

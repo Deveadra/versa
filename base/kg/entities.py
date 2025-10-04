@@ -1,4 +1,3 @@
-
 ENTITY_TYPES = [
     "Person",
     "Organization",

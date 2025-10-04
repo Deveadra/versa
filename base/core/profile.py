@@ -3,18 +3,20 @@ import os
 
 PROFILE_PATH = os.getenv("USER_PROFILE_PATH", "config/user_profile.json")
 
+
 def get_profile():
     """
     Load user profile from disk. Returns a dict.
     """
     try:
-        with open(PROFILE_PATH, "r") as f:
+        with open(PROFILE_PATH) as f:
             return json.load(f)
     except FileNotFoundError:
         return {}
     except json.JSONDecodeError:
         return {}
-    
+
+
 def get_persona(profile: dict) -> str:
     """
     Extract a persona description from the profile.
@@ -23,15 +25,15 @@ def get_persona(profile: dict) -> str:
     profession = profile.get("profession", "a professional")
     traits = profile.get("traits", [])
     interests = profile.get("interests", [])
-    
+
     traits_str = ", ".join(traits) if traits else "no specific traits"
     interests_str = ", ".join(interests) if interests else "no specific interests"
-    
+
     persona = (
-        f"{name} is {profession} with {traits_str}. "
-        f"They are interested in {interests_str}."
+        f"{name} is {profession} with {traits_str}. " f"They are interested in {interests_str}."
     )
     return persona
+
 
 def update_profile(updates: dict):
     """
@@ -44,12 +46,14 @@ def update_profile(updates: dict):
         json.dump(profile, f, indent=2)
     return profile
 
+
 def get_pref(key: str, default=None):
     """
     Convenience accessor for single preference.
     """
     profile = get_profile()
     return profile.get(key, default)
+
 
 def set_pref(key: str, value):
     """
@@ -66,4 +70,3 @@ def set_pref(key: str, value):
         raise TypeError(f"Preference value for '{key}' must be JSON-serializable: {e}")
 
     return update_profile({key: value})
-

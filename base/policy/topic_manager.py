@@ -1,12 +1,10 @@
-
 import sqlite3
-from typing import List, Union
-from datetime import timedelta, datetime
+from datetime import datetime, timedelta
 
 from base.database.sqlite import SQLiteConn
 
 
-def get_known_topics(conn: Union[SQLiteConn, sqlite3.Connection]) -> List[str]:
+def get_known_topics(conn: SQLiteConn | sqlite3.Connection) -> list[str]:
     """
     Return all topics Ultron currently knows about.
     Populated automatically by dream cycle inserts into topics table.
@@ -15,12 +13,13 @@ def get_known_topics(conn: Union[SQLiteConn, sqlite3.Connection]) -> List[str]:
     rows = cur.execute("SELECT id FROM topics ORDER BY created_at ASC").fetchall()
     return [r["id"] for r in rows]
 
+
 def prune_stale_topics(
-    conn: Union[SQLiteConn, sqlite3.Connection],
+    conn: SQLiteConn | sqlite3.Connection,
     stale_days: int = 90,
     min_rules: int = 0,
-    min_memories: int = 0
-) -> List[str]:
+    min_memories: int = 0,
+) -> list[str]:
     """
     Remove topics that have not been referenced recently in rules or memories.
 

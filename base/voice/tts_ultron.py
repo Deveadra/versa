@@ -1,15 +1,18 @@
-
-import requests
 import os
 import tempfile
+
 import pygame  # for simple playback, since you already use audio output
+import requests
+
 
 class UltronVoice:
     _instance = None
 
     def __init__(self, endpoint_url: str = None):
         # Default to env var, fallback to localhost
-        self.endpoint_url = endpoint_url or os.getenv("ULTRON_TTS_URL", "http://localhost:5000/speak")
+        self.endpoint_url = endpoint_url or os.getenv(
+            "ULTRON_TTS_URL", "http://localhost:5000/speak"
+        )
 
         # init pygame mixer once
         if not pygame.mixer.get_init():
@@ -33,6 +36,7 @@ class UltronVoice:
 
             # decode base64 audio into temp file
             import base64
+
             audio_bytes = base64.b64decode(data["audio"])
             with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
                 tmp.write(audio_bytes)

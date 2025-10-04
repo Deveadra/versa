@@ -1,12 +1,16 @@
 # base/devops/git_client.py
 from __future__ import annotations
-from typing import Optional, List, Sequence, Union
+
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
+
 from loguru import logger
+
 
 class GitError(RuntimeError):
     pass
+
 
 class GitClient:
     """
@@ -14,7 +18,7 @@ class GitClient:
     Assumes `git` is installed and repo already initialized with a remote.
     """
 
-    def __init__(self, repo_root: Union[str, Path], remote: str = "origin"):
+    def __init__(self, repo_root: str | Path, remote: str = "origin"):
         self.root = Path(repo_root).resolve()
         self.remote = remote
 
@@ -55,10 +59,11 @@ class GitClient:
 
         res = subprocess.run(
             cmd,
+            check=False,
             cwd=self.root,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
         )
         out = res.stdout.strip()
         if check and res.returncode != 0:
@@ -88,7 +93,7 @@ class GitClient:
     def fetch(self) -> None:
         self._run(["fetch", self.remote, "--prune"])
 
-    def checkout(self, branch: str, create: bool = False, start_point: Optional[str] = None) -> None:
+    def checkout(self, branch: str, create: bool = False, start_point: str | None = None) -> None:
         try:
             if create:
                 if start_point:
@@ -105,7 +110,9 @@ class GitClient:
             else:
                 raise
 
-    def safe_switch(self, target_branch: str, create: bool = False, start_point: Optional[str] = None) -> None:
+    def safe_switch(
+        self, target_branch: str, create: bool = False, start_point: str | None = None
+    ) -> None:
         dirty = self.has_uncommitted_changes()
         if dirty:
             logger.info("Uncommitted changes detected — stashing")
@@ -118,7 +125,7 @@ class GitClient:
                 logger.info("Restoring stashed changes")
                 self.stash_pop()
 
-    def add_all(self, paths: Optional[List[str]] = None) -> None:
+    def add_all(self, paths: list[str] | None = None) -> None:
         if not paths:
             self._run(["add", "-A"])
         else:

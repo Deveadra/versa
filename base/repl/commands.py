@@ -1,12 +1,38 @@
-
+# base/repl/commands.py
 import re
-from datetime import datetime
+
 from ..agents.orchestrator import Orchestrator
+from base.core.commands import (
+    handle_policy_command, 
+    handle_diagnostic_command,
+    handle_diagnostic_history
+)
+
 
 orch = Orchestrator()
 
-def handle_command(cmd: str) -> str:
+
+def handle_command(cmd: str, text: str, policy) -> str | None:
     tokens = cmd.strip().split(maxsplit=2)
+
+    # 1) Policy rules
+    resp = handle_policy_command(text, policy)
+    if resp:
+        return resp
+
+    # 2) Run diagnostics
+    resp = handle_diagnostic_command(text)
+    if resp:
+        return resp
+
+    # 3) Read diagnostic history/summaries
+    resp = handle_diagnostic_history(text)
+    if resp:
+        return resp
+
+    # (future: add other handlers here...)
+
+    # return None
 
     if not tokens:
         return ""
@@ -26,7 +52,7 @@ def handle_command(cmd: str) -> str:
                 start_iso = match.group(3)
                 event_id = orch.create_recurring_event_from_phrase(title, phrase, start_iso)
                 return f"Recurring event '{title}' created (id={event_id})."
-            return "Usage: event add recurring \"Title\" <phrase> start <ISO date>"
+            return 'Usage: event add recurring "Title" <phrase> start <ISO date>'
 
         # event list (all events stored, without expansion)
         if sub == "list":
@@ -45,8 +71,12 @@ def handle_command(cmd: str) -> str:
             if not evs:
                 return f"No events in the next {days} days."
             return "\n".join(
-                f"{e['start']} – {e['title']}" + (f" @ {e['location']}" if e.get('location') else "")
+                f"{e['start']} – {e['title']}"
+                + (f" @ {e['location']}" if e.get("location") else "")
                 for e in evs
             )
 
-    return ""
+    return "" or None
+
+
+    

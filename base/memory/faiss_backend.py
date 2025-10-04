@@ -1,10 +1,13 @@
-
 from __future__ import annotations
-from typing import Any, List, Sequence
-import numpy as np
+
+from collections.abc import Sequence
+from typing import Any
+
 import faiss
+import numpy as np
 
 from .vector_backend import VectorBackend
+
 
 class FAISSBackend(VectorBackend):
     def __init__(self, embedder, dim: int = 384, normalize: bool = True):
@@ -16,19 +19,21 @@ class FAISSBackend(VectorBackend):
 
     def _encode(self, texts: Sequence[str]) -> np.ndarray:
         vecs = self.embedder.encode(list(texts))
-        vecs = np.asarray(vecs, dtype=np.float32)   # handle list->ndarray safely
+        vecs = np.asarray(vecs, dtype=np.float32)  # handle list->ndarray safely
         if self.normalize and vecs.size:
-            faiss.normalize_L2(vecs)               # cosine via normalized IP
+            faiss.normalize_L2(vecs)  # cosine via normalized IP
         return vecs
 
     def index(self, texts: list[str]) -> None:
         if not self.embedder or not texts:
             return
         vecs = self._encode(texts)
-        self.faiss_index.add(vecs,)
+        self.faiss_index.add(
+            vecs,
+        )
         self.texts.extend(texts)
 
-    def search(self, query: str, k: int = 5) -> List[str]:
+    def search(self, query: str, k: int = 5) -> list[str]:
         if not self.embedder or not self.texts:
             return []
         q = self._encode([query])

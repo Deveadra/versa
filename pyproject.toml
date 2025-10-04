@@ -4,3 +4,27 @@ version = "0.1.0"
 description = "Ultron MVP: modular assistant with SQLite memory and retrieval"
 requires-python = ">=3.10"
 dependencies = []
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+extend-exclude = """
+(
+  ^\.git/
+| ^\.venv/
+| ^__pycache__/
+| ^ultron\.db$
+)
+"""
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "PL"]
+ignore = ["E501"]              # if you want Black to own line-length
+exclude = [".git",".venv","__pycache__","ultron.db"]
+extend-exclude = ["ultron.db"] # safety
+
+[tool.pytest.ini_options]
+addopts = "-q"
+pythonpath = ["."]

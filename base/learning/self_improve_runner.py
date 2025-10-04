@@ -1,21 +1,20 @@
 # base/learning/self_improve_runner.py
+import json
+import sqlite3
+from datetime import datetime
+from pathlib import Path
+
 from apscheduler.schedulers.background import BackgroundScheduler
 from loguru import logger
-import sqlite3
-import json
-import os
 
-from pathlib import Path
-from datetime import datetime
-from base.policy import self_improve, policy_store
+from base.database.sqlite import SQLiteConn
 from base.learning import dream_cycle, review
 from base.learning.habit_miner import HabitMiner
 from base.memory.store import MemoryStore
-from base.database.sqlite import SQLiteConn
-from base.policy.policy_store import PolicyStore   # <-- for policy.conn
+from base.policy import policy_store, self_improve
+from base.policy.policy_store import PolicyStore  # <-- for policy.conn
 from base.voice.tts_elevenlabs import Voice
 from config.config import settings
-
 
 LOG_DIR = Path("logs/morning_reviews")
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -29,7 +28,7 @@ def get_policy_store() -> policy_store.PolicyStore:
 
 
 def review_proposal(conn, rule_id: int, action: str):
-    if action not in ("approve","deny","revert"):
+    if action not in ("approve", "deny", "revert"):
         raise ValueError("Invalid action")
 
     if action == "approve":
@@ -64,9 +63,15 @@ def accept_proposal(rule_id: int):
         ON CONFLICT(name) DO NOTHING
         """,
         (
-            p["name"], p["topic_id"], p["priority"], p["cooldown_seconds"], p["max_per_day"],
-            p["condition_json"], p["tone_strategy_json"], p["context_template"]
-        )
+            p["name"],
+            p["topic_id"],
+            p["priority"],
+            p["cooldown_seconds"],
+            p["max_per_day"],
+            p["condition_json"],
+            p["tone_strategy_json"],
+            p["context_template"],
+        ),
     )
     conn.execute("UPDATE proposed_rules SET status='accepted' WHERE id=?", (rule_id,))
     conn.commit()
@@ -85,7 +90,9 @@ def revert_proposal(rule_id: int):
     db = SQLiteConn(settings.db_path)
     conn = db.conn
 
-    p = conn.execute("SELECT * FROM proposed_rules WHERE id=? AND status='accepted'", (rule_id,)).fetchone()
+    p = conn.execute(
+        "SELECT * FROM proposed_rules WHERE id=? AND status='accepted'", (rule_id,)
+    ).fetchone()
     if not p:
         logger.error(f"No accepted proposal with id={rule_id} to revert.")
         return
@@ -123,7 +130,7 @@ def morning_review(text_only: bool = False):
             f"[{p['id']}] Rule '{p['name']}' for topic '{p['topic_id']}' "
             f"(confidence={p['confidence']:.2f}, score={p['score']:.2f})"
         )
-        if p['rationale']:
+        if p["rationale"]:
             lines.append(f"   ↳ {p['rationale']}")
 
     summary_text = "\n".join(lines)
@@ -144,6 +151,7 @@ def morning_review(text_only: bool = False):
     )
 
     return summary_text
+
 
 # # DAY AND NIGHT CYCLE
 # def run_self_improve():
@@ -203,11 +211,16 @@ def run_nightly_self_improve():
                 ON CONFLICT(name) DO NOTHING
                 """,
                 (
-                    r["name"], r["topic_id"],
-                    json.dumps(r["condition"]), json.dumps(r["tone_strategy"]),
-                    r.get("priority", 60), r.get("cooldown_seconds", 1800),
-                    r.get("max_per_day", 4), r.get("context_template", ""),
-                    r.get("confidence", 0.6), r.get("score", 0.6),
+                    r["name"],
+                    r["topic_id"],
+                    json.dumps(r["condition"]),
+                    json.dumps(r["tone_strategy"]),
+                    r.get("priority", 60),
+                    r.get("cooldown_seconds", 1800),
+                    r.get("max_per_day", 4),
+                    r.get("context_template", ""),
+                    r.get("confidence", 0.6),
+                    r.get("score", 0.6),
                     r.get("rationale", "auto-proposed"),
                 ),
             )
@@ -232,6 +245,7 @@ def run_nightly_self_improve():
         logger.info("No pending proposals this cycle.")
         Voice.get_instance().speak_async("No new proposals tonight. All stable.")
 
+
 def run_morning_review_digest():
     """Runs once each morning to drop the text file + optional voice cue."""
     conn = SQLiteConn(settings.db_path).conn
@@ -239,9 +253,6 @@ def run_morning_review_digest():
     logger.info(f"Morning review written to {path}")
 
 
-    
-    
-    
 # UNIFIED NIGHT CYCLE
 # ---- 0. setup connection + stores ----
 def run_unified_night_cycle(auto_insert: bool = False):
@@ -249,7 +260,7 @@ def run_unified_night_cycle(auto_insert: bool = False):
     memory_store = MemoryStore(db)
     policy = PolicyStore(db.conn)
     conn = policy.conn
-    
+
     apply_reverts(conn)
 
     # ---- 1. Persona update ----
@@ -311,9 +322,10 @@ def run_unified_night_cycle(auto_insert: bool = False):
 
 def start_scheduler(auto_insert: bool = False):
     scheduler = BackgroundScheduler()
-    scheduler.add_job(lambda: run_unified_night_cycle(auto_insert=auto_insert),
-                      "cron", hour=2, minute=0)
-    
+    scheduler.add_job(
+        lambda: run_unified_night_cycle(auto_insert=auto_insert), "cron", hour=2, minute=0
+    )
+
     # Morning digest — configurable
     hr = getattr(settings, "morning_review_hour", 8)
     mn = getattr(settings, "morning_review_minute", 30)
@@ -328,21 +340,25 @@ def apply_reverts(conn):
     Remove any rules marked as reverted from engagement_rules.
     Archive them in proposed_rules for history.
     """
-    reverted = conn.execute(
-        "SELECT name FROM proposed_rules WHERE status='reverted'"
-    ).fetchall()
+    reverted = conn.execute("SELECT name FROM proposed_rules WHERE status='reverted'").fetchall()
 
     for r in reverted:
         logger.info(f"Applying revert: removing {r['name']} from engagement_rules")
         conn.execute("DELETE FROM engagement_rules WHERE name=?", (r["name"],))
-        conn.execute("""
+        conn.execute(
+            """
             UPDATE proposed_rules
             SET status='archived'
             WHERE name=? AND status='reverted'
-        """, (r["name"],))
-        conn.execute("""
+        """,
+            (r["name"],),
+        )
+        conn.execute(
+            """
             INSERT INTO audit_log (created_at, rationale)
             VALUES (datetime('now'), ?)
-        """, (f"Removed reverted rule '{r['name']}' from engagement_rules",))
+        """,
+            (f"Removed reverted rule '{r['name']}' from engagement_rules",),
+        )
 
     conn.commit()

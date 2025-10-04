@@ -1,17 +1,16 @@
-
 # base/memory/store.py
 from __future__ import annotations
 
 import sqlite3
 from datetime import datetime, timedelta
-from typing import Iterable, List, Tuple, Any, Optional
 
-from loguru import logger
+from base.database.sqlite import SQLiteConn  # ✅ correct path
 
 # your project imports
 from config.config import settings
-from base.database.sqlite import SQLiteConn           # ✅ correct path
+
 from .scoring import assess_importance
+
 
 class MemoryStore:
     """
@@ -83,20 +82,26 @@ class MemoryStore:
         )
         self.conn.commit()
 
-    def list_facts(self) -> List[Tuple[str, str]]:
+    def list_facts(self) -> list[tuple[str, str]]:
         cur = self.conn.execute("SELECT key, value FROM facts ORDER BY key")
         return [(r["key"], r["value"]) for r in cur.fetchall()]
 
     # Delete facts containing topic, and events whose content matches topic.
     def forget(self, topic: str) -> int:
-        n1 = self.conn.execute(
-            "DELETE FROM facts WHERE key LIKE ? OR value LIKE ?",
-            (f"%{topic}%", f"%{topic}%"),
-        ).rowcount or 0
-        n2 = self.conn.execute(
-            "DELETE FROM events WHERE content LIKE ?",
-            (f"%{topic}%",),
-        ).rowcount or 0
+        n1 = (
+            self.conn.execute(
+                "DELETE FROM facts WHERE key LIKE ? OR value LIKE ?",
+                (f"%{topic}%", f"%{topic}%"),
+            ).rowcount
+            or 0
+        )
+        n2 = (
+            self.conn.execute(
+                "DELETE FROM events WHERE content LIKE ?",
+                (f"%{topic}%",),
+            ).rowcount
+            or 0
+        )
         self.conn.commit()
         return n1 + n2
 
@@ -123,7 +128,7 @@ class MemoryStore:
             raise RuntimeError("Failed to retrieve lastrowid after insert")
         return rowid
 
-    def maybe_store_text(self, text: str, explicit_type: Optional[str] = None) -> bool:
+    def maybe_store_text(self, text: str, explicit_type: str | None = None) -> bool:
         score = assess_importance(text)
         if score < settings.importance_threshold:
             return False
@@ -141,7 +146,7 @@ class MemoryStore:
         return int(cur.rowcount or 0)
 
     # ---------- retrieval ----------
-    def keyword_search(self, query: str, limit: int = 5) -> List[str]:
+    def keyword_search(self, query: str, limit: int = 5) -> list[str]:
         if self._fts_enabled:
             cur = self.conn.execute(
                 "SELECT content FROM events_fts WHERE events_fts MATCH ? LIMIT ?",

@@ -1,19 +1,21 @@
+# base/calendar/calendar.py
 import datetime
-import dateparser
 import os
 
-from typing import List, Dict
+import dateparser
 
 try:
-    from googleapiclient.discovery import build
-    from google_auth_oauthlib.flow import InstalledAppFlow
-    from google.auth.transport.requests import Request
     import pickle
+
+    from google.auth.transport.requests import Request
+    from google_auth_oauthlib.flow import InstalledAppFlow
+    from googleapiclient.discovery import build
+
     GAPI_AVAILABLE = True
 except ImportError:
     GAPI_AVAILABLE = False
 
-mock_calendar: List[Dict] = []  # In-memory list of events (fallback)
+mock_calendar: list[dict] = []  # In-memory list of events (fallback)
 _pending = None  # shape: {"summary": str|None, "time": datetime|None}
 
 SCOPES = [
@@ -27,22 +29,22 @@ _service = None
 def init_google_calendar_service():
     """Authenticate and build Google Calendar service."""
     global _service
-    token_path = 'token.google.pickle'
+    token_path = "token.google.pickle"
     if not GAPI_AVAILABLE:
         return None
     creds = None
     if os.path.exists(token_path):
-      with open(token_path, "rb") as token:
-          creds = pickle.load(token)
+        with open(token_path, "rb") as token:
+            creds = pickle.load(token)
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
+            flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
             creds = flow.run_local_server(port=0)
         with open(token_path, "wb") as token:
             pickle.dump(creds, token)
-    _service = build('calendar', 'v3', credentials=creds)
+    _service = build("calendar", "v3", credentials=creds)
     return _service
 
 
@@ -50,7 +52,7 @@ def calendar_has_pending():
     return _pending is not None
 
 
-def get_upcoming_events(calendar_id: str = "primary", n: int = 5) -> List[Dict[str, str]]:
+def get_upcoming_events(calendar_id: str = "primary", n: int = 5) -> list[dict[str, str]]:
     """
     Return the next n events as a list of dicts with keys:
       - 'summary': str
@@ -65,7 +67,7 @@ def get_upcoming_events(calendar_id: str = "primary", n: int = 5) -> List[Dict[s
             .execute()
         )
         items = events_result.get("items", [])
-        result: List[Dict[str, str]] = []
+        result: list[dict[str, str]] = []
         for e in items:
             start = e.get("start", {})
             when = start.get("dateTime") or start.get("date") or ""
@@ -76,8 +78,7 @@ def get_upcoming_events(calendar_id: str = "primary", n: int = 5) -> List[Dict[s
             return []
         events = sorted(mock_calendar, key=lambda e: e["time"])[:n]
         return [
-            {"summary": e["summary"], "start": e["time"].strftime("%Y-%m-%d %H:%M")}
-            for e in events
+            {"summary": e["summary"], "start": e["time"].strftime("%Y-%m-%d %H:%M")} for e in events
         ]
 
 

@@ -1,14 +1,21 @@
 # main.py
 from __future__ import annotations
 
-import os, shutil, threading, time, random, sqlite3, requests
+import os
+import random
+import shutil
+import sqlite3
+import threading
+import time
 from pathlib import Path
+
+import requests
 from dotenv import load_dotenv
-from typing import Optional, Dict, Any
 
 # ---------- FFmpeg bootstrap (for audio helpers that might need it) ----------
 try:
     import imageio_ffmpeg as iio_ffmpeg  # downloads/caches a static ffmpeg on first import
+
     if shutil.which("ffmpeg") is None:
         ffmpeg_exe = iio_ffmpeg.get_ffmpeg_exe()
         ffmpeg_dir = os.path.dirname(ffmpeg_exe)
@@ -23,32 +30,32 @@ load_dotenv(dotenv_path=dotenv_path)
 # ---------- Std / 3p ----------
 from datetime import datetime
 
-# ---------- Ultron imports ----------
-from base.core.core import JarvisState, reset_session, SLEEP_WORDS, STOP_WORDS
-from base.core.audio import listen_for_wake_word, listen_until_silence, stream_speak, interrupt
-from base.llm.brain import ask_jarvis_stream
+from base.agents.scheduler import Scheduler
 from base.calendar import calendar_flow
-from base.plugins import system, file_manager, media_smart_home
-from base.plugins import email_flow_original
-from base.core.plugin_manager import PluginManager
-from personalities.loader import load_personality
-from base.core.mode_classifier import classify_mode
-from base.core.profile import get_profile, get_pref
+from base.core.audio import interrupt, listen_for_wake_word, listen_until_silence, stream_speak
+from base.core.commands import handle_policy_command
+
+# ---------- Ultron imports ----------
+from base.core.core import SLEEP_WORDS, STOP_WORDS, JarvisState, reset_session
 from base.core.decider import Decider
-from base.memory.store import init_db, MemoryStore
-from base.memory.recall import recall_relevant, format_memories
+from base.core.mode_classifier import classify_mode
+from base.core.plugin_manager import PluginManager
+from base.core.profile import get_pref, get_profile
+from base.core.profile_manager import ProfileManager
+from base.database.sqlite import SQLiteConn
 from base.learning.engagement_manager import EngagementManager
 from base.learning.habit_miner import HabitMiner
-from base.core.profile_manager import ProfileManager
-from base.policy.policy_store import PolicyStore
-from base.core.commands import handle_policy_command
-from base.database.sqlite import SQLiteConn
-from base.agents.scheduler import Scheduler
-from base.policy.feedback import record_feedback, schedule_signal_check
-from base.policy.context_signals import ContextSignals
+from base.llm.brain import ask_jarvis_stream
+from base.memory.recall import format_memories, recall_relevant
+from base.memory.store import MemoryStore, init_db
+from base.plugins import email_flow_original, file_manager, media_smart_home, system
 from base.policy.consequence_linker import link_consequence
+from base.policy.context_signals import ContextSignals
+from base.policy.feedback import record_feedback, schedule_signal_check
+from base.policy.policy_store import PolicyStore
 from base.voice.tts_elevenlabs import Voice
 from config.config import settings
+from personalities.loader import load_personality
 
 # ---------------------------------------------------------------------------
 #                               INITIALIZATION
@@ -80,7 +87,7 @@ try:
     initial_habits = habit_miner.get_summaries(days=30, top_k=5) or []
 except Exception:
     initial_habits = []
-    
+
 engagement_mgr = EngagementManager(
     db=db,
     memory=store,
@@ -99,9 +106,16 @@ voice = Voice.get_instance()
 manager = PluginManager()
 manager.register("system_stats", system.get_system_stats, keywords=["system", "cpu", "memory"])
 manager.register("calendar", calendar_flow, keywords=["calendar", "event"], flow=True)
-manager.register("email", email_flow_original, keywords=["email", "send email", "compose email"], flow=True)
+manager.register(
+    "email", email_flow_original, keywords=["email", "send email", "compose email"], flow=True
+)
 manager.register("file_manager", file_manager, keywords=["file", "document", "open"], flow=True)
-manager.register("media_smart_home", media_smart_home, keywords=["light", "music", "spotify", "thermostat"], flow=True)
+manager.register(
+    "media_smart_home",
+    media_smart_home,
+    keywords=["light", "music", "spotify", "thermostat"],
+    flow=True,
+)
 
 print(f"[Ultron initialized] base={BASE_PERSONALITY}, mode={MODE}")
 
@@ -113,6 +127,7 @@ HA_TOKEN = os.getenv("HA_TOKEN")
 HA_ENTITY = os.getenv("HA_PRESENCE_ENTITY", "device_tracker.your_phone")
 headers = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
 
+
 def check_presence(entity=HA_ENTITY):
     try:
         url = f"{HA_URL}/states/{entity}"
@@ -123,8 +138,9 @@ def check_presence(entity=HA_ENTITY):
         return None
     return None
 
+
 def presence_monitor():
-    last_state: Optional[str] = None
+    last_state: str | None = None
     while True:
         state = check_presence()
         if state and state != last_state:
@@ -136,12 +152,14 @@ def presence_monitor():
             last_state = state
         time.sleep(10)
 
+
 threading.Thread(target=presence_monitor, daemon=True).start()
 
 # ---------------------------------------------------------------------------
 #                           SCHEDULER TASKS
 # ---------------------------------------------------------------------------
 scheduler = Scheduler(db, memory=store, store=store)
+
 
 def classify_feedback(text: str | None) -> str | None:
     if not text:
@@ -156,6 +174,7 @@ def classify_feedback(text: str | None) -> str | None:
     if any(w in t for w in ("done", "did it", "on it", "ok i did")):
         return "acted"
     return None
+
 
 def engagement_task():
     try:
@@ -230,8 +249,10 @@ def engagement_task():
         # Never let the scheduler die
         print(f"[engagement_task] error: {e}")
 
+
 # hourly
 scheduler.add_task("engagement_check", interval=3600, func=engagement_task)
+
 
 def update_core_signals():
     try:
@@ -247,6 +268,7 @@ def update_core_signals():
         conn.commit()
     except Exception as e:
         print(f"[update_core_signals] error: {e}")
+
 
 # Run every 60s
 scheduler.add_task("update_signals", interval=60, func=update_core_signals)
@@ -275,6 +297,7 @@ def nightly_maintenance():
     finally:
         conn.commit()
 
+
 # daily
 scheduler.add_task("nightly_maintenance", interval=86400, func=nightly_maintenance)
 scheduler.start()
@@ -283,12 +306,16 @@ scheduler.start()
 #                               MAIN LOOP
 # ---------------------------------------------------------------------------
 state = JarvisState.IDLE
-last_user_input: Optional[str] = None
+last_user_input: str | None = None
 
 while True:
     if state == JarvisState.IDLE:
         listen_for_wake_word()
-        stream_speak(f"At your service, {USER_NAME}." if USER_NAME else random.choice(CURRENT_PERSONALITY["wake"]))
+        stream_speak(
+            f"At your service, {USER_NAME}."
+            if USER_NAME
+            else random.choice(CURRENT_PERSONALITY["wake"])
+        )
         reset_session()
         state = JarvisState.ACTIVE
 
@@ -358,25 +385,34 @@ while True:
                     dec = Decider()
                     mem = dec.decide_memory(revised_input, reply)
                     if mem:
-                        store.add_event(f"{mem['content']} || {mem.get('response','')}", importance=0.0, type_="chat")
+                        store.add_event(
+                            f"{mem['content']} || {mem.get('response','')}",
+                            importance=0.0,
+                            type_="chat",
+                        )
             continue
 
         # Manual overrides (simple)
         if "be sarcastic" in low:
-            MODE = "sarcastic"; CURRENT_PERSONALITY = load_personality(BASE_PERSONALITY, MODE)
+            MODE = "sarcastic"
+            CURRENT_PERSONALITY = load_personality(BASE_PERSONALITY, MODE)
             stream_speak("Oh, finally. Let me really express myself.")
             continue
         if "be formal" in low:
-            MODE = "formal"; CURRENT_PERSONALITY = load_personality(BASE_PERSONALITY, MODE)
+            MODE = "formal"
+            CURRENT_PERSONALITY = load_personality(BASE_PERSONALITY, MODE)
             stream_speak("Very well. I will maintain formal tone.")
             continue
         if "be normal" in low:
-            MODE = "default"; CURRENT_PERSONALITY = load_personality(BASE_PERSONALITY, MODE)
+            MODE = "default"
+            CURRENT_PERSONALITY = load_personality(BASE_PERSONALITY, MODE)
             stream_speak("Back to default mode.")
             continue
 
         # Plugins first
-        reply, spoken = manager.handle(text, manager.plugins, personality=CURRENT_PERSONALITY, mode=MODE)
+        reply, spoken = manager.handle(
+            text, manager.plugins, personality=CURRENT_PERSONALITY, mode=MODE
+        )
         if reply or spoken:
             if reply:
                 print(f"{BASE_PERSONALITY.capitalize()}: {reply}")
@@ -406,6 +442,8 @@ while True:
             dec = Decider()
             mem = dec.decide_memory(text, reply or "")
             if mem:
-                store.add_event(f"{mem['content']} || {mem.get('response','')}", importance=0.0, type_="chat")
+                store.add_event(
+                    f"{mem['content']} || {mem.get('response','')}", importance=0.0, type_="chat"
+                )
         except Exception:
             pass

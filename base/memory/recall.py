@@ -1,11 +1,10 @@
 # base/memory/recall.py
+import json
 import sqlite3
-import re
 from pathlib import Path
 
-from base.policy.topic_manager import get_known_topics
 from base.llm.brain import ask_brain
-import json
+from base.policy.topic_manager import get_known_topics
 
 DB_PATH = Path("memory.db")
 
@@ -34,12 +33,14 @@ def recall_relevant(query: str, limit=5):
     """
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    cur.execute("""
+    cur.execute(
+        """
         SELECT timestamp, type, content, response
         FROM memories
         ORDER BY id DESC
         LIMIT 200
-    """)
+    """
+    )
     rows = cur.fetchall()
     conn.close()
 
@@ -91,5 +92,3 @@ def format_memories(memories):
     for ts, mtype, content, response in memories:
         lines.append(f"[{ts}] You said: '{content}' | Ultron replied: '{response}'")
     return "\n".join(lines)
-
-

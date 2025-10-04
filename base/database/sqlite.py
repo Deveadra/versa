@@ -1,8 +1,11 @@
-
 from __future__ import annotations
+
 import sqlite3
 from pathlib import Path
+
 from loguru import logger
+
+
 
 class SQLiteConn:
     def __init__(self, path: str):
@@ -17,8 +20,19 @@ class SQLiteConn:
         conn = sqlite3.connect(path, check_same_thread=False)
         cur = conn.cursor()
 
+        # Enable WAL
+        cur.execute("PRAGMA journal_mode=WAL;")
+        cur.execute("PRAGMA synchronous=NORMAL;")
+        cur.execute("PRAGMA temp_store=MEMORY;")
+
+        # Schema
+        # PRAGMA journal_mode=WAL;
+        # PRAGMA synchronous=NORMAL;
+        # PRAGMA temp_store=MEMORY;
+
         # Events / Memories
-        cur.execute("""
+        cur.execute(
+            """
         CREATE TABLE IF NOT EXISTS events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             content TEXT NOT NULL,
@@ -26,15 +40,19 @@ class SQLiteConn:
             importance REAL NOT NULL DEFAULT 0.0,
             type TEXT NOT NULL DEFAULT 'event'
         )
-        """)
-        cur.execute("""
+        """
+        )
+        cur.execute(
+            """
         CREATE TABLE IF NOT EXISTS facts (
             key TEXT PRIMARY KEY,
             value TEXT,
             last_updated TIMESTAMP
         )
-        """)
-        cur.execute("""
+        """
+        )
+        cur.execute(
+            """
         CREATE TABLE IF NOT EXISTS habits (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             key TEXT,
@@ -42,15 +60,18 @@ class SQLiteConn:
             score REAL,
             last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-        """)
-        cur.execute("""
+        """
+        )
+        cur.execute(
+            """
         CREATE TABLE IF NOT EXISTS usage_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             resolved_action TEXT,
             params_json TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-        """)
+        """
+        )
 
         conn.commit()
         return conn
@@ -61,19 +82,20 @@ class SQLiteConn:
         mig_dir = Path(__file__).parent / "migrations"
         files = sorted(p for p in mig_dir.glob("*.sql"))
 
-        self.conn.execute("""
+        self.conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS schema_migrations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 filename TEXT NOT NULL UNIQUE,
                 applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-        """)
+        """
+        )
         self.conn.commit()
 
         # --- get already applied migrations ---
         applied = {
-            row["filename"]
-            for row in self.conn.execute("SELECT filename FROM schema_migrations")
+            row["filename"] for row in self.conn.execute("SELECT filename FROM schema_migrations")
         }
 
         # --- apply migrations in order ---
@@ -91,18 +113,17 @@ class SQLiteConn:
                     logger.exception(f"Failed to apply migration {p.name}: {e}")
                     raise
 
-        else:
-            # Fallback if no migration files
-            SQLiteConn.init_db(self.path) # type: ignore
+        # Fallback if no migration files
+        SQLiteConn.init_db(self.path)  # type: ignore
 
     def cursor(self):
         return self.conn.cursor()
-    
+
     def commit(self):
         return self.conn.commit()
 
     def execute(self, *args, **kwargs):
         return self.conn.execute(*args, **kwargs)
-    
+
     def close(self):
         self.conn.close()

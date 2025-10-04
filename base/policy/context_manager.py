@@ -1,9 +1,11 @@
 from __future__ import annotations
+
 import json
 import sqlite3
-from datetime import datetime
-from typing import Dict, Any, Optional, List
+from typing import Any
+
 from loguru import logger
+
 
 class ContextManager:
     def __init__(self, conn: sqlite3.Connection):
@@ -26,13 +28,11 @@ class ContextManager:
         )
         self.conn.commit()
 
-    def get_signal(self, name: str) -> Optional[dict]:
-        row = self.conn.execute(
-            "SELECT * FROM context_signals WHERE name=?", (name,)
-        ).fetchone()
+    def get_signal(self, name: str) -> dict | None:
+        row = self.conn.execute("SELECT * FROM context_signals WHERE name=?", (name,)).fetchone()
         return dict(row) if row else None
 
-    def all_signals(self) -> Dict[str, dict]:
+    def all_signals(self) -> dict[str, dict]:
         rows = self.conn.execute("SELECT * FROM context_signals").fetchall()
         return {r["name"]: dict(r) for r in rows}
 
@@ -49,7 +49,7 @@ class ContextManager:
         )
         self.conn.commit()
 
-    def eval_derived_signals(self) -> Dict[str,bool]:
+    def eval_derived_signals(self) -> dict[str, bool]:
         """
         Evaluate all derived signals against current signals.
         """
@@ -65,7 +65,7 @@ class ContextManager:
                 logger.error(f"Bad derived signal {r['name']}: {e}")
         return derived
 
-    def _eval_defn(self, defn: dict, base: Dict[str,dict]) -> bool:
+    def _eval_defn(self, defn: dict, base: dict[str, dict]) -> bool:
         # only "all"/"any" supported for now
         if "all" in defn:
             return all(self._check_condition(c, base) for c in defn["all"])
@@ -73,7 +73,7 @@ class ContextManager:
             return any(self._check_condition(c, base) for c in defn["any"])
         return False
 
-    def _check_condition(self, cond: dict, base: Dict[str,dict]) -> bool:
+    def _check_condition(self, cond: dict, base: dict[str, dict]) -> bool:
         sig = cond["signal"]
         if sig not in base:
             return False
@@ -92,6 +92,6 @@ class ContextManager:
         )
         self.conn.commit()
 
-    def list_derived(self) -> List[dict]:
+    def list_derived(self) -> list[dict]:
         rows = self.conn.execute("SELECT * FROM derived_signals").fetchall()
         return [dict(r) for r in rows]

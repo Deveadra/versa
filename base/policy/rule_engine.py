@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-import json, re
-from typing import Dict, Any, Tuple, List, Callable, Union
+import json
+import re
+from collections.abc import Callable
+from typing import Any
 
 
 def _coerce(val: Any) -> Any:
@@ -19,7 +21,7 @@ def _coerce(val: Any) -> Any:
         return val
 
 
-def _get_signal(signals: Dict[str, dict], key: str) -> Any:
+def _get_signal(signals: dict[str, dict], key: str) -> Any:
     # key may be "signal:name" or just "name"
     name = key.split("signal:", 1)[-1]
     entry = signals.get(name)
@@ -28,7 +30,7 @@ def _get_signal(signals: Dict[str, dict], key: str) -> Any:
     return _coerce(entry.get("value"))
 
 
-def _eval_node(node: Any, signals: Dict[str, dict]) -> Any:
+def _eval_node(node: Any, signals: dict[str, dict]) -> Any:
     if isinstance(node, (str, int, float, bool)) or node is None:
         return node
     if isinstance(node, list):
@@ -42,17 +44,23 @@ def _eval_node(node: Any, signals: Dict[str, dict]) -> Any:
         if "not" in node:
             return not _eval_node(node["not"], signals)
         if "eq" in node:
-            a, b = node["eq"]; return _value(a, signals) == _value(b, signals)
+            a, b = node["eq"]
+            return _value(a, signals) == _value(b, signals)
         if "neq" in node:
-            a, b = node["neq"]; return _value(a, signals) != _value(b, signals)
+            a, b = node["neq"]
+            return _value(a, signals) != _value(b, signals)
         if "gt" in node:
-            a, b = node["gt"]; return float(_value(a, signals) or 0) > float(_value(b, signals) or 0)
+            a, b = node["gt"]
+            return float(_value(a, signals) or 0) > float(_value(b, signals) or 0)
         if "gte" in node:
-            a, b = node["gte"]; return float(_value(a, signals) or 0) >= float(_value(b, signals) or 0)
+            a, b = node["gte"]
+            return float(_value(a, signals) or 0) >= float(_value(b, signals) or 0)
         if "lt" in node:
-            a, b = node["lt"]; return float(_value(a, signals) or 0) < float(_value(b, signals) or 0)
+            a, b = node["lt"]
+            return float(_value(a, signals) or 0) < float(_value(b, signals) or 0)
         if "lte" in node:
-            a, b = node["lte"]; return float(_value(a, signals) or 0) <= float(_value(b, signals) or 0)
+            a, b = node["lte"]
+            return float(_value(a, signals) or 0) <= float(_value(b, signals) or 0)
         if "exists" in node:
             return _get_signal(signals, node["exists"]) is not None
         if "regex" in node:
@@ -67,13 +75,15 @@ def _eval_node(node: Any, signals: Dict[str, dict]) -> Any:
     return None
 
 
-def _value(node: Any, signals: Dict[str, dict]) -> Any:
+def _value(node: Any, signals: dict[str, dict]) -> Any:
     if isinstance(node, str) and node.startswith("signal:"):
         return _get_signal(signals, node)
     return _eval_node(node, signals)
 
 
-def evaluate_condition(condition_json: str, signals: Dict[str, dict]) -> Tuple[bool, float, Dict[str, Any]]:
+def evaluate_condition(
+    condition_json: str, signals: dict[str, dict]
+) -> tuple[bool, float, dict[str, Any]]:
     """
     Returns (match, severity, bindings).
     - severity: float between 0–1
@@ -98,7 +108,7 @@ def evaluate_condition(condition_json: str, signals: Dict[str, dict]) -> Tuple[b
         except Exception:
             pass
 
-    bindings: Dict[str, Any] = {}
+    bindings: dict[str, Any] = {}
     if "bindings" in obj:
         for k, expr in obj["bindings"].items():
             try:
@@ -130,12 +140,11 @@ def choose_tone(tone_strategy_json: str, severity: float) -> str:
 def derive_expectation(
     condition_json: str,
 ) -> tuple[list[str], Callable[[dict[str, float]], bool] | None]:
-
     """
     Derive (signal_names, expect_change_fn) from condition_json.
     Handles gte/gt/lt/lte/between, plus all/any.
     """
-    
+
     try:
         obj = json.loads(condition_json)
     except Exception:
@@ -147,21 +156,32 @@ def derive_expectation(
     def extract(cond) -> list[tuple[str, str, Any]]:
         checks: list[tuple[str, str, Any]] = []
         if isinstance(cond, dict):
-            if "gte" in cond: k, thr = cond["gte"]; checks.append((k, "gte", float(thr)))
-            elif "gt" in cond: k, thr = cond["gt"]; checks.append((k, "gt", float(thr)))
-            elif "lte" in cond: k, thr = cond["lte"]; checks.append((k, "lte", float(thr)))
-            elif "lt" in cond: k, thr = cond["lt"]; checks.append((k, "lt", float(thr)))
+            if "gte" in cond:
+                k, thr = cond["gte"]
+                checks.append((k, "gte", float(thr)))
+            elif "gt" in cond:
+                k, thr = cond["gt"]
+                checks.append((k, "gt", float(thr)))
+            elif "lte" in cond:
+                k, thr = cond["lte"]
+                checks.append((k, "lte", float(thr)))
+            elif "lt" in cond:
+                k, thr = cond["lt"]
+                checks.append((k, "lt", float(thr)))
             elif "between" in cond:
-                k, lo, hi = cond["between"]; checks.append((k, "between", (float(lo), float(hi))))
+                k, lo, hi = cond["between"]
+                checks.append((k, "between", (float(lo), float(hi))))
             elif "all" in cond:
-                for c in cond["all"]: checks.extend(extract(c))
+                for c in cond["all"]:
+                    checks.extend(extract(c))
             elif "any" in cond:
-                for c in cond["any"]: checks.extend(extract(c))
+                for c in cond["any"]:
+                    checks.extend(extract(c))
         return checks
 
     checks = extract(cond)
     signals = [c[0].split("signal:")[1] for c in checks if c[0].startswith("signal:")]
-    
+
     def expect_change_fn(values: dict[str, float]) -> bool:
         results: list[bool] = []
         for k, op, thr in checks:

@@ -1,21 +1,17 @@
 from __future__ import annotations
 
-from textwrap import dedent
-from typing import List, Dict, Any, Optional
-
 import datetime
-import os
-
 from datetime import datetime
+from typing import Any
+
 from base.core.profile_manager import ProfileManager
-from base.memory.store import MemoryStore
 from base.learning.habit_miner import HabitMiner
 from base.learning.sentiment import quick_polarity, quick_polarity_label
+from base.memory.store import MemoryStore
 from base.personality.tone_adapter import ToneAdapter
 
 
-
-def _format_timestamp(ts: Optional[str]) -> str:
+def _format_timestamp(ts: str | None) -> str:
     if not ts:
         return "unknown time"
     try:
@@ -24,7 +20,7 @@ def _format_timestamp(ts: Optional[str]) -> str:
         return ts.split("T")[0] if "T" in ts else ts
 
 
-def justify_memory(mem: Dict[str, Any]) -> str:
+def justify_memory(mem: dict[str, Any]) -> str:
     if not mem:
         return ""
     parts = []
@@ -40,13 +36,15 @@ def justify_memory(mem: Dict[str, Any]) -> str:
         parts.append(f"as of {_format_timestamp(ts)}")
     return ", ".join(parts) if parts else "relevant memory"
 
-def compose_persona_block(persona_text: Optional[str]) -> str:
+
+def compose_persona_block(persona_text: str | None) -> str:
     if not persona_text:
         return ""
     lines = [l.strip() for l in persona_text.splitlines() if l.strip()][:6]
     if not lines:
         return ""
     return "Persona:\\n" + "\\n".join(lines) + "\\n"
+
 
 def compose_habit_block(habits: list[str], top_k: int = 3) -> str:
     """
@@ -62,13 +60,16 @@ def compose_habit_block(habits: list[str], top_k: int = 3) -> str:
         lines.append(f"{i}. {h}")
     return "\n".join(lines) + "\n"
 
-def compose_retrieval_block(memories: List[Dict[str, Any]], top_k: int = 3) -> str:
+
+def compose_retrieval_block(memories: list[dict[str, Any]], top_k: int = 3) -> str:
     if not memories:
         return ""
-    def _key(m: Dict[str, Any]):
+
+    def _key(m: dict[str, Any]):
         score = m.get("score") or 0.0
         ts = m.get("last_used") or m.get("created_at") or m.get("timestamp") or ""
         return (score, ts)
+
     sorted_mem = sorted(memories, key=_key, reverse=True)
     selected = sorted_mem[:top_k]
     lines = ["Relevant memories:"]
@@ -79,16 +80,18 @@ def compose_retrieval_block(memories: List[Dict[str, Any]], top_k: int = 3) -> s
     return "\\n".join(lines) + "\\n"
 
 
-def synthesize_memories(memories: List[Dict[str, Any]], top_k: int = 3) -> str:
+def synthesize_memories(memories: list[dict[str, Any]], top_k: int = 3) -> str:
     """
     Turn raw memory dicts into a natural narrative Ultron can use.
     """
     if not memories:
         return ""
-    def _key(m: Dict[str, Any]):
+
+    def _key(m: dict[str, Any]):
         score = m.get("score") or 0.0
         ts = m.get("last_used") or m.get("created_at") or m.get("timestamp") or ""
         return (score, ts)
+
     selected = sorted(memories, key=_key, reverse=True)[:top_k]
 
     lines = []
@@ -111,8 +114,8 @@ def compose_prompt(
     extra_context: str | None = None,
     top_k_memories: int = 3,
     top_k_habits: int = 3,
-    channel: str = "text",         # NEW
-    include_kg: bool = True,       # optional future hook
+    channel: str = "text",  # NEW
+    include_kg: bool = True,  # optional future hook
 ) -> str:
     """
     Compose a dynamic prompt that fuses:
@@ -157,7 +160,7 @@ def compose_prompt(
     parts.append(render_style_instructions(style_plan))
 
     # Sentiment analysis
-    polarity = quick_polarity(user_text)   # keep float for numeric analysis
+    polarity = quick_polarity(user_text)  # keep float for numeric analysis
     if polarity:
         tone_hint = ToneAdapter.adapt(quick_polarity_label(user_text))  # pass str instead
         parts.append(f"Adjust your tone: {tone_hint}\n")
@@ -167,7 +170,7 @@ def compose_prompt(
         parts.append("Context:\n" + extra_context.strip() + "\n")
 
     # User input
-    parts.append("User:\n" + (user_text or '').strip() + "\n")
+    parts.append("User:\n" + (user_text or "").strip() + "\n")
 
     return "\n".join(parts)
 
@@ -177,7 +180,7 @@ def compose_style_plan(
     profile_mgr: ProfileManager,
     habit_miner: HabitMiner,
     channel: str = "text",  # "voice" or "text"
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Produce a concrete style plan Ultron follows for *this* response.
     Combines: sentiment, policy bandit, habits, and channel.
@@ -190,7 +193,7 @@ def compose_style_plan(
     tod = "morning" if 5 <= hour < 12 else "afternoon" if hour < 18 else "evening"
 
     # defaults
-    polarity_label = quick_polarity_label(user_text)  
+    polarity_label = quick_polarity_label(user_text)
     bandit = ToneAdapter(profile)
     policy = bandit.choose_policy()
 
@@ -232,7 +235,7 @@ def compose_style_plan(
     return plan
 
 
-def render_style_instructions(plan: Dict[str, Any]) -> str:
+def render_style_instructions(plan: dict[str, Any]) -> str:
     """
     Turn the style plan into explicit, LLM-friendly instructions.
     """
@@ -244,7 +247,11 @@ def render_style_instructions(plan: Dict[str, Any]) -> str:
     ]
     if plan["channel"] == "voice":
         tts = plan["tts"]
-        bullets.append(f"TTS: ~{tts['wpm']} wpm, pause≈{tts['pause_ms']}ms, filler_ok={'yes' if tts['filler_ok'] else 'no'}")
-        bullets.append("If voice: keep sentences shorter, use natural pauses instead of lists when possible.")
+        bullets.append(
+            f"TTS: ~{tts['wpm']} wpm, pause≈{tts['pause_ms']}ms, filler_ok={'yes' if tts['filler_ok'] else 'no'}"
+        )
+        bullets.append(
+            "If voice: keep sentences shorter, use natural pauses instead of lists when possible."
+        )
 
     return "Style plan:\n- " + "\n- ".join(bullets) + "\n"

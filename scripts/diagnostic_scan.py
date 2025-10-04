@@ -12,14 +12,11 @@ Features:
 from __future__ import annotations
 
 import argparse
-import os
-import shlex
 import subprocess
 import sys
-
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Iterable, List, Tuple
 
 
 def print_section(title: str) -> None:
@@ -33,6 +30,7 @@ def run(cmd: list[str], cwd: Path) -> tuple[int, str, str]:
     try:
         proc = subprocess.run(
             cmd,
+            check=False,
             cwd=str(cwd),
             capture_output=True,
             text=True,
@@ -43,13 +41,15 @@ def run(cmd: list[str], cwd: Path) -> tuple[int, str, str]:
         return 127, "", f"{e}"
     except Exception as e:
         return 1, "", f"{e}"
-    
+
+
 def run_cmd(cwd: Path, *cmd: str) -> tuple[int, str, str]:
     try:
-        p = subprocess.run(list(cmd), cwd=str(cwd), capture_output=True, text=True)
+        p = subprocess.run(list(cmd), check=False, cwd=str(cwd), capture_output=True, text=True)
         return p.returncode, p.stdout, p.stderr
     except Exception as e:
         return 1, "", str(e)
+
 
 def try_has_xdist() -> bool:
     try:
@@ -57,6 +57,7 @@ def try_has_xdist() -> bool:
         return True
     except Exception:
         return False
+
 
 def find_repo_root(start: Path | None = None) -> Path:
     """Walk upward until we find a directory containing .git; otherwise return start or cwd."""
@@ -126,10 +127,7 @@ def select_test_files(files: Iterable[Path]) -> list[Path]:
 
 def black_check(repo: Path, pyfiles: list[Path], fix: bool, scan_all: bool) -> int:
     print_section("Black")
-    if fix:
-        cmd = [sys.executable, "-m", "black"]
-    else:
-        cmd = [sys.executable, "-m", "black", "--check"]
+    cmd = [sys.executable, "-m", "black"] if fix else [sys.executable, "-m", "black", "--check"]
     if scan_all or not pyfiles:
         cmd.append(".")
     else:
@@ -173,7 +171,6 @@ def pytest_run(repo: Path, testfiles: list[Path], scan_all: bool, smart: bool) -
     return rc
 
 
-
 def compile_syntax(repo: Path, pyfiles: list[Path], scan_all: bool) -> int:
     print_section("Python Syntax (compileall/py_compile)")
     # If scanning all, let compileall handle it; else compile changed files individually.
@@ -185,7 +182,14 @@ def compile_syntax(repo: Path, pyfiles: list[Path], scan_all: bool) -> int:
     # compile changed files individually for clearer feedback
     failures = 0
     for p in pyfiles:
-        rc, out, err = run([sys.executable, "-c", f"import py_compile; py_compile.compile(r'{str(p)}', doraise=True)"], cwd=repo)
+        rc, out, err = run(
+            [
+                sys.executable,
+                "-c",
+                f"import py_compile; py_compile.compile(r'{str(p)}', doraise=True)",
+            ],
+            cwd=repo,
+        )
         if rc != 0:
             failures += 1
             print(f"❌ {p.relative_to(repo)}: {err.strip() or out.strip()}")
@@ -198,14 +202,28 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run diagnostics on the repository.")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--all", action="store_true", help="Scan entire repository (default).")
-    mode.add_argument("--changed", action="store_true", help="Scan only changed files (requires git).")
-    parser.add_argument("--base", default=None, help="Base ref to diff against when using --changed (e.g., origin/main).")
-    parser.add_argument("--fix", action="store_true", help="Apply fixes (black format, ruff --fix).")
+    mode.add_argument(
+        "--changed", action="store_true", help="Scan only changed files (requires git)."
+    )
+    parser.add_argument(
+        "--base",
+        default=None,
+        help="Base ref to diff against when using --changed (e.g., origin/main).",
+    )
+    parser.add_argument(
+        "--fix", action="store_true", help="Apply fixes (black format, ruff --fix)."
+    )
+    parser.add_argument(
+        "--concurrent",
+        action="store_true",
+        help="Run independent checks (Black/Ruff) concurrently.",
+    )
+    parser.add_argument(
+        "--smart-pytest",
+        action="store_true",
+        help="If --changed and no test files changed, skip pytest.",
+    )
     args = parser.parse_args(argv)
-    parser.add_argument("--concurrent", action="store_true",
-                        help="Run independent checks (Black/Ruff) concurrently.")
-    parser.add_argument("--smart-pytest", action="store_true",
-                        help="If --changed and no test files changed, skip pytest.")
 
     repo = find_repo_root(Path(__file__).parent)
     scan_all = args.all or (not args.changed)
@@ -232,8 +250,12 @@ def main(argv: list[str] | None = None) -> int:
         print_section("Concurrent Lint/Format")
         futures = {}
         with ThreadPoolExecutor(max_workers=2) as ex:
-            futures[ex.submit(black_check, repo, py_changed, fix=args.fix, scan_all=scan_all)] = "black"
-            futures[ex.submit(ruff_check, repo, py_changed, fix=args.fix, scan_all=scan_all)]  = "ruff"
+            futures[ex.submit(black_check, repo, py_changed, fix=args.fix, scan_all=scan_all)] = (
+                "black"
+            )
+            futures[ex.submit(ruff_check, repo, py_changed, fix=args.fix, scan_all=scan_all)] = (
+                "ruff"
+            )
             for fut in as_completed(futures):
                 tool = futures[fut]
                 try:
@@ -246,11 +268,10 @@ def main(argv: list[str] | None = None) -> int:
                     rc_ruff = rc
     else:
         rc_black = black_check(repo, py_changed, fix=args.fix, scan_all=scan_all)
-        rc_ruff  = ruff_check(repo, py_changed, fix=args.fix, scan_all=scan_all)
+        rc_ruff = ruff_check(repo, py_changed, fix=args.fix, scan_all=scan_all)
 
-    rc_py    = pytest_run(repo, tests_changed, scan_all=scan_all, smart=args.smart_pytest)
-    rc_comp  = compile_syntax(repo, py_changed, scan_all=scan_all)
-
+    rc_py = pytest_run(repo, tests_changed, scan_all=scan_all, smart=args.smart_pytest)
+    rc_comp = compile_syntax(repo, py_changed, scan_all=scan_all)
 
     print_section("Summary")
     print(f"Black:  {'OK' if rc_black == 0 else 'Issues'}")

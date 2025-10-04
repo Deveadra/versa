@@ -8,22 +8,21 @@ dependencies = []
 [tool.black]
 line-length = 100
 target-version = ["py311"]
-extend-exclude = """
+extend-exclude = '''
 (
-  ^\.git/
-| ^\.venv/
+  ^.git/
+| ^.venv/
 | ^__pycache__/
 | ^ultron\.db$
 )
-"""
+'''
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-select = ["E", "F", "W", "I", "B", "UP", "SIM", "PL"]
-ignore = ["E501"]              # if you want Black to own line-length
-exclude = [".git",".venv","__pycache__","ultron.db"]
-extend-exclude = ["ultron.db"] # safety
+lint.select = ["E", "F", "W", "I", "B", "UP", "SIM", "PL"]
+lint.ignore = ["E501"]              # if you want Black to own line-length
+extend-exclude = ["ultron.db", ".git",".venv","__pycache__","ultron.db"] # safety
 
 [tool.pytest.ini_options]
 addopts = "-q"

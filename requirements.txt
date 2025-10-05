@@ -1,5 +1,6 @@
 # Core dependencies
 apscheduler==3.10.4
+colorama>=0.4.6
 dateparser
 faiss-cpu==1.8.0.post1
 loguru==0.7.2

@@ -49,6 +49,7 @@ from base.self_improve.pr_manager import PRManager
 from base.self_improve.proposal_engine import ProposalEngine
 from base.utils.embeddings import get_embedder
 from base.utils.timeparse import extract_time_from_text
+from base.utils.ultron_status import UltronStatus, UltronStatusConfig, CognitiveStatus
 from base.voice.tts_elevenlabs import Voice
 from config.config import settings
 
@@ -116,7 +117,6 @@ class Orchestrator:
         self.brain = Brain()
         self.notifier = ConsoleNotifier()
         self.voice = Voice.get_instance()
-        self.voice = Voice.get_instance()
 
         # --- DB / stores
         self.db: SQLiteConn = db or SQLiteConn(settings.db_path)
@@ -133,6 +133,25 @@ class Orchestrator:
             dim=self.embed_dim,
         )
 
+        # --- UX/UI components
+        self.status_display = CognitiveStatus(immersive=True, timeout=15)
+        
+        # Status / terminal UX
+        self.status = UltronStatus(UltronStatusConfig(
+            immersive=True,
+            stall_warn_sec=8.0,   # narrate if a step runs long
+            stall_bell=False,     # flip to True if you want a soft bell on stalls
+            dual_output=True,     # voice and terminal output
+        ))
+        # Connect to voice system (so Ultron can speak his own status)
+        try:
+            if hasattr(self, "voice"):
+                self.status.attach_voice_interface(self.voice)
+        except Exception:
+            logger.debug("Voice interface unavailable for status feedback.")
+            
+        # --- Self-improvement
+        
         # Mentorship / proposal components
         self.repo_root = Path(".").resolve()
         self.code_indexer = CodeIndexer(
@@ -296,6 +315,15 @@ class Orchestrator:
                     self.enricher.run()
             except Exception:
                 logger.debug("Background enrichment skipped (non-fatal).")
+
+    def _process_task(self, task):
+        self.status_display.start("Processing cognitive task...")
+        try:
+            result = self._evaluate_chain(task)
+            return result
+        finally:
+            self.status_display.stop("[ULTRON STATUS] Task evaluation complete.")
+
 
     # ----------------------------------------
     # Low-confidence confirmation, feedback IO
@@ -588,16 +616,14 @@ class Orchestrator:
         return f"{url}/compare/{base_branch}...{branch}?expand=1"
 
     def _try_open_pr_via_manager(self, branch: str, title: str, body: str) -> Optional[str]:
-        # Best-effort: use your PR manager if available
-        try:
-            from base.self_improve.pr_manager import PRManager  # type: ignore
-        except Exception:
-            return None
+        """
+        Best-effort PR open using PRManager. PRManager.open_pr expects a Proposal,
+        so we wrap our title/body into a minimal Proposal (no changes listed).
+        """
         try:
             mgr = PRManager(repo_root=str(self.repo_root))
-            # Ensure branch is prepared only once in your flow; here we assume we're already on the branch.
-            pr_url = mgr.create_pr(title=title, body=body, branch_name=branch)
-            return pr_url
+            proposal = Proposal(title=title, description=body, changes=[])
+            return mgr.open_pr(branch=branch, proposal=proposal)
         except Exception:
             return None
 
@@ -636,16 +662,15 @@ class Orchestrator:
         if base:
             cmd.extend(["--base", base])
 
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            diag_output = result.stdout.strip() or result.stderr.strip()
-        except Exception as e:
-            return f"⚠️ Diagnostics failed: {e}"
+        # ADD: speed flags for quick runs
+        if (mode == "changed") and (not fix):
+            cmd.extend(["--concurrent", "--smart-pytest"])
+
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        diag_output = result.stdout.strip() or result.stderr.strip()
 
         logger.info(f"Diagnostics:\n{diag_output}")
         print("\nUltron: Beginning self-diagnostic.\n")
-
-        diag_output = result.stdout.strip() or result.stderr.strip()
 
         # --- Progress bar (tqdm) across main stages ---
         with tqdm(
@@ -682,12 +707,6 @@ class Orchestrator:
             _, scan_struct = engine.scan()
             structured["issues"].extend(scan_struct.get("issues", []))
             pbar.set_description(steps[1])
-            pbar.update(1)
-
-            # --- 3. Index repository ---
-            index = self.code_indexer.scan()
-            index_md = self.code_indexer.to_markdown(index)
-            pbar.set_description(steps[2])
             pbar.update(1)
             
             # --- 3. Index repository ---
@@ -779,6 +798,7 @@ class Orchestrator:
                     pushed = self._git_push_branch(branch)
                     title = "chore(diagnostics): auto-fix & hygiene"
                     # Build a compact PR body
+                    benchmarks_str = ", ".join(f"{b['label']} {b['latency_ms']:.1f}ms" for b in benchmarks) if benchmarks else "n/a"
                     preview = "; ".join(
                         f"{i.get('file','?')}: {i.get('summary', i.get('issue','?'))}" for i in issues[:5]
                     )
@@ -787,7 +807,7 @@ class Orchestrator:
                         "Automated diagnostics completed.\n\n"
                         f"**Mode:** {mode}  |  **Fix:** {fix}  |  **Lag:** {'yes' if laggy else 'no'}\n\n"
                         "### Summary\n"
-                        f"- Benchmarks: {', '.join(f'{b['label']} {b['latency_ms']:.1f}ms' for b in benchmarks) or 'n/a'}\n"
+                        f"- Benchmarks: {benchmarks_str}\n"
                         f"- Issues (sample): {preview or 'none'}{more}\n\n"
                         "### Tool Output (tail)\n"
                         f"```\n{(diag_output or '')[-2000:]}\n```"
@@ -851,10 +871,11 @@ class Orchestrator:
         ]
 
         try:
-            if percent % 20 == 0:  # only speak at milestones
+            if percent % 20 == 0:
                 msg = f"Diagnostic {percent}% complete. {desc}."
-                if hasattr(self, "voice") and callable(getattr(self.voice, "say", None)):
-                    self.voice.say(msg)
+                speak = getattr(self.voice, "speak", None)
+                if callable(speak):
+                    self.voice.speak(msg)
                 else:
                     print(f"[Ultron Voice] {msg}")
         except Exception as e:
@@ -862,7 +883,7 @@ class Orchestrator:
 
         print("\nUltron: Beginning self-diagnostic.\n")
         if hasattr(self, "voice"):
-            self.voice.say("Beginning self-diagnostic.")
+            self.voice.speak("Beginning self-diagnostic.")
 
         with tqdm(
             total=len(steps), bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
@@ -957,7 +978,7 @@ class Orchestrator:
 
         print(msg)
         if hasattr(self, "voice"):
-            self.voice.say(msg)
+            self.voice.speak(msg)
         return msg
 
     def run_tests_in_branch(self, branch: str) -> str:
@@ -1080,8 +1101,17 @@ class Orchestrator:
 
     def _retrieve_context(self, user_text: str, k: int = 4) -> list[str]:
         try:
-            hits = self.store.keyword_search(user_text, limit=k)
-            return hits or []
+            hits = self.store.keyword_search(user_text, limit=k) or []
+            # Convert dict rows to strings (prefer content/text fields)
+            if hits and isinstance(hits[0], dict):
+                return [
+                    h.get("content")
+                    or h.get("text")
+                    or json.dumps(h, ensure_ascii=False)
+                    for h in hits
+                ]
+            # If store returns strings, pass them through
+            return [str(h) for h in hits]
         except Exception:
             return []
 
@@ -1110,28 +1140,32 @@ class Orchestrator:
         Also routes special commands like 'propose:' and diagnostics.
         Also routes special commands like 'propose:' and diagnostics.
         """
+        
         try:
             lower = msg.strip().lower()
-            # --- Fast intent routing (short-circuit if matched) ---
+            self.status.begin('analyze', 'Understanding request')
+            self.status.stage('analyze', 'Parsing intent', pct=10)
+
+            # --- Fast intent routing ---
             if lower.startswith("propose:"):
                 instruction = msg.split(":", 1)[1].strip()
+                self.status.complete('Proposed code change')
                 return self.propose_code_change(instruction)
 
             if "propose" in lower:
-                # Try to extract what user wants improved
                 instruction = (
                     lower.replace("ultron", "").replace("propose", "").strip()
                     or "Apply a small improvement"
                 )
+                self.status.complete('Proposed code change')
                 return self.propose_code_change(instruction)
 
-            if any(
-                k in lower for k in ("laggy", "slow", "optimize", "diagnose", "diagnostic", "scan")
-            ):
+            if any(k in lower for k in ("laggy", "slow", "optimize", "diagnose", "diagnostic", "scan")):
                 auto = any(k in lower for k in ("optimize", "auto", "autofix", "fix"))
-                return self.run_diagnostic(auto_fix=auto)
+                self.status.complete('Running diagnostic')
+                return self.run_diagnostic(mode="changed", fix=auto)
 
-            # --- Persist raw text (best-effort) ---
+            # --- Persist raw text ---
             try:
                 if hasattr(self.store, "maybe_store_text"):
                     self.store.maybe_store_text(msg)
@@ -1150,17 +1184,20 @@ class Orchestrator:
             except Exception:
                 memories = []
 
+            self.status.stage('memory', f'Found {len(memories)} relevant notes', pct=25)
+
             # --- KG context ---
             kg_context = self.query_kg_context(msg)
+            kg_lines = (kg_context or '').splitlines()
+            self.status.stage('kg', f'Knowledge graph context lines: {len(kg_lines)}', pct=35)
 
-            # --- Persona primer text ---
+            # --- Persona primer ---
             try:
                 persona_text = self.primer.build(msg) if self.primer else ""
             except Exception:
                 persona_text = ""
 
-            # --- Tone policy (optional) ---
-            # --- Tone policy (optional) ---
+            # --- Tone policy ---
             policy_id = None
             try:
                 policy = self.tone_adapter.choose_policy() if self.tone_adapter else None
@@ -1169,7 +1206,8 @@ class Orchestrator:
             except Exception:
                 self.last_policy_id = None
 
-            # --- Compose final prompt ---
+            self.status.stage('compose', 'Persona and tone prepared', pct=45)
+
             # --- Compose final prompt ---
             prompt = compose_prompt(
                 system_prompt=SYSTEM_PROMPT,
@@ -1184,40 +1222,34 @@ class Orchestrator:
                 channel="text",
             )
 
-            # --- Call Brain ---
+            self.status.update(55, 'Prompt composed')
+            self.status.stage('reasoning', 'Asking brain...', pct=65)
+
+            # --- Brain call ---
             try:
                 reply = self.brain.ask_brain(prompt, system_prompt=SYSTEM_PROMPT)
             except Exception:
                 logger.exception("Brain call failed")
                 reply = "Sorry — my reasoning module hit an error."
+                
+            self.status.stage('synthesis', 'Forming reply', pct=85)
 
-            # # --- Record policy assignment (best-effort) ---
-            # try:
-            #     if getattr(self, "last_usage_id", None) and policy_id:
-            #         uid = self.last_usage_id
-            #         self.policy_by_usage_id[uid] = policy_id
-            #         try:
-            #             write_policy_assignment(self.db, uid, policy_id)
-            #         except Exception:
-            #             logger.debug("Failed to persist policy_assignment")
-            # except Exception:
-            #     pass
-            # return reply or ""
-            # # --- Record policy assignment (best-effort) ---
-            # try:
-            #     if getattr(self, "last_usage_id", None) and policy_id:
-            #         uid = self.last_usage_id
-            #         self.policy_by_usage_id[uid] = policy_id
-            #         try:
-            #             write_policy_assignment(self.db, uid, policy_id)
-            #         except Exception:
-            #             logger.debug("Failed to persist policy_assignment")
-            # except Exception:
-            #     pass
-            # return reply or ""
+            try:
+                from config.config import settings
+                if getattr(settings, 'auto_speak', False):
+                    self.status.update(90, 'Speech queued')
+            except Exception:
+                pass
+
+            self.status.complete('Done')
+            return reply or ""
 
         except Exception:
             logger.exception("handle_user failed")
+            try:
+                self.status.stop()
+            except Exception:
+                pass
             return "Sorry — something went wrong while composing my reply."
 
     # -------------------------------------
@@ -1592,8 +1624,9 @@ class Orchestrator:
 
             # Remove from FAISS vector index (if present)
             try:
-                if hasattr(self.store, "faiss") and self.store.faiss:
-                    self.store.faiss.remove_by_text(user_text)
+                faiss_index = getattr(self.store, "faiss", None)
+                if faiss_index:
+                    faiss_index.remove_by_text(user_text)
             except Exception as e:
                 logger.error(f"forget_memory: failed to delete from FAISS: {e}")
 

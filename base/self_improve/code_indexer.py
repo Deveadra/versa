@@ -8,7 +8,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from base.self_improve.code_indexer import CodeIndexer
+# from base.self_improve.code_indexer import CodeIndexer
 
 
 @dataclass
@@ -70,6 +70,13 @@ class CodeIndexer:
     #         except Exception as e:
     #             logger.debug(f"Index skip {p}: {e}")
     #     return files
+    
+    def _index_file(self, p: Path) -> dict:
+        return {
+            "path": str(p.relative_to(self.root)),
+            "summary": "...",
+            "symbols": [],
+        }
     
     def scan(self, incremental: bool = True) -> dict:
         """

@@ -1,13 +1,13 @@
 # base/repl/commands.py
 import re
 
-from ..agents.orchestrator import Orchestrator
 from base.core.commands import (
-    handle_policy_command, 
     handle_diagnostic_command,
-    handle_diagnostic_history
+    handle_diagnostic_history,
+    handle_policy_command,
 )
 
+from ..agents.orchestrator import Orchestrator
 
 orch = Orchestrator()
 
@@ -79,4 +79,3 @@ def handle_command(cmd: str, text: str, policy) -> str | None:
     return "" or None
 
 
-    

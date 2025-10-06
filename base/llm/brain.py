@@ -84,6 +84,13 @@ class Brain:
             if settings.auto_speak:
                 self.voice.speak_async(reply)
 
+            # brain.py
+            if getattr(settings, "auto_speak", False) and hasattr(self, "voice"):
+                speak_async = getattr(self.voice, "speak_async", None)
+                if callable(speak_async):
+                    speak_async(reply)
+
+
             return reply
         except Exception as e:
             logger.exception(f"[ask_brain error] {e}")

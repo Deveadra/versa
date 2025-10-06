@@ -316,6 +316,16 @@ class Orchestrator:
             except Exception:
                 logger.debug("Background enrichment skipped (non-fatal).")
 
+    def _evaluate_chain(self, task):
+        
+        result = self._run_action(
+            user_text=task["user_text"],
+            intent=task["intent"],
+            action=task["action"],
+            params=task["params"],
+        )
+        return result
+    
     def _process_task(self, task):
         self.status_display.start("Processing cognitive task...")
         try:

@@ -620,6 +620,11 @@ class Orchestrator:
             return mgr.open_pr(branch=branch, proposal=proposal)
         except Exception:
             return None
+    
+    def _is_vendor_path(self, path: str) -> bool:
+        p = str(path).replace("/", "\\").lower()
+        return "\\.venv\\" in p or "site-packages" in p or "\\lib\\site-packages\\" in p
+
 
     def run_diagnostic(self, mode: str = "changed", fix: bool = False, base: str | None = None, verbose: bool = False) -> str:
         """
@@ -633,6 +638,7 @@ class Orchestrator:
         - Merge results
         Provides conversational summary at the end.
         """
+        
         fast = (mode == "changed") and (not fix)
         started_at = datetime.now(timezone.utc)
         structured = {"issues": []}
@@ -716,15 +722,20 @@ class Orchestrator:
                 report = {"summary": "LLM parse failed", "issues": []}
         structured["issues"].extend(report.get("issues", []))
 
-        # --- 5. Merge Results ---
-        self.status.stage('diagnostic', 'Merging results', pct=90)
+        # --- 5. Merge Results & log ---
         issues = structured.get("issues", [])
+        # Drop third-party / venv noise
+        issues = [i for i in issues if not self._is_vendor_path(i.get("file", ""))]
+
         log_payload = {"issues": issues, "fixable": bool(issues)}
         logger.info(f"[diagnostic] structured={log_payload}")
         if hasattr(self.store, "add_event"):
             self.store.add_event(
-                content=f"[diagnostic] {log_payload}", importance=0.0, type_="diagnostic"
+                content=f"[diagnostic] {log_payload}",
+                importance=0.0,
+                type_="diagnostic",
             )
+
 
         self.status.complete('Self-diagnostic complete')
 
@@ -750,7 +761,11 @@ class Orchestrator:
 
         if laggy:
             lag_summary = "; ".join(f"{b['label']} {b['latency_ms']:.1f}ms" for b in benchmarks)
-            return diag_output + f"\nDiagnostic complete. ⚠️ I noticed lag: {lag_summary}. Optimization suggested."
+            return f"Diagnostic complete. ⚠️ I noticed lag: {lag_summary}. Optimization suggested."
+
+        # if laggy:
+        #     lag_summary = "; ".join(f"{b['label']} {b['latency_ms']:.1f}ms" for b in benchmarks)
+        #     return diag_output + f"\nDiagnostic complete. ⚠️ I noticed lag: {lag_summary}. Optimization suggested."
 
         # ===== Feedback loop: auto-propose fixes (only when fix=True) =====
         if fix:

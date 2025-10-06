@@ -51,7 +51,7 @@ class UltronStatusConfig:
     log_size: int = 50                # rolling log entries
     spinner_interval: float = 0.1     # how fast the heartbeat ticks
     min_emit_interval: float = 0.15   # throttle to avoid flooding
-    dual_output: bool = False         # also send messages to voice system
+    dual_output: bool = True         # also send messages to voice system
     dual_output_threshold: int = 20   # speak only if % jumped this much
     dual_output_min_gap: float = 6.0  # min seconds between spoken updates
 

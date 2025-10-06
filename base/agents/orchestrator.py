@@ -348,23 +348,7 @@ class Orchestrator:
     #         return {"ask_user": q, "usage_id": usage_id}
     #     return None
 
-    # def record_user_feedback(self, usage_id: int, text: str) -> None:
-    #     """
-    #     Very light sentiment → feedback mapping. Safe even if Feedback is unavailable.
-    #     """
-    #     if not self.feedback:
-    #         return
-    #     try:
-    #         s = quick_polarity(text)
-    #         kind = "confirm" if s > 0.2 else "dislike" if s < -0.2 else "note"
-    #         self.feedback.record(usage_id, kind, text)
-    #         # If you wire ToneAdapter.update(reward), you could add:
-    #         # pid = self.policy_by_usage_id.get(usage_id)
-    #         # if pid and self.tone_adapter:
-    #         #     reward = 1.0 if kind == "confirm" else -1.0 if kind == "dislike" else 0.0
-    #         #     self.tone_adapter.update(pid, reward)
-    #     except Exception:
-    #         logger.exception("record_user_feedback failed")
+
 
 
 
@@ -429,7 +413,7 @@ class Orchestrator:
         """
         # 1) Build repo index (for LLM context)
         index = self.code_indexer.scan()
-        index_md = self.code_indexer.to_markdown(index)
+        index_md = self.code_indexer.to_markdown(cast(Any, index))
 
         # 2) Ask LLM for proposal
         proposal = self.proposal_engine.propose(instruction, index_md=index_md)
@@ -683,69 +667,45 @@ class Orchestrator:
         print("\nUltron: Beginning self-diagnostic.\n")
 
         # --- Progress bar (tqdm) across main stages ---
-        with tqdm(
-            total=len(steps), bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
-        ) as pbar:
+        self.status.begin('diagnostic', 'Beginning self-diagnostic sequence')
 
-            # --- 1. Performance benchmarks ---
-            benchmarks = []
-            try:
-                benchmarks.append(
-                    self.benchmark_action("Memory Search", self.store.keyword_search, "test")
-                )
-                benchmarks.append(
-                    self.benchmark_action("Embedding Encode", self.embedder.encode, ["benchmark string"])
-                )
-                benchmarks.append(
-                    self.benchmark_action("Brain Response", self.brain.ask_brain, "ping", system_prompt="diag")
-                )
-            except Exception as e:
-                logger.error(f"Benchmarking failed: {e}")
-            pbar.set_description(steps[0])
-            pbar.update(1)
+        # --- 1. Performance Benchmarks ---
+        self.status.stage('diagnostic', 'Running performance benchmarks', pct=10)
+        benchmarks = []
+        try:
+            benchmarks.append(self.benchmark_action("Memory Search", self.store.keyword_search, "test"))
+            benchmarks.append(self.benchmark_action("Embedding Encode", self.embedder.encode, ["benchmark string"]))
+            benchmarks.append(self.benchmark_action("Brain Response", self.brain.ask_brain, "ping", system_prompt="diag"))
+        except Exception as e:
+            logger.error(f"Benchmarking failed: {e}")
+        laggy = any(b["latency_ms"] > 300 for b in benchmarks)
+        if laggy:
+            structured["issues"].append({
+                "file": "performance",
+                "summary": "High latency detected",
+                "suggestion": "Optimize embedding, DB retrieval, or caching.",
+            })
 
-            laggy = any(b["latency_ms"] > 300 for b in benchmarks)
-            if laggy:
-                structured["issues"].append({
-                    "file": "performance",
-                    "summary": "High latency detected",
-                    "suggestion": "Optimize embedding, DB retrieval, or caching.",
-                })
+        # --- 2. Static Scan ---
+        self.status.stage('diagnostic', 'Running static code scan', pct=30)
+        engine = DiagnosticEngine(repo_root=str(self.repo_root))
+        _, scan_struct = engine.scan()
+        structured["issues"].extend(scan_struct.get("issues", []))
 
-            # --- 2. Static scan ---
-            engine = DiagnosticEngine(repo_root=str(self.repo_root))
-            _, scan_struct = engine.scan()
-            structured["issues"].extend(scan_struct.get("issues", []))
-            pbar.set_description(steps[1])
-            pbar.update(1)
-            
-            # --- 3. Index repository ---
-            if fast:
-                index_md = "(fast-mode: index skipped)"
-            else:
-                index = self.code_indexer.scan(incremental=True)   # see Section C below
-                index_md = self.code_indexer.to_markdown(index)
-            pbar.set_description(steps[2]); pbar.update(1)
+        # --- 3. Index Repository ---
+        self.status.stage('diagnostic', 'Indexing repository', pct=50)
+        if fast:
+            index_md = "(fast-mode: index skipped)"
+        else:
+            idx = self.code_indexer.scan(incremental=True)
+            index_md = self.code_indexer.to_markdown(cast(Any, idx))
 
-            # --- 4. LLM-assisted scan ---
-            if fast:
-                report = {"summary": "LLM scan skipped (fast mode)", "issues": []}
-            else:
-                user_prompt = f"Run a full self-diagnostic scan.\n\nRepository index:\n{index_md}"
-                raw = self.brain.ask_brain(user_prompt, system_prompt=DIAGNOSTIC_SYS_PROMPT)
-                try:
-                    if raw.startswith("```"):
-                        raw = re.sub(r"^```[a-zA-Z]*\n", "", raw).rstrip("`").strip()
-                    report = json.loads(raw)
-                except Exception as e:
-                    logger.error(f"Diagnostic parse error: {e} | Raw: {raw[:200]}")
-                    report = {"summary": "LLM parse failed", "issues": []}
-            structured["issues"].extend(report.get("issues", []))
-            pbar.set_description(steps[3]); pbar.update(1)
-
-
-            # --- 4. LLM-assisted scan ---
-            user_prompt = f"""Run a full self-diagnostic scan.\n\nRepository index:\n{index_md}"""
+        # --- 4. LLM-Assisted Scan ---
+        self.status.stage('diagnostic', 'Running LLM-assisted scan', pct=70)
+        if fast:
+            report = {"summary": "LLM scan skipped (fast mode)", "issues": []}
+        else:
+            user_prompt = f"Run a full self-diagnostic scan.\n\nRepository index:\n{index_md}"
             raw = self.brain.ask_brain(user_prompt, system_prompt=DIAGNOSTIC_SYS_PROMPT)
             try:
                 if raw.startswith("```"):
@@ -754,21 +714,19 @@ class Orchestrator:
             except Exception as e:
                 logger.error(f"Diagnostic parse error: {e} | Raw: {raw[:200]}")
                 report = {"summary": "LLM parse failed", "issues": []}
-            structured["issues"].extend(report.get("issues", []))
-            pbar.set_description(steps[3])
-            pbar.update(1)
+        structured["issues"].extend(report.get("issues", []))
 
-            # --- 5. Merge & log ---
-            issues = structured.get("issues", [])
-            log_payload = {"issues": issues, "fixable": bool(issues)}
-            logger.info(f"[diagnostic] structured={log_payload}")
-            if hasattr(self.store, "add_event"):
-                self.store.add_event(
-                    content=f"[diagnostic] {log_payload}", importance=0.0, type_="diagnostic"
-                )
-            pbar.set_description(steps[4])
-            pbar.update(1)
-        duration_ms = (datetime.now(timezone.utc) - started_at).total_seconds() * 1000.0
+        # --- 5. Merge Results ---
+        self.status.stage('diagnostic', 'Merging results', pct=90)
+        issues = structured.get("issues", [])
+        log_payload = {"issues": issues, "fixable": bool(issues)}
+        logger.info(f"[diagnostic] structured={log_payload}")
+        if hasattr(self.store, "add_event"):
+            self.store.add_event(
+                content=f"[diagnostic] {log_payload}", importance=0.0, type_="diagnostic"
+            )
+
+        self.status.complete('Self-diagnostic complete')
 
         try:
             self.store.add_diagnostic_event(
@@ -780,7 +738,8 @@ class Orchestrator:
                 benchmarks=benchmarks,         # from step 1
                 laggy=laggy,                   # derived from benchmarks
                 started_at_iso=started_at.isoformat(),
-                duration_ms=duration_ms,
+                duration_ms=round((datetime.now(timezone.utc) - started_at).total_seconds() * 1000),
+                # duration_ms=duration_ms,
             )
         except Exception as e:
             logger.error(f"Failed to persist diagnostic event: {e}")
@@ -871,125 +830,12 @@ class Orchestrator:
 
 
     def speak_progress(self, percent: int, desc: str):
-        """Speak progress aloud if TTS is available."""
-        steps = [
-            "Running performance benchmarks",
-            "Static code scan",
-            "Indexing repository",
-            "LLM-assisted scan",
-            "Merging results",
-        ]
-
+        """Report diagnostic progress using UltronStatus (and optional TTS)."""
         try:
-            if percent % 20 == 0:
-                msg = f"Diagnostic {percent}% complete. {desc}."
-                speak = getattr(self.voice, "speak", None)
-                if callable(speak):
-                    self.voice.speak(msg)
-                else:
-                    print(f"[Ultron Voice] {msg}")
+            # Update visual + vocal progress
+            self.status.update(percent, desc)
         except Exception as e:
-            logger.debug(f"TTS progress update failed: {e}")
-
-        print("\nUltron: Beginning self-diagnostic.\n")
-        if hasattr(self, "voice"):
-            self.voice.speak("Beginning self-diagnostic.")
-
-        with tqdm(
-            total=len(steps), bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
-        ) as pbar:
-            for idx, step in enumerate(steps, start=1):
-                # --- STEP EXECUTION ---
-                if step == "Running performance benchmarks":
-                    benchmarks = []
-                    try:
-                        benchmarks.append(
-                            self.benchmark_action(
-                                "Memory Search", self.store.keyword_search, "test"
-                            )
-                        )
-                        benchmarks.append(
-                            self.benchmark_action(
-                                "Embedding Encode", self.embedder.encode, ["benchmark string"]
-                            )
-                        )
-                        benchmarks.append(
-                            self.benchmark_action(
-                                "Brain Response", self.brain.ask_brain, "ping", system_prompt="diag"
-                            )
-                        )
-                    except Exception as e:
-                        logger.error(f"Benchmarking failed: {e}")
-                    laggy = any(b["latency_ms"] > 300 for b in benchmarks)
-                    if laggy:
-                        structured["issues"].append(
-                            {
-                                "file": "performance",
-                                "summary": "High latency detected",
-                                "suggestion": "Optimize embedding, DB retrieval, or caching.",
-                            }
-                        )
-
-                elif step == "Static code scan":
-                    engine = DiagnosticEngine(repo_root=str(self.repo_root))
-                    _, scan_struct = engine.scan()
-                    structured["issues"].extend(scan_struct.get("issues", []))
-
-                elif step == "Indexing repository":
-                    index = self.code_indexer.scan()
-                    index_md = self.code_indexer.to_markdown(index)
-
-                elif step == "LLM-assisted scan":
-                    user_prompt = (
-                        f"""Run a full self-diagnostic scan.\n\nRepository index:\n{index_md}"""
-                    )
-                    raw = self.brain.ask_brain(user_prompt, system_prompt=DIAGNOSTIC_SYS_PROMPT)
-                    try:
-                        if raw.startswith("```"):
-                            raw = re.sub(r"^```[a-zA-Z]*\n", "", raw).rstrip("`").strip()
-                        report = json.loads(raw)
-                    except Exception as e:
-                        logger.error(f"Diagnostic parse error: {e} | Raw: {raw[:200]}")
-                        report = {"summary": "LLM parse failed", "issues": []}
-                    structured["issues"].extend(report.get("issues", []))
-
-                elif step == "Merging results":
-                    issues = structured.get("issues", [])
-                    log_payload = {"issues": issues, "fixable": bool(issues)}
-                    logger.info(f"[diagnostic] structured={log_payload}")
-                    if hasattr(self.store, "add_event"):
-                        self.store.add_event(
-                            content=f"[diagnostic] {log_payload}",
-                            importance=0.0,
-                            type_="diagnostic",
-                        )
-
-                # --- PROGRESS UPDATE ---
-                pbar.set_description(step)
-                pbar.update(1)
-                percent = int((idx / len(steps)) * 100)
-                self.speak_progress(percent, step)
-                self.speak_progress(percent, step)
-                time.sleep(0.3)  # pacing, so bar doesn't flash instantly
-
-        # === Conversational Reporting ===
-        issues = structured.get("issues", [])
-        if not issues and not laggy:
-            msg = "Diagnostic complete. Everything looks clean — no glaring issues."
-        elif laggy:
-            lag_summary = "; ".join(f"{b['label']} {b['latency_ms']:.1f}ms" for b in benchmarks)
-            msg = f"Diagnostic complete. ⚠️ I noticed lag: {lag_summary}. Optimization proposed."
-        else:
-            preview = "; ".join(
-                f"{i['file']}: {i.get('summary', i.get('issue','?'))}" for i in issues[:3]
-            )
-            more = "" if len(issues) <= 3 else f" …and {len(issues)-3} more."
-            msg = f"Diagnostic complete. I found: {preview}{more}"
-
-        print(msg)
-        if hasattr(self, "voice"):
-            self.voice.speak(msg)
-        return msg
+            logger.debug(f"Status update failed: {e}")
 
     def run_tests_in_branch(self, branch: str) -> str:
         """Run pytest inside the repo and return results as a string."""
@@ -1448,7 +1294,7 @@ class Orchestrator:
             logger.debug("query_kg_context failed (non-fatal).")
             return ""
 
-    def ask_confirmation_if_unsure(self, suggestion: str, confidence: float, usage_id: int = None):
+    def ask_confirmation_if_unsure(self, suggestion: str, confidence: float, usage_id: Optional[int] = None):  # usage_id: int = None):
         """Return a confirmation prompt if confidence is low; caller sends it to user UI/REPL."""
         try:
             if confidence is None:
@@ -1462,43 +1308,71 @@ class Orchestrator:
             logger.exception("ask_confirmation_if_unsure")
             return None
 
-    def record_user_feedback(self, usage_id: int, text: str):
+    # def record_user_feedback(self, usage_id: int, text: str) -> None:
+    #     """
+    #     Very light sentiment → feedback mapping. Safe even if Feedback is unavailable.
+    #     """
+    #     if not self.feedback:
+    #         return
+    #     try:
+    #         s = quick_polarity(text)
+    #         kind = "confirm" if s > 0.2 else "dislike" if s < -0.2 else "note"
+    #         self.feedback.record(usage_id, kind, text)
+    #         # If you wire ToneAdapter.update(reward), you could add:
+    #         # pid = self.policy_by_usage_id.get(usage_id)
+    #         # if pid and self.tone_adapter:
+    #         #     reward = 1.0 if kind == "confirm" else -1.0 if kind == "dislike" else 0.0
+    #         #     self.tone_adapter.update(pid, reward)
+    #     except Exception:
+    #         logger.exception("record_user_feedback failed")
+    
+    # def record_user_feedback(self, usage_id: int | None, text: str):
+    def record_user_feedback(self, usage_id: Optional[int], text: str) -> None:
         pid = None
-        if hasattr(self, "policy_by_usage_id") and usage_id in self.policy_by_usage_id:
+        if usage_id is not None and hasattr(self, "policy_by_usage_id") and usage_id in self.policy_by_usage_id:
             pid = self.policy_by_usage_id.get(usage_id)
 
-        # fallback to DB lookup if not found in memory (this makes the mapping durable)
-        if not pid:
+        if pid is None and usage_id is not None:
             try:
                 pid = read_policy_assignment(self.db, usage_id)
             except Exception:
                 pid = None
 
-        # fallback to last_policy_id if still nothing
-        if not pid:
+        if pid is None:
             pid = getattr(self, "last_policy_id", None)
 
         """Record feedback, update events, reward the tone bandit, and optionally reinforce habits/facts."""
         try:
             # 1) polarity
-            score = quick_polarity(text)  # [-1,1]
-            kind = "confirm" if score > 0.2 else "dislike" if score < -0.2 else "note"
+            try:
+                score = quick_polarity(text)  # [-1, 1]
+                kind = "confirm" if score > 0.2 else "dislike" if score < -0.2 else "note"
+            except Exception:
+                score = 0.0
+                kind = "note"
 
-            # 2) record in DB
-            if getattr(self, "feedback", None):
-                try:
-                    self.feedback.record(usage_id, kind, text)
-                except Exception:
-                    logger.exception("feedback.record failed")
+            # 2) record in DB (only if we have a valid usage_id)
+            try:
+                fb = cast(Any, getattr(self, "feedback", None))
+                if fb is not None and usage_id is not None:
+                    try:
+                        fb.record(usage_id, kind, text)
+                    except Exception:
+                        logger.exception("feedback.record failed")
+            except Exception:
+                logger.exception("feedback access failed")
 
             # 3) reward tone adapter (map to [0,1])
-            if getattr(self, "tone_adapter", None):
-                policy_id = getattr(self, "last_policy_id", None)
-                if policy_id:
+            try:
+                ta = cast(Any, getattr(self, "tone_adapter", None))
+                if ta is not None and pid is not None:
+                    reward_value = (float(score) + 1.0) / 2.0  # [-1,1] -> [0,1]
                     try:
-                        self.tone_adapter.reward(policy_id, score)
+                        ta.reward(pid, reward_value)
                     except Exception:
                         logger.exception("tone_adapter.reward failed")
+            except Exception:
+                logger.exception("tone_adapter access failed")
 
             # 4) optionally: bump fact confidence / reinforce habit
             #   (You can implement a separate small routine that increments fact.confidence or habit counts.)

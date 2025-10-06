@@ -1,8 +1,9 @@
 # base/core/nlu.py
 from __future__ import annotations
+
 import re
 from difflib import SequenceMatcher
-from typing import Optional, Dict, Any
+from typing import Any
 
 _DIAG_TRIGGERS = {
     "diagnostic", "diagnostics", "diag", "scan", "health check",
@@ -57,7 +58,7 @@ def _contains_any(text: str, phrases: set[str]) -> bool:
     # fallback fuzzy
     return _fuzzy_contains(t, phrases)
 
-def parse_diagnostic_intent(text: str) -> Optional[Dict[str, Any]]:
+def parse_diagnostic_intent(text: str) -> dict[str, Any] | None:
     """
     Returns:
       { "name": "diagnostic", "mode": "all|changed", "fix": bool, "confidence": float }

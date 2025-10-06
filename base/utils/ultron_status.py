@@ -1,19 +1,26 @@
 # base/utils/ultron_status.py
 from __future__ import annotations
 
-import sys
-import time
 import itertools
+import logging
 import random
+import sys
 import threading
-
+import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Optional
+
+from rich.console import Console
+from rich.live import Live
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+
+console = Console()
+logger = logging.getLogger(__name__)
 
 # Optional color (graceful fallback)
 try:
-    from colorama import init as _color_init, Fore, Style  # type: ignore
+    from colorama import Fore, Style
+    from colorama import init as _color_init  # type: ignore
     _color_init()
 except Exception:  # fallback to no-color
     class _Dummy:
@@ -21,6 +28,7 @@ except Exception:  # fallback to no-color
     Fore = Style = _Dummy()  # type: ignore
 
 BELL = '\a'  # cheap audio cue on terminals
+
 
 STAGE_COLORS = {
     'analyze':   Fore.CYAN,
@@ -43,6 +51,16 @@ CONTEXT_TAGS = {
     'synthesis': ['Forming output', 'Polishing phrasing', 'Queuing speech'],
 }
 
+spinner = Progress(
+    SpinnerColumn("earth", speed=0.6),  # or "bouncingBall", "aesthetic", "dots12"
+    TextColumn("[bold violet]ULTRON[/bold violet] {task.fields[stage]}"),
+    BarColumn(bar_width=None, complete_style="bright_blue"),
+    TextColumn("{task.fields[msg]}"),
+    TimeElapsedColumn(),
+    expand=True,
+    transient=True,
+)
+
 @dataclass
 class UltronStatusConfig:
     immersive: bool = True            # keep on; we gate behavior with this
@@ -51,12 +69,13 @@ class UltronStatusConfig:
     log_size: int = 50                # rolling log entries
     spinner_interval: float = 0.1     # how fast the heartbeat ticks
     min_emit_interval: float = 0.15   # throttle to avoid flooding
-    dual_output: bool = True         # also send messages to voice system
+    dual_output: bool = False         # also send messages to voice system
     dual_output_threshold: int = 20   # speak only if % jumped this much
     dual_output_min_gap: float = 6.0  # min seconds between spoken updates
 
 @dataclass
 class UltronStatus:
+    _voice_lock: threading.Lock = field(default_factory=threading.Lock, init=False)
     cfg: UltronStatusConfig = field(default_factory=UltronStatusConfig)
     _active: bool = field(default=False, init=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False)
@@ -64,12 +83,15 @@ class UltronStatus:
     _last_update: float = field(default=0.0, init=False)
     _progress: int = field(default=0, init=False)
     _stage: str = field(default='idle', init=False)
-    _spinner_thread: Optional[threading.Thread] = field(default=None, init=False)
-    _hb_thread: Optional[threading.Thread] = field(default=None, init=False)
+    _spinner_thread: threading.Thread | None = field(default=None, init=False)
+    _hb_thread: threading.Thread | None = field(default=None, init=False)
     _log: deque[str] = field(default_factory=lambda: deque(maxlen=50), init=False)
     _last_spoken: float = field(default=0.0, init=False)
     _last_spoken_pct: int = field(default=0, init=False)
-    _voice_iface: Optional[object] = field(default=None, init=False)
+    _voice_iface: object | None = field(default=None, init=False)
+    _progress_pct: int | None = None
+    _STATUS_CONSOLE = Console(file=sys.stderr, force_terminal=True)
+
 
     # ---------- internals ----------
     def attach_voice_interface(self, voice_iface: object) -> None:
@@ -88,27 +110,45 @@ class UltronStatus:
         sys.stdout.write(line + '\n')
         sys.stdout.flush()
 
-    def _maybe_speak(self, text: str, pct: Optional[int] = None) -> None:
-        if not self.cfg.dual_output or not self._voice_iface:
-            return
-        now = time.time()
-        if pct is None:
-            pct = 0
-        # Only speak if enough time or progress has passed
-        if (
-            now - self._last_spoken >= self.cfg.dual_output_min_gap
-            or abs(pct - self._last_spoken_pct) >= self.cfg.dual_output_threshold
-        ):
-            self._last_spoken = now
-            self._last_spoken_pct = pct
-            try:
-                speak_fn = getattr(self._voice_iface, "speak_async", None) or getattr(self._voice_iface, "speak", None)
-                if callable(speak_fn):
-                    speak_fn(text)
-            except Exception:
-                pass
+    def _safe_speak_blocking(self, text: str):
+        try:
+            fn = getattr(self._voice_iface, "speak", None)
+            if callable(fn):
+                fn(text)
+        except Exception as e:
+            logger.debug(f"Voice speak failed (suppressed): {e}")
 
-    def _fmt(self, stage: str, msg: str, pct: Optional[int]=None) -> str:
+    def _maybe_speak(self, text: str, pct: int = 0) -> None:
+        if not (self.cfg.dual_output and self._voice_iface):
+            return
+
+        now = time.time()
+
+        if (now - self._last_spoken < self.cfg.dual_output_min_gap) and abs(pct - self._last_spoken_pct) < self.cfg.dual_output_threshold:
+            return
+
+        try:
+            speak_async = getattr(self._voice_iface, "speak_async", None)
+            speak = getattr(self._voice_iface, "speak", None)
+            if callable(speak_async):
+                # Fire-and-forget; provider errors must not bubble
+                try:
+                    speak_async(text)
+                except Exception as e:
+                    logger.debug(f"voice speak_async suppressed: {e}")
+            elif callable(speak):
+                # Run blocking speak in a tiny thread so stage() never blocks
+                def _run():
+                    try: speak(text)
+                    except Exception as e: logger.debug(f"voice speak suppressed: {e}")
+                threading.Thread(target=_run, daemon=True).start()
+        except Exception as e:
+            logger.debug(f"voice path suppressed: {e}")
+
+        self._last_spoken = now
+        self._last_spoken_pct = pct
+
+    def _fmt(self, stage: str, msg: str, pct: int | None=None) -> str:
         color = STAGE_COLORS.get(stage, '')
         base = f"[ULTRON {stage.upper():>9}] {msg}"
         if pct is not None:
@@ -120,81 +160,79 @@ class UltronStatus:
         idx = int(time.time()) % len(choices)
         return choices[idx]
 
-    def _spinner(self) -> None:
-        spin = itertools.cycle(['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'])
-        while self._active:
-            with self._lock:
-                stage = self._stage
-            tag = self._pick_tag(stage)
-            self._emit(self._fmt('monitor', f"{tag} {next(spin)}"))
-            time.sleep(self.cfg.spinner_interval)
-
-    def _heartbeat(self) -> None:
-        while self._active:
-            time.sleep(0.5)
-            if time.time() - self._last_update > self.cfg.stall_warn_sec:
-                self._emit(self._fmt('monitor', '...still thinking (long step)'))
-                if self.cfg.stall_bell:
-                    try:
-                        sys.stdout.write(BELL); sys.stdout.flush()
-                    except Exception:
-                        pass
-                self._last_update = time.time()
+    def _run_rich_display(self):
+        prog = Progress(
+            SpinnerColumn("dots2", speed=0.8),
+            TextColumn("[bold violet]ULTRON[/bold violet] • {task.fields[stage]}"),
+            BarColumn(bar_width=None, complete_style="bright_blue"),
+            TextColumn("{task.fields[msg]}"),
+            TimeElapsedColumn(),
+            expand=True,
+            transient=True,
+        )
+        with Live(prog, console=_STATUS_CONSOLE, refresh_per_second=12):
+            task_id = prog.add_task("ultron", total=100, completed=0, stage=self._stage, msg=self._pick_tag(self._stage))
+            while self._active:
+                with self._lock:
+                    pct = int(self._progress_pct or 0)
+                    stage = self._stage
+                    msg = self._pick_tag(stage)
+                prog.update(task_id, completed=max(0, min(100, pct)), stage=stage, msg=msg)
+                time.sleep(0.10)
 
     # ---------- public API ----------
-    def begin(self, stage: str, message: str='') -> None:
+    def begin(self, stage: str, message: str = "") -> None:
         with self._lock:
             self._active = True
             self._stage = stage
-            self._progress = 0
+            self._progress_pct = 0 if message else None
             self._last_update = time.time()
-        if message:
-            self._emit(self._fmt(stage, message, 0))
-        self._spinner_thread = threading.Thread(target=self._spinner, daemon=True)
-        self._hb_thread = threading.Thread(target=self._heartbeat, daemon=True)
-        self._spinner_thread.start()
-        self._hb_thread.start()
+        # optional: a single log line (not every frame)
+        self._emit(self._fmt(stage, message or "Starting...", self._progress_pct or 0))
+        self._display_thread = threading.Thread(target=self._run_rich_display, daemon=True)
+        self._display_thread.start()
 
-    def stage(self, stage: str, message: str='', pct: Optional[int]=None) -> None:
+    def stage(self, stage: str, message: str = "", pct: int | None = None) -> None:
         with self._lock:
             self._stage = stage
-            if pct is not None:
-                self._progress = pct
+            self._progress_pct = pct  # None => pulse, int => % bar
             self._last_update = time.time()
-        self._emit(self._fmt(stage, message or self._pick_tag(stage), pct))
-        self._maybe_speak(message or self._pick_tag(stage), pct)
+        # one-off log line (won’t spam)
+        self._emit(self._fmt(stage, message or self._pick_tag(stage), pct if pct is not None else 0))
+        self._maybe_speak(message or self._pick_tag(stage), pct or 0)
 
-
-    def update(self, pct: int, message: str='') -> None:
+    def update(self, pct: int, message: str = "") -> None:
         with self._lock:
-            self._progress = max(self._progress, min(100, pct))
+            self._progress_pct = max(self._progress_pct or 0, min(100, pct))
             self._last_update = time.time()
             stage = self._stage
-        self._emit(self._fmt(stage, message or self._pick_tag(stage), self._progress))
+        if message:
+            self._emit(self._fmt(stage, message, self._progress_pct))
+            self._maybe_speak(message, self._progress_pct)
 
-    def complete(self, message: str='Ready') -> None:
+    def complete(self, message: str = "Ready") -> None:
         with self._lock:
-            self._progress = 100
-            self._stage = 'complete'
+            self._progress_pct = 100
+            self._stage = "complete"
             self._last_update = time.time()
-        self._emit(self._fmt('complete', message, 100))
+        # show 100% briefly, then Live(transient=True) clears the line
+        self._emit(self._fmt("complete", message, 100))
         self._maybe_speak(message, 100)
         self.stop()
 
     def stop(self) -> None:
         with self._lock:
             self._active = False
-        for t in (self._spinner_thread, self._hb_thread):
-            try:
-                if t and t.is_alive():
-                    t.join(timeout=0.1)
-            except Exception:
-                pass
+        try:
+            if getattr(self, "_display_thread", None) and self._display_thread.is_alive():
+                self._display_thread.join(timeout=0.25)
+        except Exception:
+            pass
 
     # Diagnostics
     def log_tail(self, n: int=10) -> list[str]:
         return list(self._log)[-n:]
-      
+
 @dataclass
 class CognitiveStatus:
     """
@@ -245,7 +283,7 @@ class CognitiveStatus:
             self._print(msg)
             time.sleep(0.1)
         self._print(" " * 80 + "\r")  # clear line when finished
-    
+
     # def _spinner_anim(self) -> None:
     #     spin = itertools.cycle(['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'])
     #     while self._active:

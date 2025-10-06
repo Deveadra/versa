@@ -13,14 +13,11 @@ Features:
 from __future__ import annotations
 
 import argparse
-import os
-import shlex
 import subprocess
 import sys
-
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Iterable, List, Tuple
 
 
 def print_section(title: str) -> None:
@@ -34,7 +31,7 @@ def run(cmd: list[str], cwd: Path) -> tuple[int, str, str]:
     try:
         proc = subprocess.run(
             cmd,
-            cwd=str(cwd),
+            check=False, cwd=str(cwd),
             capture_output=True,
             text=True,
             shell=False,
@@ -44,10 +41,10 @@ def run(cmd: list[str], cwd: Path) -> tuple[int, str, str]:
         return 127, "", f"{e}"
     except Exception as e:
         return 1, "", f"{e}"
-    
+
 def run_cmd(cwd: Path, *cmd: str) -> tuple[int, str, str]:
     try:
-        p = subprocess.run(list(cmd), cwd=str(cwd), capture_output=True, text=True)
+        p = subprocess.run(list(cmd), check=False, cwd=str(cwd), capture_output=True, text=True)
         return p.returncode, p.stdout, p.stderr
     except Exception as e:
         return 1, "", str(e)
@@ -202,11 +199,11 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--changed", action="store_true", help="Scan only changed files (requires git).")
     parser.add_argument("--base", default=None, help="Base ref to diff against when using --changed (e.g., origin/main).")
     parser.add_argument("--fix", action="store_true", help="Apply fixes (black format, ruff --fix).")
-    args = parser.parse_args(argv)
     parser.add_argument("--concurrent", action="store_true",
                         help="Run independent checks (Black/Ruff) concurrently.")
     parser.add_argument("--smart-pytest", action="store_true",
                         help="If --changed and no test files changed, skip pytest.")
+    args = parser.parse_args(argv)
 
     repo = find_repo_root(Path(__file__).parent)
     scan_all = args.all or (not args.changed)

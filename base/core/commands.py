@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess, sys
-
-from datetime import datetime, timezone, timedelta
+import subprocess
+import sys
+from datetime import UTC, datetime, timedelta
 
 from base.agents.orchestrator import Orchestrator
 from base.core.nlu import parse_diagnostic_intent
@@ -16,7 +16,7 @@ try:
     from base.core.nlu import parse_diagnostic_intent
 except Exception:  # pragma: no cover
     parse_diagnostic_intent = None  # type: ignore
-    
+
 STOP_HARD = re.compile(
     r"\b(stop|never|don'?t.*ever)\b.*\b(remind|bring up)\b.*\b(?P<topic>\w[\w\s-]{1,40})", re.I
 )
@@ -132,7 +132,7 @@ def handle_diagnostic_command(text: str) -> str | None:
             args = [sys.executable, "scripts/diagnostic_scan.py", f"--{mode}"]
             if fix:
                 args.append("--fix")
-            result = subprocess.run(args, capture_output=True, text=True)
+            result = subprocess.run(args, check=False, capture_output=True, text=True)
             output = (result.stdout or result.stderr or "").strip()
             return f"Diagnostics completed.\n{output}" if output else "Diagnostics completed."
         except Exception as e_script:
@@ -161,7 +161,7 @@ def handle_diagnostic_history(text: str, store) -> str | None:
             cnt = len(ev.get("issues", []))
             lines.append(f"- {when} • {mode}/{fix} • {lag} • {cnt} issue(s)")
         return "Recent diagnostics:\n" + "\n".join(lines)
-    
+
     # Trigger patterns
     history_trigger = (
         (re.search(r"\b(diagnostic|diagnostics|scan)\b", t) and
@@ -179,7 +179,7 @@ def handle_diagnostic_history(text: str, store) -> str | None:
     # Optional time filter
     since_iso = None
     if "yesterday" in t or "last night" in t:
-        since_iso = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+        since_iso = (datetime.now(UTC) - timedelta(days=1)).isoformat()
 
     # Fetch events with graceful fallbacks
     try:

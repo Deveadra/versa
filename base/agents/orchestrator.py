@@ -633,6 +633,11 @@ class Orchestrator:
             return mgr.open_pr(branch=branch, proposal=proposal)
         except Exception:
             return None
+    
+    def _is_vendor_path(self, path: str) -> bool:
+        p = str(path).replace("/", "\\").lower()
+        return "\\.venv\\" in p or "site-packages" in p or "\\lib\\site-packages\\" in p
+
 
     def run_diagnostic(self, mode: str = "changed", fix: bool = False, base: str | None = None, verbose: bool = False) -> str:
         """
@@ -646,6 +651,7 @@ class Orchestrator:
         - Merge results
         Provides conversational summary at the end.
         """
+        
         fast = (mode == "changed") and (not fix)
         # started_at = datetime.now(timezone.utc)
         started_at_iso = self._now_iso_utc()
@@ -796,7 +802,11 @@ class Orchestrator:
 
         if laggy:
             lag_summary = "; ".join(f"{b['label']} {b['latency_ms']:.1f}ms" for b in benchmarks)
-            return diag_output + f"\nDiagnostic complete. ⚠️ I noticed lag: {lag_summary}. Optimization suggested."
+            return f"Diagnostic complete. ⚠️ I noticed lag: {lag_summary}. Optimization suggested."
+
+        # if laggy:
+        #     lag_summary = "; ".join(f"{b['label']} {b['latency_ms']:.1f}ms" for b in benchmarks)
+        #     return diag_output + f"\nDiagnostic complete. ⚠️ I noticed lag: {lag_summary}. Optimization suggested."
 
         # ===== Feedback loop: auto-propose fixes (only when fix=True) =====
         if fix:

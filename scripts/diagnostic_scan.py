@@ -12,6 +12,8 @@ Features:
 
 from __future__ import annotations
 
+from __future__ import annotations
+
 import argparse
 import subprocess
 import sys
@@ -27,20 +29,21 @@ def print_section(title: str) -> None:
 
 
 def run(cmd: list[str], cwd: Path) -> tuple[int, str, str]:
-    """Run a command and return (rc, stdout, stderr)."""
     try:
         proc = subprocess.run(
             cmd,
-            check=False, cwd=str(cwd),
+            cwd=str(cwd),
             capture_output=True,
             text=True,
             shell=False,
+            check=False,  # explicit
         )
         return proc.returncode, proc.stdout, proc.stderr
     except FileNotFoundError as e:
         return 127, "", f"{e}"
     except Exception as e:
         return 1, "", f"{e}"
+
 
 def run_cmd(cwd: Path, *cmd: str) -> tuple[int, str, str]:
     try:
@@ -125,7 +128,7 @@ def select_test_files(files: Iterable[Path]) -> list[Path]:
 def black_check(repo: Path, pyfiles: list[Path], fix: bool, scan_all: bool) -> int:
     print_section("Black")
     if fix:
-        cmd = [sys.executable, "-m", "black"]
+        cmd = [sys.executable, "-m", "black"] if fix else [sys.executable, "-m", "black", "--check"]
     else:
         cmd = [sys.executable, "-m", "black", "--check"]
     if scan_all or not pyfiles:
@@ -204,7 +207,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--smart-pytest", action="store_true",
                         help="If --changed and no test files changed, skip pytest.")
     args = parser.parse_args(argv)
-
     repo = find_repo_root(Path(__file__).parent)
     scan_all = args.all or (not args.changed)
 

@@ -19,6 +19,7 @@ python-dotenv==1.1.1
 openai #==1.107.2
 openai-whisper==20231117 # STT (cloud/offline with whisper.cpp alt)
 requests==2.32.3
+rich>=13.7.1
 simpleaudio==1.0.4
 sounddevice==0.5.2
 soundfile==0.13.1

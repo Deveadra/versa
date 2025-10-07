@@ -1,7 +1,6 @@
 # base/core/decider.py
 import hashlib
 import re
-
 from datetime import datetime
 
 from base.core.nlu import parse_diagnostic_intent
@@ -57,7 +56,7 @@ class Decider:
 
     def _is_explicit_remember(self, text: str) -> bool:
         return any(p in text.lower() for p in REMEMBER_PHRASES)
-    
+
     def score_text(
         self, text: str, plugin_hint: str = "", repeat_count: int = 0
     ) -> tuple[int, dict]:
@@ -105,7 +104,7 @@ class Decider:
             "thank you",
             "bye",
         ]
-        
+
         if "diagnostic" in text.lower() or "scan" in text.lower():
             score += WEIGHTS["direct_command"]
             meta["reason"].append("diagnostic_command")
@@ -120,7 +119,7 @@ class Decider:
             meta["category"] = "action"
             meta["intent"] = "diagnostic"
             meta["intent_payload"] = {"mode": intent["mode"], "fix": intent["fix"], "confidence": intent["confidence"]}
-            
+
         if any(m in text.lower() for m in low_value_markers):
             score += WEIGHTS["low_value"]
             meta["reason"].append("low_value_marker")
@@ -135,7 +134,7 @@ class Decider:
             meta["category"] = "short_history"
 
         return score, meta
-    
+
     def decide(self, text: str, plugin_hint: str = "") -> tuple[int, dict]:
         """
         Wrapper around score_text that keeps repeat counts.
@@ -210,7 +209,7 @@ class Decider:
 
         memory.add_history(text)
 
-    
+
 
     def make_fact_key(self, text: str, hint: str = "") -> str:
         base = (hint or "") + "|" + text.strip().lower()

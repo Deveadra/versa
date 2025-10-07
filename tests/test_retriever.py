@@ -1,5 +1,5 @@
 import unittest, os, sqlite3, tempfile
-from base.llm.retriever import Retriever
+from base.llm.retriever import DbRetriever
 
 class RetrieverTests(unittest.TestCase):
     def setUp(self):
@@ -34,7 +34,7 @@ class RetrieverTests(unittest.TestCase):
         class ConnWrapper:
             def __init__(self, conn): self.conn = conn
             def cursor(self): return self.conn.cursor()
-        r = Retriever(ConnWrapper(self.conn))
+        r = DbRetriever(ConnWrapper(self.conn))
         results = r.query("play lo-fi", top_k=3)
         summaries = [r['summary'] for r in results]
         self.assertTrue(any('usage:' in s for s in summaries))

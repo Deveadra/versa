@@ -3,10 +3,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from base.database.sqlite import SQLiteConn
 from base.memory.scoring import assess_importance
@@ -189,10 +188,10 @@ class MemoryStore:
         *,
         mode: str,
         fix: bool,
-        base: Optional[str],
+        base: str | None,
         diag_output: str,
-        issues: List[Dict[str, Any]],
-        benchmarks: List[Dict[str, Any]],
+        issues: list[dict[str, Any]],
+        benchmarks: list[dict[str, Any]],
         laggy: bool,
         started_at_iso: str,
         duration_ms: float,
@@ -223,7 +222,7 @@ class MemoryStore:
                 importance=0.0,
                 type_="diagnostic",
             )
-        except Exception as e:
+        except Exception:
             # Graceful fallback: don't crash the run; keep an audit trail.
             try:
                 with open("diagnostics.log", "a", encoding="utf-8") as f:
@@ -231,12 +230,12 @@ class MemoryStore:
             except Exception:
                 pass
 
-    def recent_diagnostics(self, limit: int = 10) -> List[Dict[str, Any]]:
+    def recent_diagnostics(self, limit: int = 10) -> list[dict[str, Any]]:
         """
         Return the most recent diagnostic events (decoded).
         Falls back to reading diagnostics.log if the event store is unavailable.
         """
-        out: List[Dict[str, Any]] = []
+        out: list[dict[str, Any]] = []
         try:
             # If you have a native list_events(type_=...) use it here.
             # Otherwise this uses a common content/type_ pattern.
@@ -251,7 +250,7 @@ class MemoryStore:
         except Exception:
             # Fallback to file if DB listing fails
             try:
-                with open("diagnostics.log", "r", encoding="utf-8") as f:
+                with open("diagnostics.log", encoding="utf-8") as f:
                     lines = f.readlines()[-limit:]
                 for ln in lines:
                     try:
@@ -262,11 +261,11 @@ class MemoryStore:
             except Exception:
                 return out  # empty if nothing works
 
-    def last_diagnostic(self) -> Optional[Dict[str, Any]]:
+    def last_diagnostic(self) -> dict[str, Any] | None:
         items = self.recent_diagnostics(limit=1)
         return items[0] if items else None
 
-    def diagnostics_since(self, iso_timestamp: str, limit: int = 50) -> List[Dict[str, Any]]:
+    def diagnostics_since(self, iso_timestamp: str, limit: int = 50) -> list[dict[str, Any]]:
         """
         Filter diagnostics since a given ISO timestamp.
         """
@@ -275,7 +274,7 @@ class MemoryStore:
         except Exception:
             return self.recent_diagnostics(limit=limit)
 
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         for ev in self.recent_diagnostics(limit=limit):
             try:
                 ts = datetime.fromisoformat(ev.get("created_at", "").replace("Z", "+00:00"))

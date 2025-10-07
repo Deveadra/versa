@@ -1,12 +1,9 @@
 # base/self_improve/code_indexer.py
 from __future__ import annotations
 
-import ast
-import json, os, time
+import json
 from dataclasses import dataclass
 from pathlib import Path
-
-from loguru import logger
 
 # from base.self_improve.code_indexer import CodeIndexer
 
@@ -51,14 +48,14 @@ class CodeIndexer:
             json.dump(cache, p.open("w", encoding="utf-8"))
         except Exception:
             pass
-    
+
     def _index_file(self, p: Path) -> dict:
         return {
             "path": str(p.relative_to(self.root)),
             "summary": "...",
             "symbols": [],
         }
-        
+
     # def scan(self) -> list[FileIndex]:
     #     files: list[FileIndex] = []
     #     for p in self.root.rglob("*.py"):
@@ -77,7 +74,7 @@ class CodeIndexer:
     #         except Exception as e:
     #             logger.debug(f"Index skip {p}: {e}")
     #     return files
-    
+
     def scan(self, incremental: bool = True) -> dict:
         """
         Return a dict index. If incremental, only re-read files whose mtime changed since last scan.
@@ -120,13 +117,13 @@ class CodeIndexer:
         if incremental:
             self._save_cache(out)
         return out
-    
+
     def _allowed(self, path: Path) -> bool:
         sp = str(path.resolve())
         if any(sp.startswith(b) for b in self.blocklist):
             return False
         return any(sp.startswith(a) for a in self.allowlist)
-    
+
 
     @staticmethod
     def to_markdown(index: list[FileIndex]) -> str:

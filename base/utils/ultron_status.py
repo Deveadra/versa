@@ -161,6 +161,7 @@ class UltronStatus:
         return choices[idx]
 
     def _run_rich_display(self):
+        _STATUS_CONSOLE = Console(file=sys.stderr, force_terminal=True)
         prog = Progress(
             SpinnerColumn("dots2", speed=0.8),
             TextColumn("[bold violet]ULTRON[/bold violet] • {task.fields[stage]}"),

@@ -726,24 +726,6 @@ class Orchestrator:
                     "suggestion": "Optimize embedding, DB retrieval, or caching.",
                 })
 
-<<<<<<< HEAD
-        # --- 5. Merge Results & log ---
-        issues = structured.get("issues", [])
-        # Drop third-party / venv noise
-        issues = [i for i in issues if not self._is_vendor_path(i.get("file", ""))]
-
-        log_payload = {"issues": issues, "fixable": bool(issues)}
-        logger.info(f"[diagnostic] structured={log_payload}")
-        if hasattr(self.store, "add_event"):
-            self.store.add_event(
-                content=f"[diagnostic] {log_payload}",
-                importance=0.0,
-                type_="diagnostic",
-            )
-
-
-        self.status.complete('Self-diagnostic complete')
-=======
             # --- 2. Static Scan ---
             self.status.stage('diagnostic', 'Running static code scan', pct=30)
             engine = DiagnosticEngine(repo_root=str(self.repo_root))
@@ -794,7 +776,6 @@ class Orchestrator:
                 pass
             raise
 
->>>>>>> e27a1c885ee0c8d13a4b74c108d3d546251dc9ef
 
         try:
             self.store.add_diagnostic_event(

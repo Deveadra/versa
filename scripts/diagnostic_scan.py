@@ -20,11 +20,6 @@ import sys
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-<<<<<<< HEAD
-from collections.abc import Iterable
-
-=======
->>>>>>> e27a1c885ee0c8d13a4b74c108d3d546251dc9ef
 
 
 def print_section(title: str) -> None:
@@ -34,15 +29,14 @@ def print_section(title: str) -> None:
 
 
 def run(cmd: list[str], cwd: Path) -> tuple[int, str, str]:
-    """Run a command and return (rc, stdout, stderr)."""
     try:
         proc = subprocess.run(
             cmd,
-            check=False, cwd=str(cwd),
+            cwd=str(cwd),
             capture_output=True,
             text=True,
             shell=False,
-            check=False,
+            check=False,  # explicit
         )
         return proc.returncode, proc.stdout, proc.stderr
     except FileNotFoundError as e:
@@ -50,13 +44,10 @@ def run(cmd: list[str], cwd: Path) -> tuple[int, str, str]:
     except Exception as e:
         return 1, "", f"{e}"
 
+
 def run_cmd(cwd: Path, *cmd: str) -> tuple[int, str, str]:
     try:
-<<<<<<< HEAD
-        p = subprocess.run(list(cmd), cwd=str(cwd), capture_output=True, text=True, check=False)
-=======
         p = subprocess.run(list(cmd), check=False, cwd=str(cwd), capture_output=True, text=True)
->>>>>>> e27a1c885ee0c8d13a4b74c108d3d546251dc9ef
         return p.returncode, p.stdout, p.stderr
     except Exception as e:
         return 1, "", str(e)
@@ -216,11 +207,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--smart-pytest", action="store_true",
                         help="If --changed and no test files changed, skip pytest.")
     args = parser.parse_args(argv)
-<<<<<<< HEAD
-    
-=======
-
->>>>>>> e27a1c885ee0c8d13a4b74c108d3d546251dc9ef
     repo = find_repo_root(Path(__file__).parent)
     scan_all = args.all or (not args.changed)
 

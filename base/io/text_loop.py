@@ -23,6 +23,14 @@ def run_text(orch):
             n = orch.store.forget(topic)
             print(f"Ultron: Removed {n} entries related to '{topic}'.")
             continue
+        
+        if msg.lower() == "self-improve":
+            try:
+                orch._job_self_improvement()
+                print("Ultron: self-improvement job executed.")
+            except Exception as e:
+                print(f"Ultron: self-improvement failed: {e}")
+            continue
 
         reply = orch.handle_user(msg)
         print("Ultron:", reply)

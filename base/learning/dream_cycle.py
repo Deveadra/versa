@@ -1,8 +1,11 @@
 import json
+
 from datetime import datetime  # <-- add this
+from pathlib import Path
 
 from base.llm.brain import ask_brain  # <-- wherever ask_brain is actually implemented
 from base.policy.topic_manager import prune_stale_topics
+
 
 
 def propose_new_signals_and_rules(conn):
@@ -206,3 +209,14 @@ def cluster_complaints(conn):
         conn.commit()
     except Exception:
         pass
+
+def write_summary(self, notes: dict) -> str:
+    from datetime import datetime
+    out_dir = Path("memory/learning")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"dream_summary_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json"
+    path.write_text(json.dumps({
+        "timestamp": datetime.utcnow().isoformat(),
+        "notes": notes,
+    }, indent=2), encoding="utf-8")
+    return str(path)

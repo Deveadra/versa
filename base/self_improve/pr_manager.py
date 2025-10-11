@@ -25,44 +25,55 @@ class PRManager:
         self.client = GitClient(self.root, remote=settings.github_remote_name)
         self.original_branch: str | None = None
 
-    def prepare_branch(self, name_suffix: str) -> str:
+    def prepare_branch(self, branch_name: str, base: str = "main") -> str:
         """
-        Prepare or reuse a proposal branch.
-        - Remember original branch
-        - Fetch + sync default branch
-        - Create new branch off default (or reuse if exists)
-        - Return branch name
+        Create/switch to a fresh proposal branch safely.
+        - Stash uncommitted local changes (if any) and restore afterward.
+        - If branch already exists locally or remotely, append a short suffix.
+        - Ensures user.name/email are set for the repo.
+        Returns the final branch name.
         """
-        base = settings.github_default_branch
-        branch = f"{settings.proposer_branch_prefix}{name_suffix}"
+        self.git.ensure_user(
+            getattr(settings, "github_bot_name", "ultron-bot"),
+            getattr(settings, "github_bot_email", "ultron-bot@local"),
+        )
 
-        # Remember where the user was
+        # Generate collision-safe name if needed
+        final = branch_name
+        suffix = 0
+        while self.git.branch_exists(final):
+            suffix += 1
+            final = f"{branch_name}-{suffix}"
+
+        # Stash if dirty
+        stashed = False
+        if self.git.has_uncommitted_changes():
+            self.logger.info("Uncommitted changes detected — stashing")
+            self.git.run(["git", "stash", "push", "-u", "-m", "ultron-autosave"])
+            stashed = True
+
         try:
-            self.original_branch = self.client.current_branch()
-        except Exception:
-            self.original_branch = base
+            self.git.run(["git", "fetch", "origin", "--prune"])
+            # always ensure we can check out base cleanly
+            self.git.run(["git", "checkout", base])
+            self.git.run(["git", "pull", "origin", base])
 
-        # If already on desired branch, reuse it
-        if self.original_branch == branch:
-            logger.info(f"Already on {branch}, reusing it")
-            return branch
-
-        # Sync default branch
-        self.client.fetch()
-        self.client.safe_switch(base)
-
-        # Try to create branch from base; otherwise reuse
-        try:
-            self.client.checkout(branch, create=True, start_point=base)
-            logger.info(f"Created new branch {branch} from {base}")
-        except GitError as e:
-            if "already exists" in str(e):
-                logger.info(f"Reusing existing branch {branch}")
-                self.client.checkout(branch)
+            # Create new branch from up-to-date base
+            if not self.git.branch_exists(final):
+                self.git.run(["git", "checkout", "-b", final, f"origin/{base}"])
             else:
-                raise
+                self.git.run(["git", "checkout", final])
 
-        return branch
+            self.logger.info(f"Created/checked out branch {final} from {base}")
+            return final
+
+        finally:
+            if stashed:
+                # `stash pop` can fail if conflicts; if so, just leave the stash
+                rc, out, err = self.git.run_rc(["git", "stash", "pop"])
+                if rc != 0:
+                    self.logger.warning(f"Stash pop had conflicts; leaving stash in place: {err.strip()}")
+
 
     def commit_and_push(self, branch: str, title: str) -> None:
         self.client.ensure_user(settings.github_bot_name, settings.github_bot_email)

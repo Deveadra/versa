@@ -1,15 +1,19 @@
+# base/agents/scheduler.py
 from __future__ import annotations
 
 import asyncio
 import threading
 import time
-from collections.abc import Callable
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from collections.abc import Callable
 from loguru import logger
 
+from base.agents.dream import DreamCycle
 from base.learning.habit_miner import HabitMiner
 from base.memory.store import MemoryStore
+from base.self_improve.diagnostic_engine import DiagnosticEngine
+from base.self_improve.proposal_engine import ProposalEngine
 
 
 class Scheduler:

@@ -4,9 +4,11 @@ from __future__ import annotations
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
-
 from loguru import logger
 
+from config.config import settings
+from base.self_improve.diagnostic_engine import DiagnosticEngine
+from base.self_improve.proposal_engine import ProposalEngine
 
 class GitError(RuntimeError):
     pass
@@ -21,6 +23,8 @@ class GitClient:
     def __init__(self, repo_root: str | Path, remote: str = "origin"):
         self.root = Path(repo_root).resolve()
         self.remote = remote
+        self.logger = logger.bind(repo=self.root)
+        
 
     def ensure_user(self, name: str, email: str) -> None:
         """
@@ -71,9 +75,62 @@ class GitClient:
             raise GitError(err or out or "Unknown git error")
         return out
 
+    def _run_rc(self, args: Sequence[str]) -> tuple[int, str, str]:
+        """
+        Non-raising git runner. Returns (rc, stdout, stderr).
+        Mirrors _run but never raises GitError; use for stash-pop/conflict logging.
+        """
+        proc = subprocess.Popen(
+            ["git", *args],
+            cwd=self.root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        out, err = proc.communicate()
+        return proc.returncode, out, err
+
+    def branch_exists(self, branch: str) -> bool:
+        """
+        True if the branch exists locally or on the remote.
+        """
+        try:
+            out = self._run(["rev-parse", "--verify", "--quiet", branch], check=False)
+            if out.strip():
+                return True
+        except Exception:
+            pass
+
+        try:
+            out = self._run(["ls-remote", "--heads", self.remote, branch], check=False)
+            return bool(out.strip())
+        except Exception:
+            return False
+
+    def _popen(self, args: Sequence[str] | str) -> subprocess.Popen:
+        # Normalize args -> flat list[str]
+        if isinstance(args, str):
+            args = args.split()
+        else:
+            flat: list[str] = []
+            for a in args:
+                if isinstance(a, (list, tuple)):
+                    flat.extend(map(str, a))
+                else:
+                    flat.append(str(a))
+            args = flat
+
+        # Strip accidental leading "git" because we prepend it below
+        if args and args[0].lower() == "git":
+            args = args[1:]
+
+        cmd = ["git"] + list(args)
+        logger.debug(f"[git] {' '.join(cmd)}")
+        return subprocess.Popen(cmd, cwd=self.root, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    
     def current_branch(self) -> str:
         return self._run(["rev-parse", "--abbrev-ref", "HEAD"])
-
+    
     def has_uncommitted_changes(self) -> bool:
         return bool(self._run(["status", "--porcelain"], check=False).strip())
 
@@ -113,6 +170,36 @@ class GitClient:
     def safe_switch(
         self, target_branch: str, create: bool = False, start_point: str | None = None
     ) -> None:
+        """
+        Switch branches safely: stash if dirty, fetch/prune, checkout base, then target.
+        Restores stash best-effort.
+        """
+        
+        self.ensure_user(
+            getattr(settings, "github_bot_name", "ultron-bot"),
+            getattr(settings, "github_bot_email", "ultron-bot@local"),
+        )
+
+        stashed = False
+        if self.has_uncommitted_changes():
+            self.logger.info("Uncommitted changes detected — stashing")
+            self.run(["git", "stash", "push", "-u", "-m", "ultron-autosave"])
+            stashed = True
+
+        try:
+            self.run(["git", "fetch", "origin", "--prune"])
+            self.run(["git", "checkout", base])
+            self.run(["git", "pull", "origin", base])
+            if not self.branch_exists(target_branch):
+                self.run(["git", "checkout", "-b", target_branch, f"origin/{base}"])
+            else:
+                self.run(["git", "checkout", target_branch])
+        finally:
+            if stashed:
+                rc, out, err = self.run_rc(["git", "stash", "pop"])
+                if rc != 0:
+                    self.logger.warning(f"Stash pop had conflicts; leaving stash in place: {err.strip()}")
+                    
         dirty = self.has_uncommitted_changes()
         if dirty:
             logger.info("Uncommitted changes detected — stashing")

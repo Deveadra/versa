@@ -84,54 +84,62 @@ class ProposalEngine:
         except Exception as e:
             logger.error(f"Safe write failed for {path}: {e}")
             return False
-
-    def _apply_change(self, change: ProposedChange) -> tuple[bool, str]:
+    
+    def _apply_change(self, change: ProposedChange) -> bool:
+        """
+        Apply a ProposedChange robustly:
+        - If 'apply_mode' == 'full_file': write replacement to a .ultron shadow (no destructive overwrite).
+        - If 'apply_mode' == 'replace_block':
+            * If file missing -> create new with replacement.
+            * If anchor present -> replace first occurrence.
+            * If anchor missing -> backup original to .bak and replace entire file.
+        Returns True if any file content was written.
+        """
         try:
-            full = self.root / change.path
+            target = (self.root / change.path).resolve()
+            target.parent.mkdir(parents=True, exist_ok=True)
 
-            if change.apply_mode == "full_file":
-                # Always create a .ultron copy, don't overwrite originals
-                new_path = full.with_suffix(full.suffix + ".ultron")
-                new_path.parent.mkdir(parents=True, exist_ok=True)
-                new_path.write_text(change.replacement, encoding="utf-8")
-                return True, f"full_file rewrite → {new_path.name} created"
+            # full_file writes a shadow copy to prevent accidental overwrites
+            if getattr(change, "apply_mode", None) == "full_file":
+                shadow = target.with_suffix(target.suffix + ".ultron")
+                shadow.write_text(change.replacement, encoding="utf-8")
+                logger.info(f"[apply_change] full_file → wrote shadow {shadow}")
+                return True
 
-            elif change.apply_mode == "replace_block":
-                if not full.exists():
-                    # Fallback: create the file from scratch
-                    full.parent.mkdir(parents=True, exist_ok=True)
-                    full.write_text(change.replacement, encoding="utf-8")
-                    return True, f"file created fresh (no original existed): {change.path}"
+            # Default mode: replace_block
+            if not target.exists():
+                target.write_text(change.replacement, encoding="utf-8")
+                logger.info(f"[apply_change] created new file {target}")
+                return True
 
-                old = self._read(change.path)
-                anchor = change.search_anchor or ""
+            original = target.read_text(encoding="utf-8", errors="ignore")
+            anchor = getattr(change, "search_anchor", None) or ""
 
-                if anchor and anchor in old:
-                    # Anchor found → standard replace
-                    new_content = old.replace(anchor, change.replacement, 1)
-                    ok = self.safe_write(str(full), new_content)
-                    return ok, "block replaced" if ok else "no changes applied"
+            if anchor and anchor in original:
+                new_content = original.replace(anchor, change.replacement, 1)
+                if new_content != original:
+                    target.write_text(new_content, encoding="utf-8")
+                    logger.info(f"[apply_change] block replaced in {target}")
+                    return True
+                logger.info(f"[apply_change] no diff after anchor replace in {target}")
+                return False
 
-                else:
-                    # Fallback when anchor missing
-                    logger.warning(
-                        f"Anchor not found in {change.path}, falling back to full file rewrite"
-                    )
-                    backup_path = full.with_suffix(full.suffix + ".bak")
-                    try:
-                        full.replace(backup_path)
-                        logger.info(f"Backed up original file to {backup_path.name}")
-                    except Exception as e:
-                        logger.error(f"Failed to backup original {full}: {e}")
+            # Fallback when anchor missing → non-destructive backup + full rewrite
+            backup = target.with_suffix(target.suffix + ".bak")
+            try:
+                backup.write_text(original, encoding="utf-8")
+                logger.warning(f"[apply_change] anchor not found; backed up {target.name} → {backup.name}")
+            except Exception as be:
+                logger.error(f"[apply_change] failed to backup {target}: {be}")
 
-                    full.write_text(change.replacement, encoding="utf-8")
-                    return True, f"anchor missing → replaced entire file {change.path}"
-
-            else:
-                return False, f"Unknown apply_mode {change.apply_mode}"
+            target.write_text(change.replacement, encoding="utf-8")
+            logger.info(f"[apply_change] anchor missing → replaced entire file {target}")
+            return True
 
         except Exception as e:
-            return False, f"apply error: {e}"
+            logger.exception(f"[apply_change] error for {change.path}: {e}")
+            return False
+
 
     def propose(self, instruction: str, index_md: str) -> Proposal:
         sys_prompt = PROPOSAL_SYS_PROMPT.format(
@@ -147,7 +155,8 @@ Repository index:
 Respond with strictly the JSON schema described.
 """
         raw = self.brain.ask_brain(user_prompt, system_prompt=sys_prompt).strip()
-
+        force_nonempty = getattr(settings, "proposer_force_nonempty", False)
+                
         # Strip markdown fencing if present
         if raw.startswith("```"):
             raw = re.sub(r"^```[a-zA-Z]*\n", "", raw).rstrip("`").strip()
@@ -176,7 +185,7 @@ Respond with strictly the JSON schema described.
                     "replacement": "def test_autogenerated():\n    assert True",
                 }
             )
-
+            
         changes: list[ProposedChange] = [
             ProposedChange(
                 path=ch.get("path", ""),
@@ -187,6 +196,15 @@ Respond with strictly the JSON schema described.
             for ch in obj.get("changes", [])
         ]
 
+        if not changes and force_nonempty:
+            changes.append(ProposedChange(
+                path="tests/test_autogenerated.py",
+                apply_mode="full_file",
+                search_anchor=None,
+                replacement="def test_ultron_placeholder():\n    assert True\n",
+                rationale="Ensure non-empty PR for CI visibility when no concrete changes inferred."
+            ))
+            
         return Proposal(
             title=obj.get("title", f"Ultron proposal: {instruction[:30]}"),
             description=obj.get("description", ""),

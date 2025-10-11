@@ -36,6 +36,14 @@ if __name__ == "__main__":
                 else:
                     print(f"Ultron KG: no relations found for '{entity}'.")
                 continue
+                        # Run self-improvement (manual trigger)
+            if msg.lower() == "self-improve":
+                try:
+                    orch._job_self_improvement()
+                    print("Ultron: self-improvement job executed.")
+                except Exception as e:
+                    print(f"Ultron: self-improvement failed: {e}")
+                continue
 
             # Default flow (chat)
             reply = orch.handle_user(msg)

@@ -17,6 +17,7 @@ from dateutil import parser as dateparser
 from loguru import logger
 from openai import OpenAI
 
+from base.agents.dream import DreamCycle
 from base.agents.scheduler import Scheduler
 from base.calendar.rrule_helpers import rrule_from_phrase
 from base.calendar.store import CalendarStore
@@ -52,6 +53,7 @@ from base.utils.ultron_status import CognitiveStatus, UltronStatus, UltronStatus
 from base.voice.null_voice import NullVoice
 from base.voice.tts_elevenlabs import Voice
 from config.config import settings
+
 
 # from base.self_improve.diagnostic_engine import benchmark_action
 
@@ -112,6 +114,7 @@ class Orchestrator:
         memory: MemoryStore | None = None,
         store: MemoryStore | None = None,
         plugin_manager: PluginManager | None = None,
+        
     ):
         # --- LLM & consolidation
         self.brain = Brain()
@@ -237,6 +240,7 @@ class Orchestrator:
             hour=settings.consolidation_hour,
             minute=settings.consolidation_minute,
         )
+        self.scheduler.add_daily(self._job_self_improvement, hour=3, minute=15)
         self.scheduler.start()
 
         logger.info("Orchestrator initialized")
@@ -1049,10 +1053,35 @@ class Orchestrator:
     # ------------------------------------
     # High-level user flow with composer
     # ------------------------------------
+    def _job_self_improvement(self):
+        """
+        Daily self-improvement pipeline:
+        1) Run diagnostics and write a report.
+        2) Open a proposal/PR referencing that report.
+        """
+        # Resolve repo root for the tools
+        repo_root = getattr(settings, "repo_root", str(Path(__file__).resolve().parents[3]))
+
+        try:
+            diag = DiagnosticEngine(repo_root=repo_root)
+            report_path = diag.run()
+        except Exception as e:
+            logger.exception(f"[self-improve] Diagnostics failed: {e}")
+            return
+
+        try:
+            ProposalEngine(repo_root=repo_root).propose(
+                instruction="Daily self-improvement based on diagnostics",
+                diagnostic_report_path=report_path,
+            )
+            logger.info("[self-improve] Proposal opened.")
+        except Exception as e:
+            logger.exception(f"[self-improve] Proposal failed: {e}")
+
+
     def handle_user(self, msg: str) -> str:
         """
         Compose: persona + memories + KG; choose tone policy; ask Brain.
-        Also routes special commands like 'propose:' and diagnostics.
         Also routes special commands like 'propose:' and diagnostics.
         """
 
@@ -1597,6 +1626,35 @@ class Orchestrator:
         except Exception as e:
             logger.exception("chat_brain failed")
             return f"[Chat fallback error] {e}"
+        
+    def cmd_self_improve(self, *args):
+        dream_path = None
+        try:
+            dc = DreamCycle()
+            notes = dc.run()
+            if isinstance(notes, dict):
+                dream_path = dc.write_summary(notes)
+            self.notify("Dream cycle completed.")
+        except Exception as e:
+            self.notify(f"Dream cycle failed: {e}")
+
+        diag_path = None
+        try:
+            diag = DiagnosticEngine()
+            diag_path = diag.run()
+            self.notify("Diagnostics completed.")
+        except Exception as e:
+            self.notify(f"Diagnostics failed: {e}")
+
+        try:
+            if diag_path:
+                ProposalEngine().propose(diagnostic_report_path=diag_path, dream_summary_path=dream_path)
+                self.notify("Proposal opened.")
+            else:
+                self.notify("Skipped proposal; no diagnostic report.")
+        except Exception as e:
+            self.notify(f"Proposal failed: {e}")
+
 
     # --------
     # Cleanup

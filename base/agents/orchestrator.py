@@ -548,7 +548,7 @@ class Orchestrator:
         )
 
         mgr = PRManager(repo_root=str(self.repo_root))
-        branch = mgr.prepare_branch(name_suffix=f"diag-autofix-{ts}")  # creates/switches safely
+        branch = mgr.prepare_branch(self, name_suffix=f"diag-autofix-{ts}")  # creates/switches safely
 
         # Build a typed Proposal for PR body (for humans). These changes are descriptive only.
         changes: list[ProposedChange] = [

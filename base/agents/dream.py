@@ -1,11 +1,19 @@
 # base/agents/dream.py
 from __future__ import annotations
-import os, json, time, glob, traceback
+import os, json, time, datetime, glob, traceback
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
 from config.self_improvements import CFG
 
+
+@dataclass
+class Event:
+    ts: str
+    role: str          # "user" | "ultron" | "system"
+    text: str
+    meta: Dict[str, Any]
+    
 class DreamCycle:
     """
     Aggregates the day's signals (logs, corrections, failures), produces insights,

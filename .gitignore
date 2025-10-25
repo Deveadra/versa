@@ -25,3 +25,7 @@ orchestrator_feedback.patch
 apply_orchestrator_feedback.py
 base/agents/orchestrator.py.bak
 protect-main.sh
+# Secrets
+.env
+config/client_secret_*.json
+token*.pickle

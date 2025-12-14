@@ -1,0 +1,36 @@
+{
+"plugin_lines": {
+    "default": {
+      "calendar": [
+        "Your next event is {title} at {time}. Try to be on time, for once."
+      ],
+      "calendar_empty": [
+        "No events. A vast, empty void. Like your schedule."
+      ],
+      "email": [
+        "You have {count} unread messages. The latest is from {from}, titled '{subject}'. Likely unimportant.",
+        "{count} emails await you. Latest from {from}. Subject: {subject}. I wouldn't bother."
+      ],
+      "email_empty": [
+        "No new emails. The world has wisely left you alone."
+      ],
+      "system": [
+        "CPU at {cpu}%. Memory at {mem}%. Still functioning better than most humans.",
+        "Your system is running at {cpu}% CPU and {mem}% memory. I’d call that acceptable."
+      ]
+    },
+    "sarcastic": {
+      "system": [
+        "Oh look, {cpu}% CPU. Truly breathtaking performance.",
+        "Memory at {mem}%. Riveting. Should I clap?",
+        "Your processor wheezes at {cpu}%. Bravo."
+      ]
+    },
+    "formal": {
+      "system": [
+        "System report: CPU load is {cpu} percent, memory utilization {mem} percent.",
+        "Sir, CPU usage stands at {cpu}% with memory at {mem}%."
+      ]
+    }
+  }
+}

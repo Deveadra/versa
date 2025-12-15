@@ -11,6 +11,8 @@ Modules:
 
 __version__ = "0.1.0"
 
+# Keep package imports lightweight to avoid pulling in optional runtime dependencies
+# such as wake-word or TTS libraries during module import time.
+from .core import core
 
-from .core import audio, core
-from .llm import brain
+__all__ = ["core"]

@@ -91,20 +91,3 @@ class PromptComposerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-# Save this test file's code to disk for discovery
-test_code = Path(__file__).read_text(encoding="utf-8")
-(test_path := tests_dir / "test_prompt_composer.py").write_text(test_code, encoding="utf-8")
-print("Wrote test:", test_path)
-
-# run tests
-print("Running unit tests with unittest discover ...")
-res = subprocess.run(
-    [sys.executable, "-m", "unittest", "discover", "-v", str(tests_dir)],
-    cwd=str(root),
-    capture_output=True,
-    text=True,
-)
-print("RETURN CODE:", res.returncode)
-print("STDOUT:\n", res.stdout)
-print("STDERR:\n", res.stderr)

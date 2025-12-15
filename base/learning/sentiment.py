@@ -1,7 +1,27 @@
 # base/learning/sentiment.py
 from __future__ import annotations
 
-from textblob import TextBlob  # type: ignore
+import re
+
+# Simple keyword-based sentiment heuristic to avoid heavy external dependencies.
+POSITIVE_WORDS = {
+    "good",
+    "great",
+    "awesome",
+    "fantastic",
+    "happy",
+    "love",
+    "excellent",
+}
+NEGATIVE_WORDS = {
+    "bad",
+    "terrible",
+    "awful",
+    "sad",
+    "hate",
+    "angry",
+    "poor",
+}
 
 
 def quick_polarity(text: str) -> float:
@@ -11,8 +31,18 @@ def quick_polarity(text: str) -> float:
     """
     if not text:
         return 0.0
-    blob = TextBlob(text)
-    return float(blob.sentiment.polarity)
+
+    tokens = re.findall(r"[\w']+", text.lower())
+    if not tokens:
+        return 0.0
+
+    pos = sum(token in POSITIVE_WORDS for token in tokens)
+    neg = sum(token in NEGATIVE_WORDS for token in tokens)
+    total = pos + neg
+    if total == 0:
+        return 0.0
+    score = (pos - neg) / total
+    return max(-1.0, min(1.0, float(score)))
 
 
 def quick_polarity_label(text: str) -> str:

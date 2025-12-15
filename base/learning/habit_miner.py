@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import datetime
 import json
+import logging
 import math
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from loguru import logger
+logger = logging.getLogger(__name__)
 
 from base.database.sqlite import SQLiteConn
 from base.memory.store import MemoryStore

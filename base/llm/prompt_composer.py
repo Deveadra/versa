@@ -185,7 +185,7 @@ def compose_style_plan(
     Produce a concrete style plan Ultron follows for *this* response.
     Combines: sentiment, policy bandit, habits, and channel.
     """
-    profile = profile_mgr.load_profile()  # assume it returns dict
+    profile = profile_mgr.load_profile() or {}
     polarity = quick_polarity(user_text)
 
     # basic time-of-day vibe

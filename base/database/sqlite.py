@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
 from pathlib import Path
 
-from loguru import logger
+logger = logging.getLogger(__name__)
 
 
 class SQLiteConn:

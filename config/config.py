@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal
 
 from dotenv import find_dotenv, load_dotenv
-from pydantic import BaseModel, Field
 
 
 def _read_secret(path_env: str) -> str | None:
@@ -31,11 +33,12 @@ else:
         load_dotenv(override=True)  # last-resort fallback
 
 
-class Settings(BaseModel):
+@dataclass
+class Settings:
     # simple, concrete types (no Optional for mode)
     mode: Literal["text", "voice", "stream"] = "text"
 
-    db_path: str = Field(default=os.getenv("ULTRON_DB_PATH", "./ultron.db"))
+    db_path: str = os.getenv("ULTRON_DB_PATH", "./ultron.db")
     memory_ttl_days: int = int(os.getenv("ULTRON_MEMORY_TTL_DAYS", 30))
     importance_threshold: int = int(os.getenv("ULTRON_IMPORTANCE_THRESHOLD", 25))
 
@@ -62,10 +65,12 @@ class Settings(BaseModel):
     # Voice
     auto_speak: bool = False  # ✅ default enabled
     wake_word: str = "ultron"  # ✅ wake word for vocal cues
-    wake_commands: dict[str, str] = {
-        "text me": "disable_speak",  # Ultron will text instead of speak
-        "talk to me": "enable_speak",  # Explicitly turn speaking back on
-    }
+    wake_commands: dict[str, str] = field(
+        default_factory=lambda: {
+            "text me": "disable_speak",  # Ultron will text instead of speak
+            "talk to me": "enable_speak",  # Explicitly turn speaking back on
+        }
+    )
 
     # --- GitHub / PR settings ---
     github_token: str | None = os.getenv("GITHUB_TOKEN")  # required for PRs
@@ -76,12 +81,16 @@ class Settings(BaseModel):
     github_remote_name: str = os.getenv("GITHUB_REMOTE_NAME", "origin")
 
     # Proposer behavior
-    proposer_allowlist: list[str] = [
-        "base/",
-        "config/",
-        "run.py",
-    ]
-    proposer_blocklist: list[str] = [".venv/", ".git/", "data/", "models/", "__pycache__/"]
+    proposer_allowlist: list[str] = field(
+        default_factory=lambda: [
+            "base/",
+            "config/",
+            "run.py",
+        ]
+    )
+    proposer_blocklist: list[str] = field(
+        default_factory=lambda: [".venv/", ".git/", "data/", "models/", "__pycache__/"]
+    )
     proposer_branch_prefix: str = os.getenv("PROPOSER_BRANCH_PREFIX", "ultron/proposal/")
     proposer_max_files_per_pr: int = int(os.getenv("PROPOSER_MAX_FILES_PER_PR", "20"))
     proposer_max_patch_bytes: int = int(os.getenv("PROPOSER_MAX_PATCH_BYTES", str(256_000)))

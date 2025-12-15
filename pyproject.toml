@@ -1,9 +1,72 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "ultron-mvp"
 version = "0.1.0"
 description = "Ultron MVP: modular assistant with SQLite memory and retrieval"
 requires-python = ">=3.10"
-dependencies = []
+# Put runtime deps here (not under [tool.poetry.*])
+dependencies = [
+  "click",
+  "dateparser>=1.2.0",
+  "elevenlabs",
+  "faiss-cpu>=1.7.4",               # if you’re on CPU; use faiss-gpu if appropriate
+  "httpx>=0.26.0",
+  "loguru>=0.7.0",
+  "numpy>=1.26",
+  "openai>=1.30.0",
+  "pydantic>=2.6.0",
+  "python-dateutil>=2.8.2",  
+  "qdrant-client>=1.7.0",
+  "requests",
+  "simpleaudio",
+]
+
+[project.optional-dependencies]
+# Install with: pip install -e .[voice]
+api = [
+  "fastapi",
+  "pydantic",
+  "soundfile",
+  "TTS",
+  "uvicorn",
+]
+voice = [
+  "sounddevice>=0.4.6",
+  "soundfile>=0.12.1",
+  "playsound==1.2.2",
+  "elevenlabs>=1.0.0",
+]
+google = [
+  "google-api-python-client>=2.120.0",
+  "google-auth-oauthlib>=1.2.0",
+  "google-auth>=2.30.0",
+]
+dev = [
+  "pytest>=7.4",
+  "ruff>=0.5.0",
+  "black>=24.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}               # tell setuptools we’re using src/
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["base*", "cli*", "config*", "personalities*"]
+exclude = ["tests*", "scripts*", "ultron-desktop*", "keys*"]
+
+# If you ship non-.py files with packages, list them here
+# (uncomment and tailor paths you actually need)
+# [tool.setuptools.package-data]
+# "base" = ["**/*.json", "**/*.sql", "**/*.txt"]
+
+[project.scripts]
+# Optional: convenience entry points (only if you have these callables)
+# ultron = "base.cli:main"
+# ultron-voice = "base.io.run_voice:main"
 
 [tool.black]
 line-length = 100
@@ -18,8 +81,10 @@ ignore = ["E501"]
 exclude = [".git",".venv","__pycache__","ultron.db"]
 
 [tool.ruff.per-file-ignores]
-"scripts/diagnostic_scan.py" = ["PLR0915"]  # keep big main() without refactor churn
+"scripts/diagnostic_scan.py" = ["PLR0915"]
 
 [tool.pytest.ini_options]
 addopts = "-q"
-pythonpath = ["."]
+# With an editable install, pythonpath is not required, but harmless:
+pythonpath = ["src"]
+testpaths = ["tests"]

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from textblob import TextBlob  # type: ignore
+from typing import Any
 
 
 def quick_polarity(text: str) -> float:
@@ -11,8 +12,13 @@ def quick_polarity(text: str) -> float:
     """
     if not text:
         return 0.0
-    blob = TextBlob(text)
-    return float(blob.sentiment.polarity)
+    blob: Any = TextBlob(text)
+    sentiment: Any = getattr(blob, "sentiment", None)
+    polarity = getattr(sentiment, "polarity", 0.0)
+    try:
+        return float(polarity)
+    except Exception:
+        return 0.0
 
 
 def quick_polarity_label(text: str) -> str:

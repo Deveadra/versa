@@ -6,76 +6,83 @@ import os
 import sqlite3
 import threading
 import time
-
-
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+from loguru import logger
 
 from base.database.sqlite import SQLiteConn
 from base.memory.scoring import assess_importance
 from base.utils.embeddings import get_embedder
-from base.memory.vector_backend import QdrantMemoryBackend, VectorBackend, InMemoryBackend, HAVE_QDRANT
-import os
-from config.config import settings
-from loguru import logger
+from base.memory.vector_backend import (
+    QdrantMemoryBackend,
+    VectorBackend,
+    InMemoryBackend,    # make sure this exists; see note below
+    HAVE_QDRANT,        # make sure this exists; see note below
+)
+from config.config import settings  # OK where your settings live
 
-# ... (existing MemoryStore class definition continues)
 DB_PATH = Path("memory.db")
+
 
 class MemoryStore:
     """
     Persistent memory store using SQLite for base storage and an optional vector backend for semantic search.
     Supports key/value facts, events with importance, and both keyword and semantic retrieval.
     """
-    
+
     def __init__(self, db: SQLiteConn | sqlite3.Connection):
-        backend_choice = os.getenv("ULTRON_VECTOR_BACKEND", "auto").lower()
-        
-        # Normalize to a raw sqlite3 connection
+        # 0) normalize DB handle
         self.conn: sqlite3.Connection = db.conn if hasattr(db, "conn") else db  # type: ignore[attr-defined]
         self.conn.row_factory = sqlite3.Row
-        self._fts_enabled = False
-        self._ensure_schema()
-        self.init_db()
+
+        # 1) state shelves
+        self._fts_enabled: bool = False
         self._subscribers: list[Any] = []
 
-        # Vector search components
-        self._vector_backend: VectorBackend # | None = None
-        if backend_choice in ("qdrant", "auto") and HAVE_QDRANT:
-            # If you have settings for remote Qdrant, pass them here; otherwise it will try localhost:6333
-            self._vector_backend = QdrantMemoryBackend(embedder=self.embedder, dim=self.embedder.dim)
-        else:
-            # No dependency path — always available
-            self._vector_backend = InMemoryBackend(embedder=self.embedder)
-            
+        # 2) embeddings FIRST (so vector backend can use it)
         self._embedder: Any | None = None
         self._embed_dim: int | None = None
-        # Initialize semantic vector backend if configured (requires embeddings and Qdrant)
         try:
-            # Only initialize if an embeddings provider is set (and OpenAI API key if using OpenAI)
-            provider = settings.embeddings_provider or ""
-            if provider and (provider.lower() == "openai" or provider.lower() == "sentence_transformers"):
-                # Get the embedding model (this may load a model or verify API key)
-                self._embedder, self._embed_dim = get_embedder()
-            if self._embedder and self._embed_dim:
-                # Instantiate Qdrant backend (remote or local based on config)
-                self._vector_backend = QdrantMemoryBackend(
-                    self._embedder,
-                    dim=self._embed_dim,
-                    url=settings.qdrant_url,
-                    api_key=settings.qdrant_api_key,
-                    collection_name=settings.qdrant_collection or "events",
-                )
-                logger.info(f"MemoryStore: Vector backend enabled (collection '{settings.qdrant_collection or 'events'}').")
-        except ImportError as e:
-            # Qdrant client not installed or embedder not available; proceed without vector backend
-            logger.warning(f"MemoryStore: Vector backend not initialized ({e}). Semantic search disabled.")
-            self._vector_backend = None
+            # If you want to gate by settings, you still can — this is simple & robust
+            self._embedder, self._embed_dim = get_embedder()
+            if not self._embed_dim and hasattr(self._embedder, "dim"):
+                self._embed_dim = int(getattr(self._embedder, "dim"))
+            logger.debug(f"MemoryStore: embedder ready (dim={self._embed_dim})")
         except Exception as e:
-            # If Qdrant connection or embedder init failed, disable vector backend but continue
-            logger.error(f"MemoryStore: Failed to initialize vector backend: {e}")
+            logger.warning(f"MemoryStore: no embedder available ({e}); semantic search may be limited")
+            self._embedder, self._embed_dim = None, None
+
+        # 3) vector backend selection (AFTER embedder)
+        backend_choice = (os.getenv("ULTRON_VECTOR_BACKEND", "auto") or "auto").lower()
+        self._vector_backend: VectorBackend | None = None
+        try:
+            if backend_choice in ("qdrant", "auto") and HAVE_QDRANT and self._embedder:
+                self._vector_backend = QdrantMemoryBackend(
+                    embedder=self._embedder,
+                    dim=int(self._embed_dim or 384),
+                    url=getattr(settings, "qdrant_url", None),
+                    api_key=getattr(settings, "qdrant_api_key", None),
+                    collection_name=(getattr(settings, "qdrant_collection", None) or "events"),
+                ) # type: ignore
+                logger.info("MemoryStore: Vector backend = Qdrant")
+            else:
+                # Always available fallback
+                self._vector_backend = InMemoryBackend(embedder=self._embedder)
+                logger.info("MemoryStore: Vector backend = InMemory")
+        except Exception as e:
+            logger.error(f"MemoryStore: vector backend init failed; disabling semantic search: {e}")
             self._vector_backend = None
+
+        # 4) schema last (unchanged)
+        self._ensure_schema()
+        self.init_db()
+
+    @property
+    def embedder(self) -> Any | None:
+        """Public, read-only view for code that expects `self.embedder`."""
+        return self._embedder
 
     # ... existing schema and fact methods ...
 
@@ -239,7 +246,8 @@ class MemoryStore:
                 logger.error(f"MemoryStore: subscriber callback failed: {err}")
 
         # Asynchronously embed and store the vector for semantic search (non-blocking)
-        if self._vector_backend:
+        backend = self._vector_backend
+        if backend is not None:
             def _embed_and_store_vector(event_id: int, text: str, timestamp: str, importance_val: float, type_val: str):
                 """
                 Background task: generate embedding and store in vector DB.
@@ -260,7 +268,7 @@ class MemoryStore:
                     attempts = 0
                     while attempts < 3:
                         try:
-                            self._vector_backend.add_text(text, vector_id=event_id, metadata=metadata)
+                            backend.add_text(text, vector_id=event_id, metadata=metadata)
                             logger.info(f"MemoryStore: Event {event_id} embedded and stored in vector DB.")
                             break  # success
                         except Exception as e:
@@ -281,6 +289,21 @@ class MemoryStore:
             ).start()
 
         return int(rowid)
+
+    def list_events(self, type_: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        """
+        Return recent events as dictionaries.
+        """
+        sql = "SELECT id, content, ts, importance, type FROM events"
+        params: list[Any] = []
+        if type_:
+            sql += " WHERE type = ?"
+            params.append(type_)
+        sql += " ORDER BY id DESC LIMIT ?"
+        params.append(int(limit))
+
+        cur = self.conn.execute(sql, params)
+        return [dict(r) for r in cur.fetchall()]
 
 
     def search(self, query: str, since: str | None = None, min_importance: float = 0.0, type_: str | None = None, limit: int = 5) -> list[str]:
@@ -509,21 +532,24 @@ class MemoryStore:
     #     # return [dict(r) for r in cur.fetchall()]
     #     return [r[0] for r in cur.fetchall()]
 
-    def keyword_search(self, query: str, limit: int = 5) -> list[dict]:
+    def keyword_search(self, query: str, limit: int = 5) -> list[str]:
         """
         Search memory for a keyword or phrase.
-        Tries FTS first, falls back to LIKE if needed.
+        Returns a consistent shape: list[str] of content.
         """
         try:
             cur = self.conn.execute(
-                "SELECT * FROM memories WHERE content MATCH ? LIMIT ?", (query, limit)
+                "SELECT content FROM memories WHERE content MATCH ? LIMIT ?",
+                (query, limit),
             )
-            return [dict(r) for r in cur.fetchall()]
+            return [str(r[0]) for r in cur.fetchall()]
         except Exception:
             cur = self.conn.execute(
-                "SELECT * FROM memories WHERE content LIKE ? LIMIT ?", (f"%{query}%", limit)
+                "SELECT content FROM memories WHERE content LIKE ? LIMIT ?",
+                (f"%{query}%", limit),
             )
-            return [dict(r) for r in cur.fetchall()]
+            return [str(r[0]) for r in cur.fetchall()]
+
 
     # ---------- Legacy helpers for backward compatibility ----------
 

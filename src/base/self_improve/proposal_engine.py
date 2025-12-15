@@ -85,7 +85,7 @@ class ProposalEngine:
             logger.error(f"Safe write failed for {path}: {e}")
             return False
     
-    def _apply_change(self, change: ProposedChange) -> bool:
+    def _apply_change(self, change: ProposedChange) -> tuple[bool, str]:
         """
         Apply a ProposedChange robustly:
         - If 'apply_mode' == 'full_file': write replacement to a .ultron shadow (no destructive overwrite).
@@ -104,13 +104,13 @@ class ProposalEngine:
                 shadow = target.with_suffix(target.suffix + ".ultron")
                 shadow.write_text(change.replacement, encoding="utf-8")
                 logger.info(f"[apply_change] full_file → wrote shadow {shadow}")
-                return True
+                return True, f"wrote shadow {shadow.name}"
 
             # Default mode: replace_block
             if not target.exists():
                 target.write_text(change.replacement, encoding="utf-8")
                 logger.info(f"[apply_change] created new file {target}")
-                return True
+                return True, "created new file"
 
             original = target.read_text(encoding="utf-8", errors="ignore")
             anchor = getattr(change, "search_anchor", None) or ""
@@ -120,9 +120,9 @@ class ProposalEngine:
                 if new_content != original:
                     target.write_text(new_content, encoding="utf-8")
                     logger.info(f"[apply_change] block replaced in {target}")
-                    return True
+                    return True, "block replaced"
                 logger.info(f"[apply_change] no diff after anchor replace in {target}")
-                return False
+                return False, "no diff after anchor replace"
 
             # Fallback when anchor missing → non-destructive backup + full rewrite
             backup = target.with_suffix(target.suffix + ".bak")
@@ -134,11 +134,11 @@ class ProposalEngine:
 
             target.write_text(change.replacement, encoding="utf-8")
             logger.info(f"[apply_change] anchor missing → replaced entire file {target}")
-            return True
+            return True, "anchor missing; replaced entire file"
 
         except Exception as e:
             logger.exception(f"[apply_change] error for {change.path}: {e}")
-            return False
+            return False, f"error: {e}"
 
 
     def propose(self, instruction: str, index_md: str) -> Proposal:

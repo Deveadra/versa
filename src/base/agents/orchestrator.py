@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import inspect
 import json
 import re
 import sqlite3
@@ -52,22 +53,22 @@ from base.utils.timeparse import extract_time_from_text
 from base.utils.ultron_status import CognitiveStatus, UltronStatus, UltronStatusConfig
 from base.voice.null_voice import NullVoice
 from base.voice.tts_elevenlabs import Voice
+
 from config.config import settings
 
 
-# from base.self_improve.diagnostic_engine import benchmark_action
+# db_conn = SQLiteConn(settings.db_path)
+# conn = sqlite3.connect(settings.db_path, check_same_thread=False)
+# store = MemoryStore(conn)
+# embedder, dim = get_embedder()
+# vdb = FAISSBackend(embedder, dim=dim, normalize=True)
+# memory = MemoryStore(db_conn)
+# habits = HabitMiner(db_conn, memory, store)
+# memory.subscribe(lambda **kwargs: habits.learn(kwargs["content"], kwargs["ts"]))
 
-
-db_conn = SQLiteConn(settings.db_path)
-conn = sqlite3.connect(settings.db_path, check_same_thread=False)
-store = MemoryStore(conn)
-embedder, dim = get_embedder()
-vdb = FAISSBackend(embedder, dim=dim, normalize=True)
-memory = MemoryStore(db_conn)
-habits = HabitMiner(db_conn, memory, store)
-memory.subscribe(lambda **kwargs: habits.learn(kwargs["content"], kwargs["ts"]))
-
-
+# NOTE:
+# Avoid module import side-effects (opening DB connections, building vector indexes, etc.).
+# Orchestrator owns runtime initialization.
 
 ULTRON_SYSTEM_PROMPT = """\
 You are **Ultron**: incisive, charismatic, darkly witty, but never cartoonish.
@@ -101,7 +102,23 @@ Respond ONLY in this JSON schema:
 }
 """
 
+class FAISSBackendCompat(FAISSBackend):
+    """
+    Compatibility shim:
+    Pylance considers FAISSBackend abstract because VectorBackend.add_text exists on the interface.
+    Until FAISSBackend implements add_text directly, this adapter satisfies the contract.
+    """
 
+    def add_text(
+        self,
+        text: str,
+        vector_id: int | str | None = None,
+        metadata: dict | None = None,
+    ) -> None:
+        # Best-effort: treat single add as a 1-item index operation.
+        # If FAISSBackend later grows native add_text support, remove this shim.
+        self.index([text])
+        
 class ConsoleNotifier:
     def notify(self, title: str, message: str):
         print(f"\n[NOTIFY] {title}: {message}\n")
@@ -133,7 +150,7 @@ class Orchestrator:
         self.retriever = VectorRetriever(
             store=self.store,
             embedder=self.embedder,
-            backend=FAISSBackend(self.embedder, dim=self.embed_dim, normalize=True),
+            backend=FAISSBackendCompat(self.embedder, dim=self.embed_dim, normalize=True),
             dim=self.embed_dim,
         )
 
@@ -248,6 +265,21 @@ class Orchestrator:
     # ------------------------------------------------------------
     # Action dispatch with usage logging + lightweight enrichment
     # ------------------------------------------------------------
+    def notify(self, title: str, message: str | None = None) -> None:
+        """
+        Convenience wrapper used throughout the file.
+        Allows:
+          self.notify("Something happened")  -> title becomes "Ultron"
+          self.notify("Title", "Message")    -> explicit title/message
+        """
+        if message is None:
+            message = title
+            title = "Ultron"
+        try:
+            self.notifier.notify(title, message)
+        except Exception:
+            print(f"\n[NOTIFY] {title}: {message}\n")
+
     def _dispatch(self, action: str, params: dict) -> Any:
         # TODO: integrate with PluginManager if you have one
         if hasattr(self, "plugin_manager"):
@@ -519,6 +551,67 @@ class Orchestrator:
                 continue
             out.append(line[3:].strip())
         return out
+    
+    def _repo_index_md(self, repo_root: str) -> str:
+        root = Path(repo_root).resolve()
+        ignore = {
+            ".git", ".venv", "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache",
+            "dist", "build", ".idea", ".vscode"
+        }
+        exts = {".py", ".md", ".toml", ".yml", ".yaml", ".json", ".txt", ".ini"}
+        lines: list[str] = ["# Repository Index", ""]
+        for p in sorted(root.rglob("*")):
+            if any(part in ignore for part in p.parts):
+                continue
+            if p.is_file() and p.suffix.lower() in exts:
+                rel = p.relative_to(root).as_posix()
+                lines.append(f"- `{rel}`")
+        return "\n".join(lines)
+
+    def _propose_self_improvement(
+        self,
+        *,
+        repo_root: str,
+        instruction: str,
+        diagnostic_path: str | None = None,
+        dream_path: str | None = None,
+    ) -> None:
+        """
+        Call ProposalEngine.propose in a signature-tolerant way.
+        This removes Pylance call issues and makes the runtime robust to refactors.
+        """
+        engine = self.proposal_engine
+        propose_fn: Any = getattr(engine, "propose", None)
+        if propose_fn is None:
+            raise RuntimeError("ProposalEngine has no propose() method")
+
+        sig = inspect.signature(propose_fn)
+        params = sig.parameters
+
+        kwargs: dict[str, Any] = {}
+
+        # required-ish inputs
+        if "instruction" in params:
+            kwargs["instruction"] = instruction
+        if "index_md" in params:
+            kwargs["index_md"] = self._repo_index_md(repo_root)
+
+        # optional diagnostic path (various historical names)
+        if diagnostic_path:
+            for key in ("diagnostic_report_path", "diagnostic_path", "report_path", "diagnostic_report"):
+                if key in params:
+                    kwargs[key] = diagnostic_path
+                    break
+
+        # optional dream path (various historical names)
+        if dream_path:
+            for key in ("dream_summary_path", "dream_path", "dream_summary"):
+                if key in params:
+                    kwargs[key] = dream_path
+                    break
+
+        propose_fn(**kwargs)
+
 
     def _append_feedback_loop(
         self,
@@ -548,7 +641,7 @@ class Orchestrator:
         )
 
         mgr = PRManager(repo_root=str(self.repo_root))
-        branch = mgr.prepare_branch(self, name_suffix=f"diag-autofix-{ts}")  # creates/switches safely
+        branch = mgr.prepare_branch(f"diag-autofix-{ts}")  # creates/switches safely
 
         # Build a typed Proposal for PR body (for humans). These changes are descriptive only.
         changes: list[ProposedChange] = [
@@ -1060,8 +1153,9 @@ class Orchestrator:
         2) Open a proposal/PR referencing that report.
         """
         # Resolve repo root for the tools
-        repo_root = getattr(settings, "repo_root", str(Path(__file__).resolve().parents[3]))
-
+        # repo_root = getattr(settings, "repo_root", str(Path(__file__).resolve().parents[3]))
+        repo_root = str(self.repo_root)
+        
         try:
             diag = DiagnosticEngine(repo_root=repo_root)
             report_path = diag.run()
@@ -1070,9 +1164,10 @@ class Orchestrator:
             return
 
         try:
-            ProposalEngine(repo_root=repo_root).propose(
+            self._propose_self_improvement(
+                repo_root=repo_root,
                 instruction="Daily self-improvement based on diagnostics",
-                diagnostic_report_path=report_path,
+                diagnostic_path=report_path,
             )
             logger.info("[self-improve] Proposal opened.")
         except Exception as e:
@@ -1628,6 +1723,7 @@ class Orchestrator:
             return f"[Chat fallback error] {e}"
         
     def cmd_self_improve(self, *args):
+        repo_root = str(self.repo_root)
         dream_path = None
         try:
             dc = DreamCycle()
@@ -1640,7 +1736,7 @@ class Orchestrator:
 
         diag_path = None
         try:
-            diag = DiagnosticEngine()
+            diag = DiagnosticEngine(repo_root=repo_root)
             diag_path = diag.run()
             self.notify("Diagnostics completed.")
         except Exception as e:
@@ -1648,7 +1744,12 @@ class Orchestrator:
 
         try:
             if diag_path:
-                ProposalEngine().propose(diagnostic_report_path=diag_path, dream_summary_path=dream_path)
+                self._propose_self_improvement(
+                    repo_root=repo_root,
+                    instruction="Manual self-improvement run",
+                    diagnostic_path=diag_path,
+                    dream_path=dream_path,
+                )
                 self.notify("Proposal opened.")
             else:
                 self.notify("Skipped proposal; no diagnostic report.")

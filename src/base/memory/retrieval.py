@@ -5,7 +5,6 @@ from typing import Any
 import faiss
 
 from base.memory.store import MemoryStore
-
 from .vector_backend import VectorBackend
 
 
@@ -52,3 +51,15 @@ class VectorRetriever:
 
         # Fallback to keyword search
         return self.store.keyword_search(query, limit=k)
+        # rows = self.store.keyword_search(query, limit=k)
+        # if not rows:
+        #     return []
+        # # store.keyword_search() may return list[dict] or list[str] depending on implementation.
+        # if isinstance(rows[0], dict):
+        #     out: list[str] = []
+        #     for r in cast(list[dict[str, Any]], rows):
+        #         content = r.get("content")
+        #         if content:
+        #             out.append(str(content))
+        #     return out[:k]
+        # return cast(list[str], rows)[:k]

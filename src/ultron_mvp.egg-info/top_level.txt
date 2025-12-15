@@ -1,4 +1,0 @@
-base
-cli
-config
-personalities

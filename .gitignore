@@ -7,6 +7,14 @@ __pycache__/
 .vscode/
 pyrightconfig.json
 
+# build / packaging artifacts
+*.egg-info/
+dist/
+build/
+__pycache__/
+
+src/ultron_mvp.egg-info/*
+
 # Ignore runtime DB files
 ultron.db
 ultron.db-wal

@@ -532,21 +532,24 @@ class MemoryStore:
     #     # return [dict(r) for r in cur.fetchall()]
     #     return [r[0] for r in cur.fetchall()]
 
-    def keyword_search(self, query: str, limit: int = 5) -> list[dict]:
+    def keyword_search(self, query: str, limit: int = 5) -> list[str]:
         """
         Search memory for a keyword or phrase.
-        Tries FTS first, falls back to LIKE if needed.
+        Returns a consistent shape: list[str] of content.
         """
         try:
             cur = self.conn.execute(
-                "SELECT * FROM memories WHERE content MATCH ? LIMIT ?", (query, limit)
+                "SELECT content FROM memories WHERE content MATCH ? LIMIT ?",
+                (query, limit),
             )
-            return [dict(r) for r in cur.fetchall()]
+            return [str(r[0]) for r in cur.fetchall()]
         except Exception:
             cur = self.conn.execute(
-                "SELECT * FROM memories WHERE content LIKE ? LIMIT ?", (f"%{query}%", limit)
+                "SELECT content FROM memories WHERE content LIKE ? LIMIT ?",
+                (f"%{query}%", limit),
             )
-            return [dict(r) for r in cur.fetchall()]
+            return [str(r[0]) for r in cur.fetchall()]
+
 
     # ---------- Legacy helpers for backward compatibility ----------
 

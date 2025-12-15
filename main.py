@@ -1,5 +1,16 @@
 # main.py
 from __future__ import annotations
+from pathlib import Path
+
+import sys
+ROOT = Path(__file__).resolve().parent
+SRC = ROOT / "src"
+
+for p in (SRC, ROOT):
+    s = str(p)
+    if s not in sys.path:
+        sys.path.insert(0, s)
+# -----------------------------------------
 
 import os
 import random
@@ -7,9 +18,8 @@ import shutil
 import sqlite3
 import threading
 import time
-from pathlib import Path
-
 import requests
+
 from dotenv import load_dotenv
 
 # ---------- FFmpeg bootstrap (for audio helpers that might need it) ----------
@@ -47,7 +57,7 @@ from base.learning.engagement_manager import EngagementManager
 from base.learning.habit_miner import HabitMiner
 from base.llm.brain import ask_jarvis_stream
 from base.memory.recall import format_memories, recall_relevant
-from base.memory.store import MemoryStore, init_db
+from base.memory.store import MemoryStore
 from base.plugins import email_flow_original, file_manager, media_smart_home, system
 from base.policy.consequence_linker import link_consequence
 from base.policy.context_signals import ContextSignals
@@ -61,7 +71,8 @@ from personalities.loader import load_personality
 #                               INITIALIZATION
 # ---------------------------------------------------------------------------
 
-init_db()  # ensures memory tables exist
+# init_db()  # ensures memory tables exist
+# Schema/table creation is handled by the stores themselves (or we’ll wire it up in store.py next).
 
 # Personality/setup
 BASE_PERSONALITY = os.getenv("BASE_PERSONALITY", "ultron")

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import faiss
 
@@ -51,4 +51,16 @@ class VectorRetriever:
             return [self.texts[i] for i in idx[0] if i < len(self.texts)]
 
         # Fallback to keyword search
-        return self.store.keyword_search(query, limit=k)
+        # return self.store.keyword_search(query, limit=k)
+        rows = self.store.keyword_search(query, limit=k)
+        if not rows:
+            return []
+        # store.keyword_search() may return list[dict] or list[str] depending on implementation.
+        if isinstance(rows[0], dict):
+            out: list[str] = []
+            for r in cast(list[dict[str, Any]], rows):
+                content = r.get("content")
+                if content:
+                    out.append(str(content))
+            return out[:k]
+        return cast(list[str], rows)[:k]

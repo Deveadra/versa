@@ -23,6 +23,9 @@ class PRManager:
         self.repo_slug = repo_slug or settings.github_repo
         self.token = token or settings.github_token
         self.client = GitClient(self.root, remote=settings.github_remote_name)
+        # Back-compat aliases (older code uses these names)
+        self.git = self.client
+        self.logger = logger.bind(component="PRManager", repo=str(self.root))
         self.original_branch: str | None = None
 
     def prepare_branch(self, branch_name: str, base: str = "main") -> str:
@@ -37,6 +40,11 @@ class PRManager:
             getattr(settings, "github_bot_name", "ultron-bot"),
             getattr(settings, "github_bot_email", "ultron-bot@local"),
         )
+        # Remember where the user was
+        try:
+            self.original_branch = self.git.current_branch()
+        except Exception:
+            self.original_branch = None
 
         # Generate collision-safe name if needed
         final = branch_name
@@ -49,20 +57,22 @@ class PRManager:
         stashed = False
         if self.git.has_uncommitted_changes():
             self.logger.info("Uncommitted changes detected — stashing")
-            self.git.run(["git", "stash", "push", "-u", "-m", "ultron-autosave"])
+            self.git.stash_push("ultron-autosave")
             stashed = True
 
         try:
-            self.git.run(["git", "fetch", "origin", "--prune"])
-            # always ensure we can check out base cleanly
-            self.git.run(["git", "checkout", base])
-            self.git.run(["git", "pull", "origin", base])
+            self.git.fetch()
+            # ensure base is present and reasonably up to date
+            self.git.checkout(base)
+            self.git.run(["pull", self.git.remote, base], check=False)
 
             # Create new branch from up-to-date base
             if not self.git.branch_exists(final):
-                self.git.run(["git", "checkout", "-b", final, f"origin/{base}"])
+                # self.git.run(["git", "checkout", "-b", final, f"origin/{base}"])
+                self.git.checkout(final, create=True, start_point=base)
             else:
-                self.git.run(["git", "checkout", final])
+                # self.git.run(["git", "checkout", final])
+                self.git.checkout(final)
 
             self.logger.info(f"Created/checked out branch {final} from {base}")
             return final
@@ -70,9 +80,10 @@ class PRManager:
         finally:
             if stashed:
                 # `stash pop` can fail if conflicts; if so, just leave the stash
-                rc, out, err = self.git.run_rc(["git", "stash", "pop"])
-                if rc != 0:
-                    self.logger.warning(f"Stash pop had conflicts; leaving stash in place: {err.strip()}")
+                # rc, out, err = self.git.run_rc(["git", "stash", "pop"])
+                # if rc != 0:
+                #     self.logger.warning(f"Stash pop had conflicts; leaving stash in place: {err.strip()}")
+                self.git.stash_pop()
 
 
     def commit_and_push(self, branch: str, title: str) -> None:

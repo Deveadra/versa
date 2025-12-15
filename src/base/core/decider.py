@@ -2,6 +2,7 @@
 import hashlib
 import re
 from datetime import datetime
+from typing import Any, Protocol
 
 from base.core.nlu import parse_diagnostic_intent
 
@@ -37,11 +38,21 @@ PREFERENCE_PHRASES = [
     "i don't like",
 ]
 
+class MemoryLike(Protocol):
+    def recall_fact(self, key: str) -> Any | None:
+        ...
+
+    def remember_fact(self, key: str, value: Any) -> None:
+        ...
+
+    def add_history(self, text: str) -> None:
+        ...
 
 class Decider:
-    def __init__(self):
+    def __init__(self, memory: MemoryLike | None = None):
         # track repeats in-session
         self.session_repeat_counter = {}
+        self.memory = memory
 
     def _has_named_entity(self, text: str) -> bool:
         return bool(EMAIL_RE.search(text) or PHONE_RE.search(text) or DATE_RE.search(text))
@@ -64,8 +75,8 @@ class Decider:
         Compute importance score and suggested memory metadata.
         """
         intent = parse_diagnostic_intent(text)
-        score = 0
-        meta = {"category": None, "reason": []}
+        score: int = 0
+        meta: dict = {"category": None, "reason": []}
 
         if self._is_explicit_remember(text):
             score += WEIGHTS["explicit_remember"]
@@ -112,7 +123,7 @@ class Decider:
 
         if intent:
             # Prefer WEIGHTS if present, else use a sane bump
-            bump = WEIGHTS["direct_command"] if "WEIGHTS" in globals() and "direct_command" in WEIGHTS else 2.0
+            bump: int = WEIGHTS["direct_command"] if "WEIGHTS" in globals() and "direct_command" in WEIGHTS else 2
             score += bump
             # Ensure meta has the fields you use elsewhere
             meta.setdefault("reason", []).append("diagnostic_command")
@@ -187,7 +198,10 @@ class Decider:
 
         return None
 
-    def handle_user_text(self, text: str, plugin_hint: str = None or ""):
+    def handle_user_text(self, text: str, plugin_hint: str = ""):
+        if self.memory is None:
+            return
+        memory = self.memory
         norm = text.strip().lower()
         self.session_repeat_counter[norm] = self.session_repeat_counter.get(norm, 0) + 1
 

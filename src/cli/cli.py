@@ -1,9 +1,21 @@
+# src/cli/cli.py
+import click
 
-# In cli.py
 from base.agents.agent import run_goal
 
-@cli.command()
+
+@click.group()
+def cli() -> None:
+    """Ultron CLI."""
+    pass
+
+
+@cli.command("goal")
 @click.argument("goal")
-def goal(goal):
-    """Run agent on a high-level GOAL"""
+def goal_cmd(goal: str) -> None:
+    """Run agent on a high-level GOAL."""
     run_goal(goal)
+
+
+if __name__ == "__main__":
+    cli()

@@ -1,7 +1,0 @@
-BEGIN;
-CREATE TABLE IF NOT EXISTS policy_assignments (
-  usage_id INTEGER PRIMARY KEY,
-  policy_id TEXT NOT NULL,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-COMMIT;

@@ -41,6 +41,21 @@ class GitClient:
             logger.error(f"Failed to set git user identity: {e}")
             raise
 
+    def run(self, args: Sequence[str] | str, check: bool = True) -> str:
+        return self._run(args, check=check)
+
+    def run_rc(self, args: Sequence[str] | str) -> tuple[int, str, str]:
+        if isinstance(args, str):
+            parts = args.split()
+        else:
+            parts = list(args)
+
+        # Strip accidental leading "git"
+        if parts and str(parts[0]).lower() == "git":
+            parts = parts[1:]
+
+        return self._run_rc([str(x) for x in parts])
+
     def _run(self, args: Sequence[str] | str, check: bool = True) -> str:
         # Normalize args -> flat list[str]
         if isinstance(args, str):
@@ -168,7 +183,11 @@ class GitClient:
                 raise
 
     def safe_switch(
-        self, target_branch: str, create: bool = False, start_point: str | None = None
+        self,
+        target_branch: str,
+        create: bool = False,
+        start_point: str | None = None,
+        base_branch: str | None = None,
     ) -> None:
         """
         Switch branches safely: stash if dirty, fetch/prune, checkout base, then target.
@@ -180,37 +199,69 @@ class GitClient:
             getattr(settings, "github_bot_email", "ultron-bot@local"),
         )
 
-        stashed = False
-        if self.has_uncommitted_changes():
-            self.logger.info("Uncommitted changes detected — stashing")
-            self.run(["git", "stash", "push", "-u", "-m", "ultron-autosave"])
-            stashed = True
-
-        try:
-            self.run(["git", "fetch", "origin", "--prune"])
-            self.run(["git", "checkout", base])
-            self.run(["git", "pull", "origin", base])
-            if not self.branch_exists(target_branch):
-                self.run(["git", "checkout", "-b", target_branch, f"origin/{base}"])
-            else:
-                self.run(["git", "checkout", target_branch])
-        finally:
-            if stashed:
-                rc, out, err = self.run_rc(["git", "stash", "pop"])
-                if rc != 0:
-                    self.logger.warning(f"Stash pop had conflicts; leaving stash in place: {err.strip()}")
-                    
         dirty = self.has_uncommitted_changes()
         if dirty:
-            logger.info("Uncommitted changes detected — stashing")
+            self.logger.info("Uncommitted changes detected — stashing")
             self.stash_push()
 
+        # choose base/start point when creating
+        base = start_point or base_branch or getattr(settings, "default_branch", "main")
+
         try:
-            self.checkout(target_branch, create=create, start_point=start_point)
+            self.fetch()
+
+            # best-effort sync of base branch
+            try:
+                self.checkout(base)
+            except Exception:
+                # if base doesn't exist locally, try creating from remote
+                self._run(["checkout", "-b", base, f"{self.remote}/{base}"], check=False)
+            self._run(["pull", self.remote, base], check=False)
+
+            if create:
+                if not self.branch_exists(target_branch):
+                    # create new branch from base
+                    self._run(["checkout", "-b", target_branch, base])
+                else:
+                    self.checkout(target_branch)
+            else:
+                self.checkout(target_branch)
         finally:
             if dirty:
-                logger.info("Restoring stashed changes")
+                self.logger.info("Restoring stashed changes")
                 self.stash_pop()
+
+        # stashed = False
+        # if self.has_uncommitted_changes():
+        #     self.logger.info("Uncommitted changes detected — stashing")
+        #     self.run(["git", "stash", "push", "-u", "-m", "ultron-autosave"])
+        #     stashed = True
+
+        # try:
+        #     self.run(["git", "fetch", "origin", "--prune"])
+        #     self.run(["git", "checkout", base])
+        #     self.run(["git", "pull", "origin", base])
+        #     if not self.branch_exists(target_branch):
+        #         self.run(["git", "checkout", "-b", target_branch, f"origin/{base}"])
+        #     else:
+        #         self.run(["git", "checkout", target_branch])
+        # finally:
+        #     if stashed:
+        #         rc, out, err = self.run_rc(["git", "stash", "pop"])
+        #         if rc != 0:
+        #             self.logger.warning(f"Stash pop had conflicts; leaving stash in place: {err.strip()}")
+                    
+        # dirty = self.has_uncommitted_changes()
+        # if dirty:
+        #     logger.info("Uncommitted changes detected — stashing")
+        #     self.stash_push()
+
+        # try:
+        #     self.checkout(target_branch, create=create, start_point=start_point)
+        # finally:
+        #     if dirty:
+        #         logger.info("Restoring stashed changes")
+        #         self.stash_pop()
 
     def add_all(self, paths: list[str] | None = None) -> None:
         if not paths:

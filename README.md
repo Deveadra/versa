@@ -23,6 +23,20 @@ cp .env.sample .env
 python run.py
 ```
 
+Core: `pip install .`
+
+Local dev: `pip install -e ".[api]"`
+
+Production/API container: `pip install ".[api]"`
+
+Docker example:
+```
+COPY pyproject.toml ./
+COPY src ./src
+RUN pip install --no-cache-dir ".[api]"
+```
+
+
 ## 2) Design Notes
 
 SQLite for durable memory. Facts (upsert) vs Events (append). TTL pruning.

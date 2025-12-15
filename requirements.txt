@@ -18,6 +18,7 @@ python-dateutil==2.9.0.post0
 python-dotenv==1.1.1
 openai #==1.107.2
 openai-whisper==20231117 # STT (cloud/offline with whisper.cpp alt)
+qdrant-client>=1.9.0
 requests==2.32.3
 rich>=13.7.1
 simpleaudio==1.0.4

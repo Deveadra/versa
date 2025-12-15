@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# src/base/memory/vector_backend.py
 from __future__ import annotations
 
 from typing import Any, Protocol, TYPE_CHECKING
@@ -7,7 +9,9 @@ class VectorBackend(Protocol):
     def index(self, texts: list[str]) -> None: ...
     def add_text(self, text: str, vector_id: int | str | None = None, metadata: dict | None = None) -> None: ...
     def search(
-        self, query: str, k: int = 5,
+        self,
+        query: str,
+        k: int = 5,
         since: str | None = None,
         min_importance: float = 0.0,
         type_filter: str | None = None,
@@ -23,7 +27,6 @@ try:
     )
     HAVE_QDRANT = True
 except Exception:
-    # Keep import failure non-fatal; we'll provide a stub class below.
     QdrantClient = None  # type: ignore
 
 from loguru import logger
@@ -137,8 +140,13 @@ class QdrantMemoryBackendStub:  # stub so imports don’t crash
 if TYPE_CHECKING:
     class QdrantMemoryBackend(_QdrantMemoryBackendImpl): ...
 else:
-    QdrantMemoryBackend = _QdrantMemoryBackendImpl if (HAVE_QDRANT and QdrantClient is not None) else _QdrantMemoryBackendStub
-    
+    class QdrantMemoryBackend:
+        """Stub so imports don’t crash when qdrant-client isn’t installed."""
+        def __init__(self, *a, **kw):
+            raise ImportError(
+                "qdrant-client not installed. Install it or choose a different backend."
+            )
+            
 # --- No-deps, in-memory fallback ---------------------------------------------
 class InMemoryBackend:
     """

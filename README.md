@@ -15,17 +15,45 @@
 ## 1) Setup
 
 ```bash
+## 1) Setup (recommended)
+
+```bash
 python -m venv .venv
 . .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-cp .env.sample .env
-# add your OPENAI_API_KEY, etc.
+python -m pip install --upgrade pip
+
+# Dev install (tests + lint tools)
+pip install -e ".[dev]"
+
+# Optional features
+# pip install -e ".[google]"   # Calendar/Gmail integrations
+# pip install -e ".[voice]"    # Voice/audio stack
+# pip install -e ".[api]"      # FastAPI server
+
+cp .env.sample .env  # if you have it; otherwise create .env
 python run.py
 ```
 
 Core: `pip install .`
 
-Local dev: `pip install -e ".[api]"`
+Local development: `pip install -e ".[dev]"`
+Local dev (tests + lint): 
+```bash
+pip install -r requirements-dev.txt
+pip install -e .
+```
+Local dev (voice-enabled):
+```bash
+pip install -r requirements-dev.txt
+pip install -r requirements-voice.txt
+pip install -e .
+```
+
+CI (default) _only installs dev, not voice_:
+```bash
+pip install -r requirements-dev.txt
+pip install -e .
+```
 
 Production/API container: `pip install ".[api]"`
 
@@ -34,6 +62,35 @@ Docker example:
 COPY pyproject.toml ./
 COPY src ./src
 RUN pip install --no-cache-dir ".[api]"
+```
+
+
+If you *also* want to keep requirements files, add a short “Alternative (pinned)” section:
+
+```md
+## Alternative: install from requirements (pinned)
+
+```bash
+pip install -r requirements.txt
+pip install -r requirements-dev.txt
+pip install -e .
+```
+
+---
+
+## Your CI workflow should match this
+
+`pyproject.toml` is now authoritative, CI should install like production:
+
+- `pip install -e ".[dev]"` (instead of mixing requirements files)
+
+In the workflow step:
+
+```yaml
+- name: Install dependencies
+  run: |
+    python -m pip install --upgrade pip
+    python -m pip install -e ".[dev]"
 ```
 
 

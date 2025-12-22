@@ -9,19 +9,39 @@ description = "Ultron MVP: modular assistant with SQLite memory and retrieval"
 requires-python = ">=3.10"
 # Put runtime deps here (not under [tool.poetry.*])
 dependencies = [
-  "click",
+  # Core runtime
+  "apscheduler==3.10.4",
+  "colorama>=0.4.6",
   "dateparser>=1.2.0",
   "elevenlabs",
   "faiss-cpu>=1.7.4",               # if you’re on CPU; use faiss-gpu if appropriate
-  "httpx>=0.26.0",
   "loguru>=0.7.0",
-  "numpy>=1.26",
-  "openai>=1.30.0",
+  "psutil",
   "pydantic>=2.6.0",
-  "python-dateutil>=2.8.2",  
-  "qdrant-client>=1.7.0",
-  "requests",
+  "python-dateutil>=2.8.2",
+  "python-dotenv>=1.0.0",  
+  "requests>=2.32.0",
+  "rich>=13.7.1",
   "simpleaudio",
+  "tqdm",  
+
+  # DB / retrieval
+  "qdrant-client>=1.7.0",  
+  "sqlite-utils",
+  
+
+  # LLM / HTTP
+  "httpx>=0.26.0",
+  "openai>=1.30.0",
+
+  # Embeddings / NLP
+  "numpy>=1.26",
+  "sentence-transformers>=3.0.0",
+  "spacy>=3.8.0",
+  "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl",
+
+  # (only keep click if the CLI actually uses it)
+  "click",
 ]
 
 [project.optional-dependencies]
@@ -33,25 +53,47 @@ api = [
   "TTS",
   "uvicorn",
 ]
-voice = [
-  "sounddevice>=0.4.6",
-  "soundfile>=0.12.1",
-  "playsound==1.2.2",
-  "elevenlabs>=1.0.0",
-]
-google = [
-  "google-api-python-client>=2.120.0",
-  "google-auth-oauthlib>=1.2.0",
-  "google-auth>=2.30.0",
-]
+
 dev = [
   "pytest>=7.4",
+  "pytest-asyncio",
+  "pytest-xdist",
+  "pytest-cov",
+  "pytest-timeout",
+  "pytest-randomly",
+  "hypothesis",
   "ruff>=0.5.0",
   "black>=24.0",
 ]
 
+google = [
+  "google-api-python-client>=2.120.0",
+  "google-auth>=2.30.0",
+  "google-auth-httplib2",
+  "google-auth-oauthlib>=1.2.0",  
+]
+
+voice = [
+  "playsound==1.2.2",
+  "sounddevice>=0.4.6",
+  "soundfile>=0.12.1",
+  "simpleaudio",
+  "elevenlabs>=1.0.0",
+  "TTS",
+  "openai-whisper==20231117",
+  "imageio-ffmpeg",
+  "pvporcupine>=3.0.0",
+]
+
+
+
 [tool.setuptools]
 package-dir = {"" = "src"}               # tell setuptools we’re using src/
+
+[tool.setuptools.package-data]
+"base.database" = ["migrations/*.sql"]
+"config" = ["*.yaml", "*.json"]
+"personalities" = ["**/*.json"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -84,7 +126,12 @@ exclude = [".git",".venv","__pycache__","ultron.db"]
 "scripts/diagnostic_scan.py" = ["PLR0915"]
 
 [tool.pytest.ini_options]
-addopts = "-q"
+addopts = "-ra"
 # With an editable install, pythonpath is not required, but harmless:
 pythonpath = ["src"]
 testpaths = ["tests"]
+markers = [
+  "unit: fast unit tests",
+  "integration: tests touching multiple subsystems",
+  "slow: intentionally slower tests"
+]

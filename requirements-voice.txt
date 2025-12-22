@@ -1,0 +1,10 @@
+# Voice / audio (optional)
+elevenlabs==2.15.1
+imageio-ffmpeg==0.4.9
+openai-whisper==20231117
+pvporcupine==3.0.5
+simpleaudio==1.0.4
+sounddevice==0.5.2
+soundfile==0.13.1
+TTS==0.22.0
+

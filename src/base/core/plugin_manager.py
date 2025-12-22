@@ -2,6 +2,10 @@
 
 import re
 
+<<<<<<< Updated upstream
+=======
+
+>>>>>>> Stashed changes
 class PluginManager:
     def __init__(self):
         self.plugins = {}
@@ -35,7 +39,12 @@ class PluginManager:
         
         for name, plugin in plugins.items():
             for keyword in plugin["keywords"]:
+<<<<<<< Updated upstream
                 if re.search(rf'\b{re.escape(keyword)}\b', text.lower()):
+=======
+                if re.search(rf'\b{re.escape(keyword)}\b', text_lower):
+                # if keyword in text.lower():
+>>>>>>> Stashed changes
                     handler = plugin["handler"]
             # for keyword in plugin["keywords"]:
             #     if keyword in text.lower():

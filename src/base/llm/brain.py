@@ -217,6 +217,7 @@ class Brain:
 
         self.auto_set_personality(user_text)
 
+<<<<<<< Updated upstream
         for name, fn in PLUGINS.items():
             if name in user_text.lower():
                 return fn() or ""
@@ -320,6 +321,49 @@ class Brain:
 
     
     
+=======
+        # Add user message
+        messages.append({"role": "user", "content": user_text})
+
+        # Filter last N user/assistant turns, and enforce system prompt
+        safe_messages = [m for m in messages if m.get("role") in ("user", "assistant")][-10:]
+
+        if not safe_messages or safe_messages[0]["role"] != "system":
+            system_prompt = PERSONALITIES["default"]["prompt"]
+            safe_messages.insert(0, {"role": "system", "content": system_prompt})
+
+        typed_msgs: list[ChatCompletionMessageParam] = cast(
+            list[ChatCompletionMessageParam], safe_messages
+        )
+
+        try:
+            stream = self.client.chat.completions.create(
+                model=self.model,
+                messages=typed_msgs,
+                temperature=0.6,
+                stream=True,
+            )
+
+            reply_accum = ""
+            for chunk in stream:
+                for choice in chunk.choices:
+                    token = choice.delta.content or ""
+                    if not token:
+                        continue
+                    reply_accum += token
+                    if token.endswith((".", "?", "!")):
+                        stream_speak(reply_accum.strip())
+                        reply_accum = ""
+
+            if reply_accum:
+                stream_speak(reply_accum.strip())
+                messages.append({"role": "assistant", "content": reply_accum})
+
+            return reply_accum.strip() or "Okay."
+        except Exception as e:
+            logger.error(f"[stream error] {e}")
+            return "Something went wrong during streaming."
+>>>>>>> Stashed changes
 
     # def ask_jarvis_stream(self, user_text: str) -> str:
     #     self.auto_set_personality(user_text)

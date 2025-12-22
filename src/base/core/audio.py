@@ -8,9 +8,14 @@ import pvporcupine
 import sounddevice as sd
 import soundfile as sf
 
+<<<<<<< Updated upstream
 from config.config import settings
 from base.voice.tts_elevenlabs import Voice
 
+=======
+from loguru import logger
+from config.config import settings
+>>>>>>> Stashed changes
 from playsound import playsound
 from pvporcupine import create
 from TTS.api import TTS
@@ -98,7 +103,14 @@ def stream_speak(text):
 #     threading.Thread(target=_play, daemon=True).start()
 
 
+# def interrupt():
+#     global stop_playback
+#     stop_playback = True
+#     ack = pick_ack("stop")
+#     stream_speak(ack)
+
 def interrupt():
+<<<<<<< Updated upstream
     global stop_playback
     stop_playback = True
     ack = pick_ack("stop")
@@ -108,6 +120,19 @@ def interrupt():
 
     # Only speak ack if not already interrupting itself
     threading.Thread(target=voice.speak_async, args=(ack,), daemon=True).start()
+=======
+    try:
+        if settings.tts_engine == "ultron":
+            from base.voice.tts_ultron import UltronVoice
+            UltronVoice.get_instance().speak("Interrupting.")
+        else:
+            from base.voice.tts_elevenlabs import Voice
+            Voice.get_instance().stop_speaking()
+            Voice.get_instance().speak_async("Interrupting.")
+    except Exception as e:
+        logger.error(f"[interrupt] Failed to interrupt voice: {e}")
+
+>>>>>>> Stashed changes
 
 
 # 💡 print("DEBUG PICOVOICE KEY:", os.getenv("PICOVOICE_API_KEY"))
@@ -151,12 +176,29 @@ def listen_for_wake_word():
         )
         pa.start()
         print("[Idle... say 'Jarvis' to wake me up.]")
+        # while state == JarvisState.IDLE:
+        #     pcm = pa.read(porcupine.frame_length)[0]
+        #     pcm = struct.unpack_from("h" * porcupine.frame_length, pcm)
+        #     if porcupine.process(pcm) >= 0:
+        #         pa.stop()
+        #         return
+        # while state == JarvisState.IDLE:
+        #     pcm = pa.read(porcupine.frame_length)[0]
+        #     pcm = struct.unpack_from("h" * porcupine.frame_length, pcm)
+        #     if porcupine.process(pcm) >= 0:
+        #         from base.core.core import JarvisState
+        #         JarvisState = JarvisState.ACTIVE
+        #         pa.stop()
+        #         return
+        global state
         while state == JarvisState.IDLE:
             pcm = pa.read(porcupine.frame_length)[0]
             pcm = struct.unpack_from("h" * porcupine.frame_length, pcm)
             if porcupine.process(pcm) >= 0:
                 pa.stop()
+                state = JarvisState.ACTIVE
                 return
+<<<<<<< Updated upstream
         
         if porcupine.process(pcm) >= 0:
             pa.stop()
@@ -164,6 +206,10 @@ def listen_for_wake_word():
             global_state = JarvisState.ACTIVE  # ⬅️ Immediately lock state to prevent parallel activation
             return
         
+=======
+
+
+>>>>>>> Stashed changes
         return porcupine
 
     except pvporcupine.PorcupineActivationError as e:

@@ -43,6 +43,9 @@ class Settings(BaseModel):
     # LLM
     openai_api_key: str | None = os.getenv("OPENAI_API_KEY")
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    
+    # TTS engine choice
+    tts_engine: str = os.getenv("TTS_ENGINE", "ultron")
 
     # Embeddings
     embeddings_provider: str = os.getenv("EMBEDDINGS_PROVIDER", "sentence_transformers")

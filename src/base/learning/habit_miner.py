@@ -149,6 +149,7 @@ class HabitMiner:
                 c = Counter(commands)
                 profile["most_used_commands"] = [k for k, _ in c.most_common(5)]
 
+<<<<<<< Updated upstream
             phrases = [r[0] for r in cur.fetchall()]
             if phrases:
                 cleaned = [p.lower().replace("play", "").strip() for p in phrases]
@@ -159,6 +160,16 @@ class HabitMiner:
                     if freq >= 3:  # only save if habit is repeated
                         profile["favorite_music"] = top
                         logger.info(f"HabitMiner: favorite_music → {top}")
+=======
+        phrases = [r[0] for r in rows]
+        if phrases:
+            cleaned = [p.lower().replace("play", "").strip() for p in phrases]
+            common = Counter(cleaned)
+            top, freq = common.most_common(1)[0]
+            if freq >= 3:  # only save if habit is repeated
+                profile["favorite_music"] = top
+                logger.info(f"HabitMiner: favorite_music → {top}")
+>>>>>>> Stashed changes
 
             # ---- Adjust tone preferences ----
             tone_adj = profile.get("tone_adjustments", {"casual": 0.5, "formal": 0.5})

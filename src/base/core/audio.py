@@ -7,12 +7,17 @@ import time
 import pvporcupine
 import sounddevice as sd
 import soundfile as sf
+
+from config.config import settings
+from base.voice.tts_elevenlabs import Voice
+
 from playsound import playsound
 from pvporcupine import create
 from TTS.api import TTS
 
 from .core import JarvisState, pick_ack, state, stop_playback
 
+current_playback_thread = None
 tts = TTS("tts_models/en/jenny/jenny")
 
 
@@ -40,24 +45,69 @@ def listen_until_silence(threshold=0.01, timeout=8, samplerate=16000):
 
 
 def stream_speak(text):
-    global stop_playback
-    stop_playback = False
+    try:
+        if settings.tts_engine == "ultron":
+            from base.voice.tts_ultron import UltronVoice
+            UltronVoice.get_instance().speak(text)
+        else:
+            voice = Voice.get_instance()
+            voice.stop_speaking()
+            voice.speak_async(text)
+    except Exception as e:
+        print(f"[stream_speak] Failed: {e}")
 
-    def _play():
-        global stop_playback
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-            tts.tts_to_file(text=text, file_path=tmp.name)
-            if not stop_playback:
-                playsound(tmp.name)
+# def stream_speak(text):
+#     try:
+#         voice = Voice.get_instance()
+#         voice.stop_speaking()
+#         voice.speak_async(text)
+#     except Exception as e:
+#         print(f"[stream_speak] Failed: {e}")
 
-    threading.Thread(target=_play, daemon=True).start()
+# def stream_speak(text):
+#     global stop_playback, current_playback_thread
+
+#     # Stop existing playback if active
+#     if current_playback_thread and current_playback_thread.is_alive():
+#         stop_playback = True
+#         time.sleep(0.1)
+
+#     stop_playback = False
+
+#     def _play():
+#         global stop_playback
+#         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+#             tts.tts_to_file(text=text, file_path=tmp.name)
+#             if not stop_playback:
+#                 playsound(tmp.name)
+
+#     current_playback_thread = threading.Thread(target=_play, daemon=True)
+#     current_playback_thread.start()
+    
+# def stream_speak(text):
+#     global stop_playback
+#     stop_playback = False
+
+#     def _play():
+#         global stop_playback
+#         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+#             tts.tts_to_file(text=text, file_path=tmp.name)
+#             if not stop_playback:
+#                 playsound(tmp.name)
+
+#     threading.Thread(target=_play, daemon=True).start()
 
 
 def interrupt():
     global stop_playback
     stop_playback = True
     ack = pick_ack("stop")
-    stream_speak(ack)
+    
+    voice = Voice.get_instance()  # consistent behavior
+    voice.stop_speaking()         # ensure ElevenLabs is stopped
+
+    # Only speak ack if not already interrupting itself
+    threading.Thread(target=voice.speak_async, args=(ack,), daemon=True).start()
 
 
 # 💡 print("DEBUG PICOVOICE KEY:", os.getenv("PICOVOICE_API_KEY"))
@@ -69,6 +119,12 @@ def listen_for_wake_word():
     Fails fast if the API key is missing or invalid.
     """
     access_key = os.getenv("PICOVOICE_API_KEY")
+
+    # if porcupine.process(pcm) >= 0:
+    #     pa.stop()
+    #     from .core import state as global_state
+    #     global_state = JarvisState.ACTIVE  # ⬅️ Immediately lock state to prevent parallel activation
+    #     return
 
     # Check early for missing/empty key
     if not access_key:
@@ -101,6 +157,13 @@ def listen_for_wake_word():
             if porcupine.process(pcm) >= 0:
                 pa.stop()
                 return
+        
+        if porcupine.process(pcm) >= 0:
+            pa.stop()
+            from .core import state as global_state
+            global_state = JarvisState.ACTIVE  # ⬅️ Immediately lock state to prevent parallel activation
+            return
+        
         return porcupine
 
     except pvporcupine.PorcupineActivationError as e:

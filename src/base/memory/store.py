@@ -36,6 +36,11 @@ class MemoryStore:
         # 0) normalize DB handle
         self.conn: sqlite3.Connection = db.conn if hasattr(db, "conn") else db  # type: ignore[attr-defined]
         self.conn.row_factory = sqlite3.Row
+        
+        # a) transient in-memory caches
+        self._add_history: list[str] = []
+        self._recall_fact: dict[str, Any] = {}
+        self._remember_fact: dict[str, Any] = {}
 
         # 1) state shelves
         self._fts_enabled: bool = False
@@ -180,6 +185,16 @@ class MemoryStore:
     def list_facts(self) -> list[tuple[str, str]]:
         cur = self.conn.execute("SELECT key, value FROM facts ORDER BY key")
         return [(r["key"], r["value"]) for r in cur.fetchall()]
+    
+    def add_history(self, text: str) -> None:
+        self._add_history.append(text)
+
+    def recall_fact(self, key: str) -> Any:
+        return self._recall_fact.get(key)
+
+    def remember_fact(self, key: str, value: Any) -> None:
+        self._remember_fact[key] = value
+
 
     def forget(self, topic: str) -> int:
         """Delete facts and events containing the given topic string."""

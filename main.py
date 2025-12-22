@@ -12,13 +12,16 @@ for p in (SRC, ROOT):
         sys.path.insert(0, s)
 # -----------------------------------------
 
+import atexit
 import os
 import random
+import requests
 import shutil
+import signal
 import sqlite3
 import threading
 import time
-import requests
+
 
 from dotenv import load_dotenv
 
@@ -63,6 +66,7 @@ from base.policy.consequence_linker import link_consequence
 from base.policy.context_signals import ContextSignals
 from base.policy.feedback import record_feedback, schedule_signal_check
 from base.policy.policy_store import PolicyStore
+from base.repl import commands as repl_commands
 from base.voice.tts_elevenlabs import Voice
 from config.config import settings
 from personalities.loader import load_personality
@@ -79,7 +83,9 @@ BASE_PERSONALITY = os.getenv("BASE_PERSONALITY", "ultron")
 MODE = os.getenv("PERSONALITY_MODE", "default")
 CURRENT_PERSONALITY = load_personality(BASE_PERSONALITY, MODE)
 
+listening =  False
 profile = get_profile()
+state = JarvisState.IDLE
 USER_NAME = profile.get("name")
 
 # Single DB handle (wrapper + raw)
@@ -227,6 +233,12 @@ def engagement_task():
 
             print(f"[Engagement] ({ev.get('topic','?')}/{ev.get('tone','gentle')}) {reply}")
             stream_speak(reply)
+            
+            decider = Decider(memory=store)  # wherever `store` is your MemoryStore
+            memory_candidate = decider.decide_memory(text, reply)
+
+            if memory_candidate:
+                store.save_memory(memory_candidate)
 
             # brief window for explicit feedback
             feedback_text = listen_until_silence(timeout=5)
@@ -313,148 +325,274 @@ def nightly_maintenance():
 scheduler.add_task("nightly_maintenance", interval=86400, func=nightly_maintenance)
 scheduler.start()
 
+
+scheduler.add_task("habit_mining", interval=86400, func=habit_miner.mine)
+
+# scheduler.add_task("habit_mining", interval=60, func=habit_miner.mine)  # For testing
+
+
 # ---------------------------------------------------------------------------
 #                               MAIN LOOP
 # ---------------------------------------------------------------------------
 state = JarvisState.IDLE
 last_user_input: str | None = None
 
-while True:
-    if state == JarvisState.IDLE:
-        listen_for_wake_word()
-        stream_speak(
-            f"At your service, {USER_NAME}."
-            if USER_NAME
-            else random.choice(CURRENT_PERSONALITY["wake"])
-        )
-        reset_session()
-        state = JarvisState.ACTIVE
+try:
+    while True:
 
-    while state == JarvisState.ACTIVE:
-        text = listen_until_silence()
-        print(f"You: {text}")
-        last_user_input = text
+        def shutdown():
+            print("[Shutdown] Cleaning up before exit...")
+            try:
+                scheduler.stop()
+                print("[Shutdown] Scheduler stopped.")
+            except Exception as e:
+                print(f"[Shutdown] Error stopping scheduler: {e}")
 
-        if not text:
-            state = JarvisState.IDLE
-            reset_session()
-            break
+            try:
+                interrupt()
+                voice.stop_speaking()
+            except Exception:
+                pass
 
-        # Link consequences to ignored advice (non-fatal)
-        try:
-            if link_consequence(conn, text):
-                print(f"[Consequence linked] {text}")
-        except Exception:
-            pass
+            try:
+                conn.close()
+                print("[Shutdown] Database connection closed.")
+            except Exception:
+                pass
 
-        # Mode switching
-        detected_mode, repeat_triggered = classify_mode(text, MODE)
-        if detected_mode != MODE:
-            MODE = detected_mode
-            CURRENT_PERSONALITY = load_personality(BASE_PERSONALITY, MODE)
-            print(f"[Mode switched → {MODE}]")
+        # Register cleanup on exit and termination
+        atexit.register(shutdown)
+        signal.signal(signal.SIGINT, lambda sig, frame: sys.exit(0))
+        signal.signal(signal.SIGTERM, lambda sig, frame: sys.exit(0))
 
-        if repeat_triggered and "repeat_sarcasm" in CURRENT_PERSONALITY:
-            stream_speak(random.choice(CURRENT_PERSONALITY["repeat_sarcasm"]))
-            continue
 
-        # sleep / stop words
-        low = text.lower()
-        if any(w in low for w in SLEEP_WORDS):
-            stream_speak(random.choice(CURRENT_PERSONALITY["sleep"]))
-            state = JarvisState.IDLE
-            reset_session()
-            break
-
-        if any(w in low for w in STOP_WORDS):
-            interrupt()
-            voice.stop_speaking()
-
-            ack = None
-            if "interrupt_ack" in CURRENT_PERSONALITY:
-                ack = random.choice(CURRENT_PERSONALITY["interrupt_ack"])
-
-            # policy commands (e.g., “Ultron disable speak” etc.)
-            reply = handle_policy_command(text, policy)
-            if reply:
-                print(f"[Policy] {reply}")
-                stream_speak(reply)
-                continue
-
-            if ack:
-                stream_speak(ack)
-
-            # capture clarification
-            correction = listen_until_silence()
-            if correction:
-                print(f"You (clarification): {correction}")
-                revised_input = f"Original: {last_user_input}\nUser clarification: {correction}"
-                reply = ask_jarvis_stream(revised_input)
-                if reply:
-                    print(f"{BASE_PERSONALITY.capitalize()}: {reply}")
-                    stream_speak(reply)
-                    dec = Decider()
-                    mem = dec.decide_memory(revised_input, reply)
-                    if mem:
-                        store.add_event(
-                            f"{mem['content']} || {mem.get('response','')}",
-                            importance=0.0,
-                            type_="chat",
-                        )
-            continue
-
-        # Manual overrides (simple)
-        if "be sarcastic" in low:
-            MODE = "sarcastic"
-            CURRENT_PERSONALITY = load_personality(BASE_PERSONALITY, MODE)
-            stream_speak("Oh, finally. Let me really express myself.")
-            continue
-        if "be formal" in low:
-            MODE = "formal"
-            CURRENT_PERSONALITY = load_personality(BASE_PERSONALITY, MODE)
-            stream_speak("Very well. I will maintain formal tone.")
-            continue
-        if "be normal" in low:
-            MODE = "default"
-            CURRENT_PERSONALITY = load_personality(BASE_PERSONALITY, MODE)
-            stream_speak("Back to default mode.")
-            continue
-
-        # Plugins first
-        reply, spoken = manager.handle(
-            text, manager.plugins, personality=CURRENT_PERSONALITY, mode=MODE
-        )
-        if reply or spoken:
-            if reply:
-                print(f"{BASE_PERSONALITY.capitalize()}: {reply}")
-            if spoken:
-                stream_speak(spoken)
-            continue
-
-        # Add recall context (if any)
-        try:
-            memories = recall_relevant(text)
-            if memories:
-                recall_ctx = format_memories(memories)
-                print("[Recall injected]:")
-                print(recall_ctx)
-                text = f"(Relevant context from past interactions: {recall_ctx})\n\n{text}"
-        except Exception:
-            pass
-
-        # Default fallback: LLM
-        reply = ask_jarvis_stream(text)
-        if reply:
-            print(f"{BASE_PERSONALITY.capitalize()}: {reply}")
-            stream_speak(reply)
-
-        # Store memory of the exchange
-        try:
-            dec = Decider()
-            mem = dec.decide_memory(text, reply or "")
-            if mem:
-                store.add_event(
-                    f"{mem['content']} || {mem.get('response','')}", importance=0.0, type_="chat"
+        while True:
+            if state == JarvisState.IDLE:
+                listen_for_wake_word()
+                stream_speak(
+                    f"At your service, {USER_NAME}."
+                    if USER_NAME
+                    else random.choice(CURRENT_PERSONALITY["wake"])
                 )
-        except Exception:
-            pass
+                reset_session()
+                state = JarvisState.ACTIVE
+
+            while state == JarvisState.ACTIVE:
+                # text = listen_until_silence()
+                if not listening:
+                    listening = True
+                    text = listen_until_silence()
+                    listening = False
+                else:
+                    print("[DEBUG] Ignoring reentrant STT call.")
+                    continue
+
+                print(f"You: {text}")
+                last_user_input = text
+
+                if not text:
+                    state = JarvisState.IDLE
+                    reset_session()
+                    break
+
+                # Link consequences to ignored advice (non-fatal)
+                try:
+                    if link_consequence(conn, text):
+                        print(f"[Consequence linked] {text}")
+                except Exception:
+                    pass
+
+                # Mode switching
+                detected_mode, repeat_triggered = classify_mode(text, MODE)
+                if detected_mode != MODE:
+                    MODE = detected_mode
+                    CURRENT_PERSONALITY = load_personality(BASE_PERSONALITY, MODE)
+                    print(f"[Mode switched → {MODE}]")
+
+                if repeat_triggered and "repeat_sarcasm" in CURRENT_PERSONALITY:
+                    stream_speak(random.choice(CURRENT_PERSONALITY["repeat_sarcasm"]))
+                    continue
+
+                # sleep / stop words
+                low = text.lower()
+                if any(w in low for w in SLEEP_WORDS):
+                    stream_speak(random.choice(CURRENT_PERSONALITY["sleep"]))
+                    state = JarvisState.IDLE
+                    reset_session()
+                    break
+
+                # if any(w in low for w in STOP_WORDS):
+                #     interrupt()
+                #     voice.stop_speaking()
+
+                if any(w in low for w in STOP_WORDS):
+                    interrupt()
+                    try:
+                        voice.stop_speaking()
+                    except Exception:
+                        pass
+
+                    listening = False
+                    state = JarvisState.IDLE
+                    reset_session()
+
+
+                    ack = None
+                    if "interrupt_ack" in CURRENT_PERSONALITY:
+                        ack = random.choice(CURRENT_PERSONALITY["interrupt_ack"])
+
+                    # policy commands (e.g., “Ultron disable speak” etc.)
+                    reply = handle_policy_command(text, policy)
+                    if reply:
+                        print(f"[Policy] {reply}")
+                        stream_speak(reply)
+                        continue
+
+                    if ack:
+                        stream_speak(ack)
+
+                    # capture clarification
+                    correction = listen_until_silence()
+                    if correction:
+                        print(f"You (clarification): {correction}")
+                        revised_input = f"Original: {last_user_input}\nUser clarification: {correction}"
+                        if isinstance(reply, dict):
+                            reply = reply.get("response") or reply.get("content") or str(reply)
+
+                            # reply = ask_jarvis_stream(revised_input)
+                            if reply:
+                                print(f"{BASE_PERSONALITY.capitalize()}: {reply}")
+                                stream_speak(reply)
+                                dec = Decider()
+                                mem = dec.decide_memory(revised_input, reply)
+                                if mem:
+                                    store.add_event(
+                                        f"{mem['content']} || {mem.get('response','')}",
+                                        importance=0.0,
+                                        type_="chat",
+                                    )
+                                    
+                                decider = Decider(memory=store)  # wherever `store` is your MemoryStore
+                                memory_candidate = decider.decide_memory(text, reply)
+
+                                if memory_candidate:
+                                    store.save_memory(memory_candidate)
+                    continue
+
+                # Manual overrides (simple)
+                if "be sarcastic" in low:
+                    MODE = "sarcastic"
+                    CURRENT_PERSONALITY = load_personality(BASE_PERSONALITY, MODE)
+                    stream_speak("Oh, finally. Let me really express myself.")
+                    continue
+                if "be formal" in low:
+                    MODE = "formal"
+                    CURRENT_PERSONALITY = load_personality(BASE_PERSONALITY, MODE)
+                    stream_speak("Very well. I will maintain formal tone.")
+                    continue
+                if "be normal" in low:
+                    MODE = "default"
+                    CURRENT_PERSONALITY = load_personality(BASE_PERSONALITY, MODE)
+                    stream_speak("Back to default mode.")
+                    continue
+
+
+                resp = repl_commands.handle_command("ultron", text, policy)
+                if resp:
+                    print(f"[Command] {resp}")
+                    stream_speak(resp)
+                    continue
+
+                # Plugin routing (runs before LLM fallback)
+                reply, spoken = manager.handle(
+                    text, manager.plugins, personality=CURRENT_PERSONALITY, mode=MODE
+                )
+                if reply or spoken:
+                    if reply:
+                        print(f"{BASE_PERSONALITY.capitalize()}: {reply}")
+                    if spoken:
+                        stream_speak(spoken)
+                    continue
+
+                # Add recall context (if any)
+                try:
+                    memories = recall_relevant(text)
+                    if memories:
+                        recall_ctx = format_memories(memories)
+                        print("[Recall injected]:")
+                        print(recall_ctx)
+                        text = f"(Relevant context from past interactions: {recall_ctx})\n\n{text}"
+                except Exception:
+                    pass
+                
+                # Default fallback: LLM or graceful error
+                if settings.openai_api_key:
+                    reply = ask_jarvis_stream(text)
+                    if reply:
+                        print(f"{BASE_PERSONALITY.capitalize()}: {reply}")
+                        stream_speak(reply)
+                else:
+                    print("[Ultron] LLM is disabled or not configured.")
+                    stream_speak("I'm not currently connected to my AI core.")
+                    reply = None
+
+                # Final fallback if no reply generated
+                if not reply:
+                    print("[Ultron] No response generated.")
+                    stream_speak("I didn't catch that. Could you rephrase?")
+
+                # Store memory of the exchange
+                try:
+                    if isinstance(reply, dict):
+                        reply = reply.get("response") or reply.get("content") or str(reply)
+
+                    if reply is not None and isinstance(reply, str):
+                        decider = Decider(memory=store)
+                        memory_candidate = decider.decide_memory(text, reply)
+
+                        if memory_candidate:
+                            store.save_memory(memory_candidate)
+                except Exception as e:
+                    print(f"[Memory] Failed to evaluate/save: {e}")
+
+                    
+                    
+                # if settings.openai_api_key:
+                #     reply = ask_jarvis_stream(text)
+                #     if reply:
+                #         print(f"{BASE_PERSONALITY.capitalize()}: {reply}")
+                #         stream_speak(reply)
+                # else:
+                #     print("[Ultron] LLM is disabled or not configured.")
+                #     stream_speak("I'm not currently connected to my AI core.")
+                #     reply = None
+
+                # # Final fallback if no reply generated
+                # if not reply:
+                #     print("[Ultron] No response generated.")
+                #     stream_speak("I didn't catch that. Could you rephrase?")
+
+                # # Store memory of the exchange
+                # try:
+                #     if isinstance(reply, dict):
+                #         reply = reply.get("response") or reply.get("content") or str(reply)
+
+                #     dec = Decider()
+                #     mem = dec.decide_memory(text, reply or "")
+                #     if mem:
+                #         store.add_event(
+                #             f"{mem['content']} || {mem.get('response','')}", importance=0.0, type_="chat"
+                #         )
+                        
+                #     decider = Decider(memory=store)  # wherever `store` is your MemoryStore
+                #     memory_candidate = decider.decide_memory(text, reply)
+
+                #     if memory_candidate:
+                #         store.save_memory(memory_candidate)
+                # except Exception:
+                #     pass
+                
+except KeyboardInterrupt:
+    print("Shutting Down...")
+    scheduler.stop()
+    sys.exit(0)

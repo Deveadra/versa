@@ -1,4 +1,4 @@
-# assistant/base/policy/policy_store.py
+# src/base/policy/policy_store.py
 from __future__ import annotations
 
 import sqlite3

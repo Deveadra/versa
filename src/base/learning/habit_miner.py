@@ -51,7 +51,10 @@ class HabitMiner:
         return {}
 
     def save_profile(self, profile: dict) -> None:
-        PROFILE_PATH.write_text(json.dumps(profile, indent=2), encoding="utf-8")
+        try:
+            PROFILE_PATH.write_text(json.dumps(profile, indent=2), encoding="utf-8")
+        except Exception as e:
+            logger.error(f"Failed to save profile: {e}")
 
     def learn(self, event: str, ts: str | None = None) -> None:
         """Record an event and try to identify recurring patterns."""
@@ -117,85 +120,89 @@ class HabitMiner:
         Run enrichment based on habits and logs.
         Returns the updated profile (also saved to disk).
         """
-        profile = self.load_profile()
+        try:
+            profile = self.load_profile()
 
-        # ---- Mine favorite music habits ----
-        cur = self.db.conn.execute("SELECT content, ts FROM events ORDER BY id DESC LIMIT 1000")
-        rows = cur.fetchall()
-        commands = []
-        tod_hist = defaultdict(int)  # hour bucket histogram
+            # ---- Mine favorite music habits ----
+            cur = self.db.conn.execute("SELECT content, ts FROM events ORDER BY id DESC LIMIT 1000")
+            rows = cur.fetchall()
+            commands = []
+            tod_hist = defaultdict(int)  # hour bucket histogram
 
-        for r in rows:
-            text = (r[0] or "").lower()
-            ts = r[1] or ""
-            try:
-                hr = datetime.fromisoformat(ts).hour
-            except Exception:
-                hr = None
-            if hr is not None:
-                tod_hist[hr] += 1
-            if text.startswith("play ") or "spotify" in text or "music" in text:
-                commands.append("music")
-            if "turn on light" in text or "lights" in text:
-                commands.append("lights")
-            if "calendar" in text or "schedule" in text or "meeting" in text:
-                commands.append("calendar")
+            for r in rows:
+                text = (r[0] or "").lower()
+                ts = r[1] or ""
+                try:
+                    hr = datetime.fromisoformat(ts).hour
+                except Exception:
+                    hr = None
+                if hr is not None:
+                    tod_hist[hr] += 1
+                if text.startswith("play ") or "spotify" in text or "music" in text:
+                    commands.append("music")
+                if "turn on light" in text or "lights" in text:
+                    commands.append("lights")
+                if "calendar" in text or "schedule" in text or "meeting" in text:
+                    commands.append("calendar")
 
-        if commands:
-            c = Counter(commands)
-            profile["most_used_commands"] = [k for k, _ in c.most_common(5)]
+            if commands:
+                c = Counter(commands)
+                profile["most_used_commands"] = [k for k, _ in c.most_common(5)]
 
-        phrases = [r[0] for r in cur.fetchall()]
-        if phrases:
-            cleaned = [p.lower().replace("play", "").strip() for p in phrases]
-            common = Counter(cleaned)
-            top, freq = common.most_common(1)[0]
-            if freq >= 3:  # only save if habit is repeated
-                profile["favorite_music"] = top
-                logger.info(f"HabitMiner: favorite_music → {top}")
+            phrases = [r[0] for r in cur.fetchall()]
+            if phrases:
+                cleaned = [p.lower().replace("play", "").strip() for p in phrases]
+                common = Counter(cleaned)
+                most_common = common.most_common(1)
+                if most_common:
+                    top, freq = most_common[0]
+                    if freq >= 3:  # only save if habit is repeated
+                        profile["favorite_music"] = top
+                        logger.info(f"HabitMiner: favorite_music → {top}")
 
-        # ---- Adjust tone preferences ----
-        tone_adj = profile.get("tone_adjustments", {"casual": 0.5, "formal": 0.5})
-        for phrase in phrases:
-            if "sarcasm" in phrase.lower() or "joke" in phrase.lower():
-                tone_adj["playful"] = min(tone_adj.get("playful", 0.0) + 0.05, 1.0)
-        profile["tone_adjustments"] = tone_adj
+            # ---- Adjust tone preferences ----
+            tone_adj = profile.get("tone_adjustments", {"casual": 0.5, "formal": 0.5})
+            for phrase in phrases:
+                if "sarcasm" in phrase.lower() or "joke" in phrase.lower():
+                    tone_adj["playful"] = min(tone_adj.get("playful", 0.0) + 0.05, 1.0)
+            profile["tone_adjustments"] = tone_adj
 
-        # ---- Greeting refinement ----
-        cur = self.db.conn.execute(
-            "SELECT content FROM events WHERE content LIKE '%hello%' OR content LIKE '%hi %'"
-        )
-        greetings = [r[0] for r in cur.fetchall()]
-        if greetings:
-            common = Counter(greetings)
-            top, freq = common.most_common(1)[0]
-            if freq >= 2:
-                profile["preferred_greeting"] = top.strip()
-                logger.info(f"HabitMiner: preferred_greeting → {top.strip()}")
+            # ---- Greeting refinement ----
+            cur = self.db.conn.execute(
+                "SELECT content FROM events WHERE content LIKE '%hello%' OR content LIKE '%hi %'"
+            )
+            greetings = [r[0] for r in cur.fetchall()]
+            if greetings:
+                common = Counter(greetings)
+                top, freq = common.most_common(1)[0]
+                if freq >= 2:
+                    profile["preferred_greeting"] = top.strip()
+                    logger.info(f"HabitMiner: preferred_greeting → {top.strip()}")
 
-        # --- mine routines by time-of-day ---
-        # store buckets like: morning/afternoon/evening/night
-        buckets = {
-            "morning": range(5, 12),
-            "afternoon": range(12, 18),
-            "evening": range(18, 23),
-            "night": tuple(list(range(23, 24)) + list(range(0, 5))),
-        }
-        rout = {}
-        if "music" in commands:
-            # naïve example: if evenings dominate total events and music used recently, we assume evening music habit
-            total_evening = sum(tod_hist[h] for h in buckets["evening"])
-            if total_evening >= 10:
-                rout["evening_music"] = "lo-fi"  # you can infer specific genre elsewhere
+            # --- mine routines by time-of-day ---
+            # store buckets like: morning/afternoon/evening/night
+            buckets = {
+                "morning": range(5, 12),
+                "afternoon": range(12, 18),
+                "evening": range(18, 23),
+                "night": tuple(list(range(23, 24)) + list(range(0, 5))),
+            }
+            rout = {}
+            if "music" in commands:
+                # naïve example: if evenings dominate total events and music used recently, we assume evening music habit
+                total_evening = sum(tod_hist[h] for h in buckets["evening"])
+                if total_evening >= 10:
+                    rout["evening_music"] = "lo-fi"  # you can infer specific genre elsewhere
 
-        if rout:
-            profile["routines"] = rout
+            if rout:
+                profile["routines"] = rout
 
-        self.save_profile(profile)
-        return profile
-        # # ---- Save changes ----
-        # self.save_profile(profile)
-        # return profile
+            self.save_profile(profile)
+            return profile
+        except Exception as e:
+            logger.error(f"HabitMiner.mine Failed: {e}")
+            return {}
+        
 
     def reinforce(self, action: str) -> None:
         """

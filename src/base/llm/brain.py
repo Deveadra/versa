@@ -97,42 +97,266 @@ class Brain:
             return "Sorry, I couldn’t process that."
 
     # -------- streaming ask with TTS -----------
+    # def ask_jarvis_stream(self, user_text: str) -> str:
+    #     import time
+    #     from loguru import logger
+
+    #     self.auto_set_personality(user_text)
+
+    #     # Quick plugin dispatch
+    #     for name, fn in PLUGINS.items():
+    #         if name in user_text.lower():
+    #             return fn()
+
+    #     # Voice toggle commands
+    #     command = _check_vocal_cue(user_text)
+    #     if command == "disable_speak":
+    #         settings.auto_speak = False
+    #         return "Understood. I’ll stop speaking and switch to text."
+    #     elif command == "enable_speak":
+    #         settings.auto_speak = True
+    #         return "Voice enabled again."
+
+    #     # Validate and sanitize conversation history
+    #     safe_messages = []
+    #     for m in messages:
+    #         if not m.get("content"):
+    #             logger.warning(f"Removed empty message from history: {m}")
+    #             continue
+    #         safe_messages.append(m)
+
+    #     if not safe_messages or safe_messages[0]["role"] != "system":
+    #         system_prompt = messages[0].get("content", PERSONALITIES["default"]["prompt"])
+    #         safe_messages.insert(0, {"role": "system", "content": system_prompt})
+
+    #     # Context trimming
+    #     MAX_PAIRS = 10
+    #     placeholder = {"role": "system", "content": "[Previous conversation truncated]"}
+    #     placeholder_present = len(safe_messages) > 1 and "truncated" in safe_messages[1]["content"]
+
+    #     while len(safe_messages) - 1 > 2 * MAX_PAIRS:
+    #         if placeholder_present:
+    #             safe_messages.pop(2); safe_messages.pop(2)
+    #         else:
+    #             safe_messages.pop(1); safe_messages.pop(1)
+    #             safe_messages.insert(1, placeholder)
+    #             placeholder_present = True
+
+    #     # API call with retry logic
+    #     user_msg = {"role": "user", "content": user_text}
+    #     payload = safe_messages + [user_msg]
+
+    #     try:
+    #         stream = self.client.chat.completions.create(
+    #             model=self.model,
+    #             messages=payload,
+    #             temperature=0.6,
+    #             stream=True,
+    #         )
+    #     except Exception as e:
+    #         logger.error(f"LLM error: {e}, retrying once...")
+    #         time.sleep(2)
+    #         try:
+    #             stream = self.client.chat.completions.create(
+    #                 model=self.model,
+    #                 messages=payload,
+    #                 temperature=0.6,
+    #                 stream=True,
+    #             )
+    #         except Exception as e2:
+    #             logger.error(f"Retry failed: {e2}")
+    #             if settings.auto_speak:
+    #                 stream_speak("I'm sorry, I couldn’t process that.")
+    #             return None
+
+    #     # Streaming and buffering
+    #     full_reply = ""
+    #     buffer = ""
+    #     error_happened = False
+
+    #     try:
+    #         for chunk in stream:
+    #             for choice in chunk.choices:
+    #                 token = choice.delta.content or ""
+    #                 if not token:
+    #                     continue
+    #                 full_reply += token
+    #                 buffer += token
+    #                 if token.endswith(('.', '?', '!')):
+    #                     stream_speak(buffer.strip())
+    #                     buffer = ""
+    #     except Exception as err:
+    #         error_happened = True
+    #         logger.error(f"Stream interrupted: {err}")
+
+    #     if buffer:
+    #         stream_speak(buffer.strip())
+
+    #     full_reply = full_reply.strip()
+
+    #     if error_happened:
+    #         if full_reply and settings.auto_speak:
+    #             stream_speak("Sorry, I lost connection.")
+    #         elif not full_reply and settings.auto_speak:
+    #             stream_speak("I'm sorry, I couldn't process that.")
+    #         return None
+
+    #     # Update global history
+    #     messages.clear()
+    #     messages.extend(safe_messages)
+    #     messages.append(user_msg)
+    #     messages.append({"role": "assistant", "content": full_reply})
+
+    #     return full_reply
+    
+    
+    
     def ask_jarvis_stream(self, user_text: str) -> str:
+        import time
+        from loguru import logger
+
         self.auto_set_personality(user_text)
 
-        # quick plugin dispatch
         for name, fn in PLUGINS.items():
             if name in user_text.lower():
-                return fn()
+                return fn() or ""
 
-        messages.append({"role": "user", "content": user_text})
-        typed_msgs: list[ChatCompletionMessageParam] = cast(
-            list[ChatCompletionMessageParam], messages
-        )
+        command = _check_vocal_cue(user_text)
+        if command == "disable_speak":
+            settings.auto_speak = False
+            return "Understood. I’ll stop speaking and switch to text."
+        elif command == "enable_speak":
+            settings.auto_speak = True
+            return "Voice enabled again."
 
-        stream = self.client.chat.completions.create(
-            model=self.model,
-            messages=typed_msgs,
-            temperature=0.6,
-            stream=True,
-        )
+        safe_messages = []
+        for m in messages:
+            if not m.get("content"):
+                logger.warning(f"Removed empty message from history: {m}")
+                continue
+            safe_messages.append(m)
 
-        reply_accum = ""
-        for chunk in stream:
-            for choice in chunk.choices:
-                token = choice.delta.content or ""
-                if not token:
-                    continue
-                reply_accum += token
-                if token.endswith((".", "?", "!")):
-                    stream_speak(reply_accum.strip())
-                    reply_accum = ""
+        if not safe_messages or safe_messages[0]["role"] != "system":
+            system_prompt = messages[0].get("content", PERSONALITIES["default"]["prompt"])
+            safe_messages.insert(0, {"role": "system", "content": system_prompt})
 
-        if reply_accum:
-            stream_speak(reply_accum.strip())
-            messages.append({"role": "assistant", "content": reply_accum})
+        MAX_PAIRS = 10
+        placeholder = {"role": "system", "content": "[Previous conversation truncated]"}
+        placeholder_present = len(safe_messages) > 1 and "truncated" in safe_messages[1]["content"]
 
-        return reply_accum
+        while len(safe_messages) - 1 > 2 * MAX_PAIRS:
+            if placeholder_present:
+                safe_messages.pop(2)
+                safe_messages.pop(2)
+            else:
+                safe_messages.pop(1)
+                safe_messages.pop(1)
+                safe_messages.insert(1, placeholder)
+                placeholder_present = True
+
+        user_msg = {"role": "user", "content": user_text}
+        payload = safe_messages + [user_msg]
+
+        try:
+            stream = self.client.chat.completions.create(
+                model=self.model,
+                messages=payload,
+                temperature=0.6,
+                stream=True,
+            )
+        except Exception as e:
+            logger.error(f"LLM error: {e}, retrying once...")
+            time.sleep(2)
+            try:
+                stream = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=payload,
+                    temperature=0.6,
+                    stream=True,
+                )
+            except Exception as e2:
+                logger.error(f"Retry failed: {e2}")
+                if settings.auto_speak:
+                    stream_speak("I'm sorry, I couldn’t process that.")
+                return "I'm sorry, I couldn’t process that."
+
+        full_reply = ""
+        buffer = ""
+        error_happened = False
+
+        try:
+            for chunk in stream:
+                for choice in chunk.choices:
+                    token = choice.delta.content or ""
+                    if not token:
+                        continue
+                    full_reply += token
+                    buffer += token
+                    if token.endswith(('.', '?', '!')):
+                        stream_speak(buffer.strip())
+                        buffer = ""
+        except Exception as err:
+            error_happened = True
+            logger.error(f"Stream interrupted: {err}")
+
+        if buffer:
+            stream_speak(buffer.strip())
+
+        full_reply = full_reply.strip()
+
+        if error_happened:
+            if full_reply and settings.auto_speak:
+                stream_speak("Sorry, I lost connection.")
+            elif not full_reply and settings.auto_speak:
+                stream_speak("I'm sorry, I couldn't process that.")
+            return full_reply or "Sorry, I lost connection."
+
+        messages.clear()
+        messages.extend(safe_messages)
+        messages.append(user_msg)
+        messages.append({"role": "assistant", "content": full_reply})
+
+        return full_reply or ""
+
+    
+    
+
+    # def ask_jarvis_stream(self, user_text: str) -> str:
+    #     self.auto_set_personality(user_text)
+
+    #     # quick plugin dispatch
+    #     for name, fn in PLUGINS.items():
+    #         if name in user_text.lower():
+    #             return fn()
+
+    #     messages.append({"role": "user", "content": user_text})
+    #     typed_msgs: list[ChatCompletionMessageParam] = cast(
+    #         list[ChatCompletionMessageParam], messages
+    #     )
+
+    #     stream = self.client.chat.completions.create(
+    #         model=self.model,
+    #         messages=typed_msgs,
+    #         temperature=0.6,
+    #         stream=True,
+    #     )
+
+    #     reply_accum = ""
+    #     for chunk in stream:
+    #         for choice in chunk.choices:
+    #             token = choice.delta.content or ""
+    #             if not token:
+    #                 continue
+    #             reply_accum += token
+    #             if token.endswith((".", "?", "!")):
+    #                 stream_speak(reply_accum.strip())
+    #                 reply_accum = ""
+
+    #     if reply_accum:
+    #         stream_speak(reply_accum.strip())
+    #         messages.append({"role": "assistant", "content": reply_accum})
+
+    #     return reply_accum
 
 
 # ---------- Singleton + module-level wrappers ----------

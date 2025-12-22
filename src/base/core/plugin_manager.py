@@ -1,3 +1,11 @@
+# src/base/core/plugin_manager.py
+
+import re
+
+<<<<<<< Updated upstream
+=======
+
+>>>>>>> Stashed changes
 class PluginManager:
     def __init__(self):
         self.plugins = {}
@@ -27,10 +35,20 @@ class PluginManager:
         Returns:
             (reply_text, spoken_text) tuple
         """
+        text_lower = text.lower()
+        
         for name, plugin in plugins.items():
             for keyword in plugin["keywords"]:
-                if keyword in text.lower():
+<<<<<<< Updated upstream
+                if re.search(rf'\b{re.escape(keyword)}\b', text.lower()):
+=======
+                if re.search(rf'\b{re.escape(keyword)}\b', text_lower):
+                # if keyword in text.lower():
+>>>>>>> Stashed changes
                     handler = plugin["handler"]
+            # for keyword in plugin["keywords"]:
+            #     if keyword in text.lower():
+            #         handler = plugin["handler"]
 
                     # If handler is a module with handle(), call that
                     if hasattr(handler, "handle"):

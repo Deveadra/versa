@@ -41,9 +41,17 @@ class Scheduler:
         self.scheduler.add_job(func, "cron", hour=hour, minute=minute)
         logger.info(f"Scheduled daily job {func.__name__} at {hour:02d}:{minute:02d}")
 
-    def add_task(self, name: str, interval: int, func: Callable[[], None]):
-        """Add or update a repeating background task."""
-        self.tasks[name] = {"interval": interval, "func": func, "last_run": 0}
+    # def add_task(self, name: str, interval: int, func: Callable[[], None]):
+    #     """Add or update a repeating background task."""
+    #     self.tasks[name] = {"interval": interval, "func": func, "last_run": 0}
+
+    def add_task(self, name: str, interval: int, func: Callable):
+        self.tasks[name] = {
+            "interval": interval,
+            "func": func,
+            "last_run": time.time(),
+        }
+        logger.info(f"[Scheduler] Registered task: {name} every {interval}s")
 
     def start(self):
         if self.running:
@@ -64,5 +72,11 @@ class Scheduler:
             time.sleep(1)
 
     def stop(self):
-        self.scheduler.shutdown()
-        logger.info("Scheduler stopped")
+        self.running = False  # <-- REQUIRED for clean exit of _loop
+        try:
+            self.scheduler.shutdown(wait=False)
+        except Exception as e:
+            logger.warning(f"[Scheduler] shutdown() raised: {e}")
+        logger.info("Scheduler stopped.")
+
+

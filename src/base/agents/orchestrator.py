@@ -1115,13 +1115,14 @@ class Orchestrator:
         try:
             hits = self.store.keyword_search(user_text, limit=k) or []
             # Convert dict rows to strings (prefer content/text fields)
-            if hits and isinstance(hits[0], dict):
-                return [
-                    h.get("content")
-                    or h.get("text")
-                    or json.dumps(h, ensure_ascii=False)
-                    for h in hits
-                ]
+            # if hits and isinstance(hits[0], dict):
+            #     return [
+            #         h.get("content")
+            #         or h.get("text")
+            #         or json.dumps(h, ensure_ascii=False)
+            #         for h in hits
+            #     ]
+            return [str(h) for h in hits]
             # If store returns strings, pass them through
             return [str(h) for h in hits]
         except Exception:

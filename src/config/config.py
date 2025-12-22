@@ -14,6 +14,7 @@ def _read_secret(path_env: str) -> str | None:
         return Path(path).read_text(encoding="utf-8").strip()
     return None
 
+USE_LLM = bool(os.getenv("OPENAI_API_KEY"))
 
 github_ssh_key = _read_secret("GITHUB_SSH_KEY_FILE")
 github_gpg_key = _read_secret("GITHUB_GPG_KEY_FILE")
@@ -42,6 +43,9 @@ class Settings(BaseModel):
     # LLM
     openai_api_key: str | None = os.getenv("OPENAI_API_KEY")
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    
+    # TTS engine choice
+    tts_engine: str = os.getenv("TTS_ENGINE", "ultron")
 
     # Embeddings
     embeddings_provider: str = os.getenv("EMBEDDINGS_PROVIDER", "sentence_transformers")
@@ -50,6 +54,8 @@ class Settings(BaseModel):
     # ElevenLabs
     eleven_api_key: str | None = os.getenv("ELEVENLABS_API_KEY")
     eleven_voice_id: str | None = os.getenv("ELEVENLABS_VOICE_ID")
+    
+    tts_engine: str = os.getenv("TTS_ENGINE", "elevenlabs")  # or "ultron"
 
     # Home Assistant
     ha_base_url: str | None = os.getenv("HA_BASE_URL")

@@ -65,6 +65,23 @@ def test_export_summary(habit_miner):
     }
     summary = habit_miner.export_summary()
     assert "music" in summary
+
+    succinct_markers = ("succinct", "concise", "short", "brief", "long answers")
+    assert any(m in summary.lower() for m in succinct_markers)
+
+
+def test_export_summary_missing_tone_bias(habit_miner):
+    habit_miner.load_profile.return_value = {
+        "most_used_commands": ["music", "lights"],
+        "persona_summary": "Reinforced preference: play jazz (x3)."
+    }
+    summary = habit_miner.export_summary()
+    assert isinstance(summary, str)
+    assert "music" in summary
+
+    }
+    summary = habit_miner.export_summary()
+    assert "music" in summary
     assert "Dislikes long answers" in summary
 
 def test_prune_habits(habit_miner):

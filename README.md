@@ -49,7 +49,7 @@ pip install -r requirements-voice.txt
 pip install -e .
 ```
 
-CI (default) _only install dev, not voice_:
+CI (default) _only installs dev, not voice_:
 ```bash
 pip install -r requirements-dev.txt
 pip install -e .

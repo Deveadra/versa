@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+
+import os
 import sqlite3
+
 from pathlib import Path
 
 from loguru import logger
@@ -50,7 +53,7 @@ class SQLiteConn:
             """
             CREATE TABLE IF NOT EXISTS facts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                key TEXT UNIQUE,
+                key TEXT NOT NULL UNIQUE,
                 value TEXT NOT NULL,
                 last_updated TEXT NOT NULL,
                 confidence REAL DEFAULT 0.75,
@@ -108,7 +111,8 @@ class SQLiteConn:
         logger.info("Initializing database / applying migrations if needed")
 
         mig_dir = Path(__file__).parent / "migrations"
-        files = sorted(p for p in mig_dir.glob("*.sql"))
+        # files = sorted(p for p in mig_dir.glob("*.sql"))
+        files = sorted(mig_dir.glob("*.sql"))
 
         # Track applied migrations
         self.conn.execute(
@@ -122,11 +126,22 @@ class SQLiteConn:
         )
         self.conn.commit()
 
+        # if not files:
+        #     logger.warning("No migration files found; using fallback schema.")
+        #     self._apply_fallback_schema(self.conn)
+        #     return
         if not files:
-            logger.warning("No migration files found; using fallback schema.")
+            allow_fallback = os.getenv("ULTRON_ALLOW_DB_FALLBACK_SCHEMA", "").lower() in ("1", "true", "yes")
+            if not allow_fallback:
+                raise RuntimeError(
+                    f"No migration files found in {mig_dir}. "
+                    "Refusing to create an untracked fallback schema. "
+                    "If you truly want fallback for dev/testing, set ULTRON_ALLOW_DB_FALLBACK_SCHEMA=1."
+                )
+            logger.warning("No migration files found; applying fallback schema (ULTRON_ALLOW_DB_FALLBACK_SCHEMA=1).")
             self._apply_fallback_schema(self.conn)
             return
-
+        
         applied = {
             row["filename"]
             for row in self.conn.execute("SELECT filename FROM schema_migrations")
@@ -139,16 +154,18 @@ class SQLiteConn:
             sql = p.read_text(encoding="utf-8")
             try:
                 logger.info(f"Applying migration {p.name}")
+                self.conn.execute("SAVEPOINT migrate_one;")
                 self.conn.executescript(sql)
-                self.conn.execute(
-                    "INSERT INTO schema_migrations(filename) VALUES (?)",
-                    (p.name,),
-                )
+                self.conn.execute("INSERT INTO schema_migrations(filename) VALUES (?)", (p.name,))
+                self.conn.execute("RELEASE SAVEPOINT migrate_one;")
                 self.conn.commit()
             except Exception as e:
+                self.conn.execute("ROLLBACK TO SAVEPOINT migrate_one;")
+                self.conn.execute("RELEASE SAVEPOINT migrate_one;")
                 self.conn.rollback()
                 logger.exception(f"Failed to apply migration {p.name}: {e}")
                 raise
+
 
     def cursor(self):
         return self.conn.cursor()

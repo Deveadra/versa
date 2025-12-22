@@ -1,4 +1,4 @@
-# assistant/base/personality/tone_adapter.py (augment)
+# src/base/personality/tone_adapter.py (augment)
 from __future__ import annotations
 
 from typing import Any

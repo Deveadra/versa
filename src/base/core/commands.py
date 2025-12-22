@@ -21,7 +21,7 @@ STOP_HARD = re.compile(
     r"\b(stop|never|don'?t.*ever)\b.*\b(remind|bring up)\b.*\b(?P<topic>\w[\w\s-]{1,40})", re.I
 )
 PAUSE_SOFT = re.compile(
-    r"\b(pause|stop)\b.*\b(?P<topic>\w[\w\s-]{1,40})\b.*\bfor\s+(?P<num>\d+)\s*(?P<unit>day|days|week|weeks)",
+    r"\b(pause|stop)\b.*\b(?P<topic>\w[\w\s-]{1,40})(?:\b.*\bfor\s+(?P<num>\d+)\s*(?P<unit>day|days|week|weeks))?",
     re.I,
 )
 RESUME = re.compile(r"\b(resume|re-enable|start)\b.*\b(?P<topic>\w[\w\s-]{1,40})", re.I)
@@ -39,6 +39,24 @@ def handle_policy_command(text: str, policy: PolicyStore) -> str | None:
 
     m = PAUSE_SOFT.search(text)
     t = text.lower().strip()
+    
+    # m = PAUSE_SOFT.search(text)
+    if m:
+        topic = normalize_topic(m.group("topic"))
+        num = int(m.group("num") or 1)
+        unit = m.group("unit") or "days"
+        unit = unit.lower()
+        days = num if unit.startswith("day") else num * 7
+        expires = datetime.now(UTC) + timedelta(days=days)
+        policy.set_override(topic, "soft", reason="user_soft_pause", expires_at=expires)
+        return f"Got it. I’ll pause mentioning {topic} for {num} {unit}."
+
+    m = RESUME.search(text)
+    if m:
+        topic = normalize_topic(m.group("topic"))
+        policy.clear_overrides(topic)
+        return f"I’ve re-enabled talking about {topic}."
+
 
     # === List active rules ===
     if re.search(r"\blist (my )?(rules|engagement rules)\b", t):

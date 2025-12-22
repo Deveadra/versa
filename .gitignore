@@ -27,7 +27,7 @@ ultron.db-shm
 
 /.env/
 .env
-tests/
+# tests/
 base/agents/orchestrator1.py
 orchestrator_feedback.patch
 apply_orchestrator_feedback.py

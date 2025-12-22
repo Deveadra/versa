@@ -4,60 +4,35 @@ colorama>=0.4.6
 dateparser
 faiss-cpu==1.8.0.post1
 loguru==0.7.2
-imageio-ffmpeg==0.4.9
-playsound==1.2.2 # STABLE, pure Python. Other versions have known issues, bad wheel/builds for Python 3.11. 
-openai #==1.107.2
-openai-whisper==20231117 # STT (cloud/offline with whisper.cpp alt)
 playsound==1.2.2 # STABLE. Other version have issues, Bad Wheel
 # pvporcupine==1.9.5
 psutil
-pvporcupine==3.0.5
 pydantic==2.11.9
 # pydantic_core==2.33.2
 python-dateutil==2.9.0.post0
 python-dotenv==1.1.1
-openai #==1.107.2
-openai-whisper==20231117 # STT (cloud/offline with whisper.cpp alt)
 qdrant-client>=1.9.0
 requests==2.32.3
 rich>=13.7.1
-simpleaudio==1.0.4
-sounddevice==0.5.2
-soundfile==0.13.1
-spacy==3.7.5 # 3.8.7
-en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
 sqlite-utils #==3.37
 textblob
-TTS==0.22.0
 tqdm
 
 # Embeddings (local-first, optional)
+en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
 numpy==1.26.4
 sentence-transformers==3.0.1 # 2.7.0
+spacy==3.7.5 # 3.8.7
 
-# ElevenLabs (optional voice)
-elevenlabs==2.15.1
-
+# LLM / HTTP
 # Home Assistant REST (optional)
 httpx==0.28.1
+openai>=1,<2
 
-# Google API for Calendar integration
+# Google API for Calendar / Gmail integration
 google-auth-httplib2
 google-auth-oauthlib
 google-api-python-client
-
-# Google API for Gmail integration
-google-auth-httplib2
-google-auth-oauthlib
-google-api-python-client
-
-# Testing
-black
-ruff
-pytest
-pytest-asyncio
-pytest-xdist
-
 
 
 # # Optional future

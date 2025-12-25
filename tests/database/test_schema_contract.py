@@ -35,4 +35,3 @@ def test_virtual_tables_exist(db) -> None:
     existing = _tables(db.conn)
     missing = REQUIRED_VIRTUAL_TABLES - existing
     assert not missing, f"Missing virtual tables: {sorted(missing)}"
-    

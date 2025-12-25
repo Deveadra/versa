@@ -1,4 +1,6 @@
+.coverage
 .venv/
+.venv.bak/
 __pycache__/
 *.pyc
 *.pyo
@@ -28,6 +30,7 @@ ultron.db-shm
 /.env/
 .env
 # tests/
+reports/
 base/agents/orchestrator1.py
 orchestrator_feedback.patch
 apply_orchestrator_feedback.py

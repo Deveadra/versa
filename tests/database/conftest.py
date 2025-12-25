@@ -1,15 +1,13 @@
 # tests/database/conftest.py
 from __future__ import annotations
 
+import sqlite3
+from collections.abc import Generator
+from pathlib import Path
 
 import pytest
-import sqlite3
-
-from pathlib import Path
-from typing import Generator
 
 from base.database.sqlite import SQLiteConn
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 MIGRATIONS_DIR = PROJECT_ROOT / "src" / "base" / "database" / "migrations"
@@ -29,7 +27,7 @@ def db(tmp_path) -> Generator[SQLiteConn, None, None]:
         yield conn
     finally:
         conn.close()
-        
+
 
 @pytest.fixture()
 def db_path(tmp_path: Path) -> Path:

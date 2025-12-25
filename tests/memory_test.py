@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import time
+
 import pytest
-import sqlite3
 
 from base.database.sqlite import SQLiteConn
 from base.memory.store import MemoryStore
@@ -30,7 +30,9 @@ class FakeVectorBackend:
             }
         )
 
-    def search(self, query: str, k: int = 5, since=None, min_importance: float = 0.0, type_filter=None) -> list[str]:
+    def search(
+        self, query: str, k: int = 5, since=None, min_importance: float = 0.0, type_filter=None
+    ) -> list[str]:
         q = query.lower()
         results: list[str] = []
 
@@ -60,7 +62,9 @@ def test_memory_semantic_search_is_deterministic(monkeypatch) -> None:
     if hasattr(store, "_vector_backend"):
         store._vector_backend = fake  # type: ignore[attr-defined]
     else:
-        pytest.skip("MemoryStore has no _vector_backend attribute to patch; adjust injection point.")
+        pytest.skip(
+            "MemoryStore has no _vector_backend attribute to patch; adjust injection point."
+        )
 
     event1_text = "User met Orion at the park."
     event2_text = "Team meeting scheduled for next week."
@@ -83,15 +87,18 @@ def test_memory_semantic_search_is_deterministic(monkeypatch) -> None:
     assert all("Team meeting" not in r for r in hi)
 
     # Type filtering
-    notes = store.search("reminder groceries") #, type_filter="note")
+    notes = store.search("reminder groceries")  # , type_filter="note")
     assert any("groceries" in r.lower() for r in notes)
-    
+
+
 def test_memory_semantic_search():
     # Set up an in-memory SQLite database for testing
     db_conn = SQLiteConn(":memory:")
     store = MemoryStore(db_conn.conn)
     # Ensure that the OpenAI API key or a local embedding model is configured for embeddings
-    assert store._vector_backend is not None, "Vector backend not initialized. Check Qdrant and embedding config."
+    assert (
+        store._vector_backend is not None
+    ), "Vector backend not initialized. Check Qdrant and embedding config."
 
     # Add some events to memory
     event1_text = "User met Orion at the park."
@@ -103,7 +110,9 @@ def test_memory_semantic_search():
     # Perform an unfiltered semantic search
     results = store.search("Who did the user meet?", min_importance=0.0)
     print("Search results (semantic):", results)
-    assert any("Alice" in res for res in results), "Semantic search failed to retrieve the correct event."
+    assert any(
+        "Alice" in res for res in results
+    ), "Semantic search failed to retrieve the correct event."
 
     # Perform a filtered search by keyword and recency (e.g., events since a recent timestamp)
     since_ts = "2025-01-01T00:00:00"

@@ -3,7 +3,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from base.llm.brain import ask_brain
+from base.llm.brain import ask_brain  # type: ignore
 from base.policy.topic_manager import get_known_topics
 
 DB_PATH = Path("memory.db")

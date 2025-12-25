@@ -1,9 +1,9 @@
-
-from base.agents.planner import plan_steps
 from base.agents.executor import execute_step
-from base.memory.store import MemoryStore
+from base.agents.planner import plan_steps
 from base.database.sqlite import SQLiteConn
+from base.memory.store import MemoryStore
 from config.config import settings
+
 
 def run_goal(goal: str):
     db = SQLiteConn(settings.db_path)

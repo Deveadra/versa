@@ -3,8 +3,8 @@ import base64
 import io
 
 import soundfile as sf
-from fastapi import FastAPI # type: ignore
-from pydantic import BaseModel # type: ignore
+from fastapi import FastAPI  # type: ignore
+from pydantic import BaseModel  # type: ignore
 from TTS.api import TTS
 
 app = FastAPI()

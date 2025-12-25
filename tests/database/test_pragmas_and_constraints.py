@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+
 import pytest
 
 
@@ -27,7 +28,9 @@ def test_topics_policy_check_constraint(db) -> None:
     db.conn.execute("INSERT INTO topics(topic_id, policy) VALUES(?, ?)", ("hydration", "adaptive"))
     db.conn.commit()
     with pytest.raises(sqlite3.IntegrityError):
-        db.conn.execute("INSERT INTO topics(topic_id, policy) VALUES(?, ?)", ("bad", "invalid_policy"))
+        db.conn.execute(
+            "INSERT INTO topics(topic_id, policy) VALUES(?, ?)", ("bad", "invalid_policy")
+        )
 
 
 def test_context_signals_type_check_constraint(db) -> None:

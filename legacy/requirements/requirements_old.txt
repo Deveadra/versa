@@ -1,0 +1,40 @@
+# Core dependencies
+apscheduler==3.10.4
+colorama>=0.4.6
+dateparser
+faiss-cpu==1.8.0.post1
+loguru==0.7.2
+playsound==1.2.2 # STABLE. Other version have issues, Bad Wheel
+# pvporcupine==1.9.5
+psutil
+pydantic==2.11.9
+# pydantic_core==2.33.2
+python-dateutil==2.9.0.post0
+python-dotenv==1.1.1
+qdrant-client>=1.9.0
+requests==2.32.3
+rich>=13.7.1
+sqlite-utils #==3.37
+textblob
+tqdm
+
+# Embeddings (local-first, optional)
+en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
+numpy==1.26.4
+sentence-transformers==3.0.1 # 2.7.0
+spacy>=3.7.2,<3.8.0 # 3.8.7
+
+# LLM / HTTP
+# Home Assistant REST (optional)
+httpx==0.28.1
+openai>=1,<2
+
+# Google API for Calendar / Gmail integration
+google-auth-httplib2
+google-auth-oauthlib
+google-api-python-client
+
+
+# # Optional future
+# weaviate-client==3.26.0
+# pymilvus==2.4.4

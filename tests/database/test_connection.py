@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+
 import pytest
 
 
@@ -20,4 +21,5 @@ def test_invalid_path_connection(tmp_path) -> None:
     # Passing a directory path should fail
     with pytest.raises(sqlite3.OperationalError):
         from base.database.sqlite import SQLiteConn
+
         SQLiteConn(str(tmp_path))

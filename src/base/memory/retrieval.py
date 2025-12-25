@@ -5,6 +5,7 @@ from typing import Any
 import faiss
 
 from base.memory.store import MemoryStore
+
 from .vector_backend import VectorBackend
 
 

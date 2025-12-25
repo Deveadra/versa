@@ -1,7 +1,9 @@
 # config/self_improvement.py
 from __future__ import annotations
+
 import os
 from dataclasses import dataclass
+
 
 @dataclass(frozen=True)
 class SelfImproveConfig:
@@ -26,5 +28,6 @@ class SelfImproveConfig:
 
     # Proposal thresholds
     open_mr_on_any_fix: bool = os.getenv("ULTRON_OPEN_MR_ON_ANY_FIX", "1") == "1"
+
 
 CFG = SelfImproveConfig()

@@ -1,9 +1,10 @@
 # base/agents/planner.py
 from __future__ import annotations
 
-from base.agents.tools.shell import run_shell
-from base.agents.tools.memory import recall_memory, write_memory
 from base.agents.tools.files import read_file, write_file
+from base.agents.tools.memory import recall_memory, write_memory
+from base.agents.tools.shell import run_shell
+
 
 def execute_step(step: str) -> str:
     # Extremely simple router

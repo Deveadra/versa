@@ -1,6 +1,6 @@
-
 from base.database.sqlite import SQLiteConn
 from base.memory.store import MemoryStore
+
 
 def test_store_roundtrip(tmp_path):
     db = SQLiteConn(tmp_path / "t.db")

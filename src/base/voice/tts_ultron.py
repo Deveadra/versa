@@ -10,13 +10,15 @@ import simpleaudio as sa
 
 
 class UltronVoice:
-    _instance: "UltronVoice | None" = None
+    _instance: UltronVoice | None = None
 
     def __init__(self, endpoint_url: str | None = None):
-        self.endpoint_url = endpoint_url or os.getenv("ULTRON_TTS_URL", "http://localhost:5000/speak")
+        self.endpoint_url = endpoint_url or os.getenv(
+            "ULTRON_TTS_URL", "http://localhost:5000/speak"
+        )
 
     @classmethod
-    def get_instance(cls, endpoint_url: str | None = None) -> "UltronVoice":
+    def get_instance(cls, endpoint_url: str | None = None) -> UltronVoice:
         if cls._instance is None:
             cls._instance = UltronVoice(endpoint_url)
         return cls._instance

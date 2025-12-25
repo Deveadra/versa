@@ -14,6 +14,7 @@ def _read_secret(path_env: str) -> str | None:
         return Path(path).read_text(encoding="utf-8").strip()
     return None
 
+
 USE_LLM = bool(os.getenv("OPENAI_API_KEY"))
 
 github_ssh_key = _read_secret("GITHUB_SSH_KEY_FILE")
@@ -43,7 +44,7 @@ class Settings(BaseModel):
     # LLM
     openai_api_key: str | None = os.getenv("OPENAI_API_KEY")
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-    
+
     # TTS engine choice
     tts_engine: str = os.getenv("TTS_ENGINE", "ultron")
 
@@ -54,7 +55,7 @@ class Settings(BaseModel):
     # ElevenLabs
     eleven_api_key: str | None = os.getenv("ELEVENLABS_API_KEY")
     eleven_voice_id: str | None = os.getenv("ELEVENLABS_VOICE_ID")
-    
+
     tts_engine: str = os.getenv("TTS_ENGINE", "elevenlabs")  # or "ultron"
 
     # Home Assistant
@@ -94,7 +95,9 @@ class Settings(BaseModel):
     proposal_notify_stdout: bool = True  # simple notification channel; you can add Slack later
 
     # Qdrant vector database settings
-    qdrant_url: str | None = os.getenv("QDRANT_URL")          # e.g. "https://your-cluster-id.aws.cloud.qdrant.io" or "http://localhost:6333"
+    qdrant_url: str | None = os.getenv(
+        "QDRANT_URL"
+    )  # e.g. "https://your-cluster-id.aws.cloud.qdrant.io" or "http://localhost:6333"
     qdrant_api_key: str | None = os.getenv("QDRANT_API_KEY")  # API key for Qdrant Cloud, if used
     qdrant_collection: str = os.getenv("QDRANT_COLLECTION", "events")
 

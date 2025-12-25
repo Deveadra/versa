@@ -6,7 +6,7 @@ import os
 import sqlite3
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -14,13 +14,13 @@ from loguru import logger
 
 from base.database.sqlite import SQLiteConn
 from base.memory.scoring import assess_importance
-from base.utils.embeddings import get_embedder
 from base.memory.vector_backend import (
+    HAVE_QDRANT,  # make sure this exists; see note below
+    InMemoryBackend,  # make sure this exists; see note below
     QdrantMemoryBackend,
     VectorBackend,
-    InMemoryBackend,    # make sure this exists; see note below
-    HAVE_QDRANT,        # make sure this exists; see note below
 )
+from base.utils.embeddings import get_embedder
 from config.config import settings  # OK where your settings live
 
 DB_PATH = Path("memory.db")
@@ -36,7 +36,7 @@ class MemoryStore:
         # 0) normalize DB handle
         self.conn: sqlite3.Connection = db.conn if hasattr(db, "conn") else db  # type: ignore[attr-defined]
         self.conn.row_factory = sqlite3.Row
-        
+
         # a) transient in-memory caches
         self._add_history: list[str] = []
         self._recall_fact: dict[str, Any] = {}
@@ -53,10 +53,12 @@ class MemoryStore:
             # If you want to gate by settings, you still can — this is simple & robust
             self._embedder, self._embed_dim = get_embedder()
             if not self._embed_dim and hasattr(self._embedder, "dim"):
-                self._embed_dim = int(getattr(self._embedder, "dim"))
+                self._embed_dim = int(self._embedder.dim)
             logger.debug(f"MemoryStore: embedder ready (dim={self._embed_dim})")
         except Exception as e:
-            logger.warning(f"MemoryStore: no embedder available ({e}); semantic search may be limited")
+            logger.warning(
+                f"MemoryStore: no embedder available ({e}); semantic search may be limited"
+            )
             self._embedder, self._embed_dim = None, None
 
         # 3) vector backend selection (AFTER embedder)
@@ -70,7 +72,7 @@ class MemoryStore:
                     url=getattr(settings, "qdrant_url", None),
                     api_key=getattr(settings, "qdrant_api_key", None),
                     collection_name=(getattr(settings, "qdrant_collection", None) or "events"),
-                ) # type: ignore
+                )  # type: ignore
                 logger.info("MemoryStore: Vector backend = Qdrant")
             else:
                 # Always available fallback
@@ -185,7 +187,7 @@ class MemoryStore:
     def list_facts(self) -> list[tuple[str, str]]:
         cur = self.conn.execute("SELECT key, value FROM facts ORDER BY key")
         return [(r["key"], r["value"]) for r in cur.fetchall()]
-    
+
     def add_history(self, text: str) -> None:
         self._add_history.append(text)
 
@@ -194,7 +196,6 @@ class MemoryStore:
 
     def remember_fact(self, key: str, value: Any) -> None:
         self._remember_fact[key] = value
-
 
     def forget(self, topic: str) -> int:
         """Delete facts and events containing the given topic string."""
@@ -221,7 +222,6 @@ class MemoryStore:
         Callback signature: fn(content: str, ts: str, type_: str, importance: float).
         """
         self._subscribers.append(callback)
-        
 
     # ---------- events ----------
     def add_event(self, content: str, importance: float = 0.0, type_: str = "event") -> int:
@@ -263,7 +263,10 @@ class MemoryStore:
         # Asynchronously embed and store the vector for semantic search (non-blocking)
         backend = self._vector_backend
         if backend is not None:
-            def _embed_and_store_vector(event_id: int, text: str, timestamp: str, importance_val: float, type_val: str):
+
+            def _embed_and_store_vector(
+                event_id: int, text: str, timestamp: str, importance_val: float, type_val: str
+            ):
                 """
                 Background task: generate embedding and store in vector DB.
                 """
@@ -276,7 +279,7 @@ class MemoryStore:
                         "timestamp": ts_epoch,
                         "ts_iso": timestamp,
                         "importance": importance_val,
-                        "type": type_val
+                        "type": type_val,
                     }
                     # Use QdrantMemoryBackend's add_text to insert vector with given ID and metadata
                     # Retry logic for embedding API call (e.g., OpenAI) in case of transient failures
@@ -284,23 +287,31 @@ class MemoryStore:
                     while attempts < 3:
                         try:
                             backend.add_text(text, vector_id=event_id, metadata=metadata)
-                            logger.info(f"MemoryStore: Event {event_id} embedded and stored in vector DB.")
+                            logger.info(
+                                f"MemoryStore: Event {event_id} embedded and stored in vector DB."
+                            )
                             break  # success
                         except Exception as e:
                             attempts += 1
                             if attempts < 3:
-                                logger.warning(f"MemoryStore: Embedding attempt {attempts} failed for event {event_id}: {e}. Retrying...")
+                                logger.warning(
+                                    f"MemoryStore: Embedding attempt {attempts} failed for event {event_id}: {e}. Retrying..."
+                                )
                                 time.sleep(1.0 * attempts)  # exponential backoff delay
                             else:
-                                logger.error(f"MemoryStore: Failed to embed event {event_id} after {attempts} attempts: {e}")
+                                logger.error(
+                                    f"MemoryStore: Failed to embed event {event_id} after {attempts} attempts: {e}"
+                                )
                 except Exception as e:
-                    logger.error(f"MemoryStore: Unexpected error in vector embedding thread for event {event_id}: {e}")
+                    logger.error(
+                        f"MemoryStore: Unexpected error in vector embedding thread for event {event_id}: {e}"
+                    )
 
             # Launch the embedding thread (daemon so it won't block program exit)
             threading.Thread(
                 target=_embed_and_store_vector,
                 args=(int(rowid), content, ts, importance, type_),
-                daemon=True
+                daemon=True,
             ).start()
 
         return int(rowid)
@@ -320,8 +331,14 @@ class MemoryStore:
         cur = self.conn.execute(sql, params)
         return [dict(r) for r in cur.fetchall()]
 
-
-    def search(self, query: str, since: str | None = None, min_importance: float = 0.0, type_: str | None = None, limit: int = 5) -> list[str]:
+    def search(
+        self,
+        query: str,
+        since: str | None = None,
+        min_importance: float = 0.0,
+        type_: str | None = None,
+        limit: int = 5,
+    ) -> list[str]:
         """
         Search the memory store for events relevant to the query.
         Supports semantic similarity search via the vector backend (if available), with optional filtering:
@@ -337,7 +354,13 @@ class MemoryStore:
             try:
                 if isinstance(self._vector_backend, QdrantMemoryBackend):
                     # Use vector search with filters in Qdrant
-                    results = self._vector_backend.search(query, k=limit, since=since, min_importance=min_importance, type_filter=type_)
+                    results = self._vector_backend.search(
+                        query,
+                        k=limit,
+                        since=since,
+                        min_importance=min_importance,
+                        type_filter=type_,
+                    )
                 else:
                     # Other backend (e.g., FAISS) - no built-in filtering support
                     results = self._vector_backend.search(query, k=limit)
@@ -346,7 +369,9 @@ class MemoryStore:
                 if results:
                     return results[:limit]
             except Exception as e:
-                logger.error(f"MemoryStore.search: Vector search failed (falling back to keyword search): {e}")
+                logger.error(
+                    f"MemoryStore.search: Vector search failed (falling back to keyword search): {e}"
+                )
                 results = []
         # Fallback to keyword-based search in SQLite if no vector results or vector backend is unavailable
         try:
@@ -354,15 +379,21 @@ class MemoryStore:
                 # Use full-text search (FTS5) on events content
                 # Join with events table to retrieve metadata for filtering
                 query_str = query.replace(",", " ")
-                sql = ("SELECT e.content, e.ts, e.importance, e.type "
-                       "FROM events_fts f JOIN events e ON f.rowid = e.id "
-                       "WHERE f MATCH ? ORDER BY e.id DESC LIMIT ?")
-                cur = self.conn.execute(sql, (query_str, limit * 3))  # fetch more than needed for filtering
+                sql = (
+                    "SELECT e.content, e.ts, e.importance, e.type "
+                    "FROM events_fts f JOIN events e ON f.rowid = e.id "
+                    "WHERE f MATCH ? ORDER BY e.id DESC LIMIT ?"
+                )
+                cur = self.conn.execute(
+                    sql, (query_str, limit * 3)
+                )  # fetch more than needed for filtering
             else:
                 # FTS not available, use LIKE query
-                sql = ("SELECT content, ts, importance, type FROM events "
-                       "WHERE content LIKE ? ESCAPE '\\' "
-                       "ORDER BY id DESC LIMIT ?")
+                sql = (
+                    "SELECT content, ts, importance, type FROM events "
+                    "WHERE content LIKE ? ESCAPE '\\' "
+                    "ORDER BY id DESC LIMIT ?"
+                )
                 cur = self.conn.execute(sql, (f"%{query}%", limit * 3))
             rows = cur.fetchall()
         except Exception as e:
@@ -386,10 +417,9 @@ class MemoryStore:
                 if ev_time and since_time:
                     if ev_time < since_time:
                         continue  # event is older than the since cutoff
-                else:
-                    # Fallback to simple string comparison if parsing fails
-                    if ts < since:
-                        continue
+                # Fallback to simple string comparison if parsing fails
+                elif ts < since:
+                    continue
             if min_importance and imp < min_importance:
                 continue
             if type_ and typ != type_:
@@ -398,7 +428,7 @@ class MemoryStore:
             if len(results) >= limit:
                 break
         return results
-      
+
     def add_diagnostic_event(
         self,
         *,
@@ -427,7 +457,7 @@ class MemoryStore:
             "laggy": laggy,
             "started_at": started_at_iso,
             "duration_ms": duration_ms,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
             "version": 1,
         }
         # Important: keep the same event API your code already uses
@@ -455,7 +485,9 @@ class MemoryStore:
         try:
             # If you have a native list_events(type_=...) use it here.
             # Otherwise this uses a common content/type_ pattern.
-            rows = self.list_events(type_="diagnostic", limit=limit)  # <-- your existing helper if present
+            rows = self.list_events(
+                type_="diagnostic", limit=limit
+            )  # <-- your existing helper if present
             for r in rows:
                 # r["content"] expected to be a JSON string from add_diagnostic_event
                 try:
@@ -564,7 +596,6 @@ class MemoryStore:
                 (f"%{query}%", limit),
             )
             return [str(r[0]) for r in cur.fetchall()]
-
 
     # ---------- Legacy helpers for backward compatibility ----------
 

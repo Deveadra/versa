@@ -4,11 +4,11 @@ from __future__ import annotations
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
+
 from loguru import logger
 
 from config.config import settings
-from base.self_improve.diagnostic_engine import DiagnosticEngine
-from base.self_improve.proposal_engine import ProposalEngine
+
 
 class GitError(RuntimeError):
     pass
@@ -24,7 +24,6 @@ class GitClient:
         self.root = Path(repo_root).resolve()
         self.remote = remote
         self.logger = logger.bind(repo=self.root)
-        
 
     def ensure_user(self, name: str, email: str) -> None:
         """
@@ -142,10 +141,10 @@ class GitClient:
         cmd = ["git"] + list(args)
         logger.debug(f"[git] {' '.join(cmd)}")
         return subprocess.Popen(cmd, cwd=self.root, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    
+
     def current_branch(self) -> str:
         return self._run(["rev-parse", "--abbrev-ref", "HEAD"])
-    
+
     def has_uncommitted_changes(self) -> bool:
         return bool(self._run(["status", "--porcelain"], check=False).strip())
 
@@ -193,7 +192,7 @@ class GitClient:
         Switch branches safely: stash if dirty, fetch/prune, checkout base, then target.
         Restores stash best-effort.
         """
-        
+
         self.ensure_user(
             getattr(settings, "github_bot_name", "ultron-bot"),
             getattr(settings, "github_bot_email", "ultron-bot@local"),
@@ -250,7 +249,7 @@ class GitClient:
         #         rc, out, err = self.run_rc(["git", "stash", "pop"])
         #         if rc != 0:
         #             self.logger.warning(f"Stash pop had conflicts; leaving stash in place: {err.strip()}")
-                    
+
         # dirty = self.has_uncommitted_changes()
         # if dirty:
         #     logger.info("Uncommitted changes detected — stashing")

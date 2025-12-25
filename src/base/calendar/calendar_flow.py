@@ -1,5 +1,4 @@
 from base.calendar.calendar import get_upcoming_events
-
 from base.core.profile import get_pref
 from base.core.stylizer import stylize_response
 

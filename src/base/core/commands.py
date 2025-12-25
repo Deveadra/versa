@@ -30,6 +30,7 @@ RESUME = re.compile(r"\b(resume|re-enable|start)\b.*\b(?P<topic>\w[\w\s-]{1,40})
 def normalize_topic(s: str) -> str:
     return re.sub(r"[^a-z0-9_-]+", "_", s.strip().lower())
 
+
 def handle_policy_command(text: str, policy: PolicyStore) -> str | None:
     m = STOP_HARD.search(text)
     if m:
@@ -39,7 +40,7 @@ def handle_policy_command(text: str, policy: PolicyStore) -> str | None:
 
     m = PAUSE_SOFT.search(text)
     t = text.lower().strip()
-    
+
     # m = PAUSE_SOFT.search(text)
     if m:
         topic = normalize_topic(m.group("topic"))
@@ -56,7 +57,6 @@ def handle_policy_command(text: str, policy: PolicyStore) -> str | None:
         topic = normalize_topic(m.group("topic"))
         policy.clear_overrides(topic)
         return f"I’ve re-enabled talking about {topic}."
-
 
     # === List active rules ===
     if re.search(r"\blist (my )?(rules|engagement rules)\b", t):
@@ -102,6 +102,7 @@ def handle_policy_command(text: str, policy: PolicyStore) -> str | None:
 
     return None
 
+
 def handle_diagnostic_command(text: str) -> str | None:
     """
     Natural language → robust diagnostic execution via Orchestrator.
@@ -127,7 +128,9 @@ def handle_diagnostic_command(text: str) -> str | None:
     intent = None
     if callable(parse_diagnostic_intent):
         try:
-            intent = parse_diagnostic_intent(t)  # {"name":"diagnostic","mode":"all|changed","fix":bool,...}
+            intent = parse_diagnostic_intent(
+                t
+            )  # {"name":"diagnostic","mode":"all|changed","fix":bool,...}
         except Exception:
             intent = None
 
@@ -136,10 +139,19 @@ def handle_diagnostic_command(text: str) -> str | None:
         fix = bool(intent.get("fix", False))
     else:
         # lightweight keyword fallback
-        if not any(k in low for k in ("diagnostic", "diagnostics", "scan", "laggy", "health check")):
+        if not any(
+            k in low for k in ("diagnostic", "diagnostics", "scan", "laggy", "health check")
+        ):
             return None
-        mode = "all" if any(k in low for k in ("all", "full", "entire", "everything", "deep")) else "changed"
-        fix = any(k in low for k in ("fix", "optimize", "autofix", "auto-fix", "cleanup", "clean up", "format"))
+        mode = (
+            "all"
+            if any(k in low for k in ("all", "full", "entire", "everything", "deep"))
+            else "changed"
+        )
+        fix = any(
+            k in low
+            for k in ("fix", "optimize", "autofix", "auto-fix", "cleanup", "clean up", "format")
+        )
 
     # ---- Execute: orchestrator first, script fallback ----
     orch = Orchestrator()
@@ -155,6 +167,7 @@ def handle_diagnostic_command(text: str) -> str | None:
             return f"Diagnostics completed.\n{output}" if output else "Diagnostics completed."
         except Exception as e_script:
             return f"⚠️ Failed to run diagnostics: orchestrator={e_orch} | script={e_script}"
+
 
 def handle_diagnostic_history(text: str, store) -> str | None:
     """
@@ -182,10 +195,11 @@ def handle_diagnostic_history(text: str, store) -> str | None:
 
     # Trigger patterns
     history_trigger = (
-        (re.search(r"\b(diagnostic|diagnostics|scan)\b", t) and
-         re.search(r"\b(history|recent|last|previous|yesterday|earlier|report|results|summary)\b", t))
-        or re.search(r"(what did.*(find|see|discover)|why.*lag|what.*results?)", t)
-    )
+        re.search(r"\b(diagnostic|diagnostics|scan)\b", t)
+        and re.search(
+            r"\b(history|recent|last|previous|yesterday|earlier|report|results|summary)\b", t
+        )
+    ) or re.search(r"(what did.*(find|see|discover)|why.*lag|what.*results?)", t)
     if not history_trigger:
         return None
 

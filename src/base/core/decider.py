@@ -38,15 +38,14 @@ PREFERENCE_PHRASES = [
     "i don't like",
 ]
 
+
 class MemoryLike(Protocol):
-    def recall_fact(self, key: str) -> Any | None:
-        ...
+    def recall_fact(self, key: str) -> Any | None: ...
 
-    def remember_fact(self, key: str, value: Any) -> None:
-        ...
+    def remember_fact(self, key: str, value: Any) -> None: ...
 
-    def add_history(self, text: str) -> None:
-        ...
+    def add_history(self, text: str) -> None: ...
+
 
 class Decider:
     def __init__(self, memory: MemoryLike | None = None):
@@ -123,13 +122,21 @@ class Decider:
 
         if intent:
             # Prefer WEIGHTS if present, else use a sane bump
-            bump: int = WEIGHTS["direct_command"] if "WEIGHTS" in globals() and "direct_command" in WEIGHTS else 2
+            bump: int = (
+                WEIGHTS["direct_command"]
+                if "WEIGHTS" in globals() and "direct_command" in WEIGHTS
+                else 2
+            )
             score += bump
             # Ensure meta has the fields you use elsewhere
             meta.setdefault("reason", []).append("diagnostic_command")
             meta["category"] = "action"
             meta["intent"] = "diagnostic"
-            meta["intent_payload"] = {"mode": intent["mode"], "fix": intent["fix"], "confidence": intent["confidence"]}
+            meta["intent_payload"] = {
+                "mode": intent["mode"],
+                "fix": intent["fix"],
+                "confidence": intent["confidence"],
+            }
 
         if any(m in text.lower() for m in low_value_markers):
             score += WEIGHTS["low_value"]
@@ -222,8 +229,6 @@ class Decider:
                 memory.remember_fact(key, existing)  # refresh timestamp
 
         memory.add_history(text)
-
-
 
     def make_fact_key(self, text: str, hint: str = "") -> str:
         base = (hint or "") + "|" + text.strip().lower()

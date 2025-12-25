@@ -13,8 +13,11 @@
   },
 
   "cSpell.words": [
+    "asyncio",
     "dateutil",
     "mtype",
+    "pylint",
+    "pyproject",
     "vecs"
   ]
 }

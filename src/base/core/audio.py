@@ -1,26 +1,19 @@
 import os
 import struct
-import tempfile
 import threading
 import time
 
 import pvporcupine
 import sounddevice as sd
 import soundfile as sf
-
-<<<<<<< Updated upstream
-from config.config import settings
-from base.voice.tts_elevenlabs import Voice
-
-=======
 from loguru import logger
-from config.config import settings
->>>>>>> Stashed changes
-from playsound import playsound
 from pvporcupine import create
 from TTS.api import TTS
 
-from .core import JarvisState, pick_ack, state, stop_playback
+from base.voice.tts_elevenlabs import Voice
+from config.config import settings
+
+from .core import JarvisState, pick_ack, state
 
 current_playback_thread = None
 tts = TTS("tts_models/en/jenny/jenny")
@@ -53,6 +46,7 @@ def stream_speak(text):
     try:
         if settings.tts_engine == "ultron":
             from base.voice.tts_ultron import UltronVoice
+
             UltronVoice.get_instance().speak(text)
         else:
             voice = Voice.get_instance()
@@ -60,6 +54,7 @@ def stream_speak(text):
             voice.speak_async(text)
     except Exception as e:
         print(f"[stream_speak] Failed: {e}")
+
 
 # def stream_speak(text):
 #     try:
@@ -88,7 +83,7 @@ def stream_speak(text):
 
 #     current_playback_thread = threading.Thread(target=_play, daemon=True)
 #     current_playback_thread.start()
-    
+
 # def stream_speak(text):
 #     global stop_playback
 #     stop_playback = False
@@ -109,30 +104,29 @@ def stream_speak(text):
 #     ack = pick_ack("stop")
 #     stream_speak(ack)
 
+
 def interrupt():
-<<<<<<< Updated upstream
     global stop_playback
     stop_playback = True
     ack = pick_ack("stop")
-    
+
     voice = Voice.get_instance()  # consistent behavior
-    voice.stop_speaking()         # ensure ElevenLabs is stopped
+    voice.stop_speaking()  # ensure ElevenLabs is stopped
 
     # Only speak ack if not already interrupting itself
     threading.Thread(target=voice.speak_async, args=(ack,), daemon=True).start()
-=======
     try:
         if settings.tts_engine == "ultron":
             from base.voice.tts_ultron import UltronVoice
+
             UltronVoice.get_instance().speak("Interrupting.")
         else:
             from base.voice.tts_elevenlabs import Voice
+
             Voice.get_instance().stop_speaking()
             Voice.get_instance().speak_async("Interrupting.")
     except Exception as e:
         logger.error(f"[interrupt] Failed to interrupt voice: {e}")
-
->>>>>>> Stashed changes
 
 
 # 💡 print("DEBUG PICOVOICE KEY:", os.getenv("PICOVOICE_API_KEY"))
@@ -198,18 +192,16 @@ def listen_for_wake_word():
                 pa.stop()
                 state = JarvisState.ACTIVE
                 return
-<<<<<<< Updated upstream
-        
+
         if porcupine.process(pcm) >= 0:
             pa.stop()
             from .core import state as global_state
-            global_state = JarvisState.ACTIVE  # ⬅️ Immediately lock state to prevent parallel activation
+
+            global_state = (
+                JarvisState.ACTIVE
+            )  # ⬅️ Immediately lock state to prevent parallel activation
             return
-        
-=======
 
-
->>>>>>> Stashed changes
         return porcupine
 
     except pvporcupine.PorcupineActivationError as e:

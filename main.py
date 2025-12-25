@@ -1,8 +1,9 @@
 # main.py
 from __future__ import annotations
-from pathlib import Path
 
 import sys
+from pathlib import Path
+
 ROOT = Path(__file__).resolve().parent
 SRC = ROOT / "src"
 
@@ -15,14 +16,13 @@ for p in (SRC, ROOT):
 import atexit
 import os
 import random
-import requests
 import shutil
 import signal
 import sqlite3
 import threading
 import time
 
-
+import requests
 from dotenv import load_dotenv
 
 # ---------- FFmpeg bootstrap (for audio helpers that might need it) ----------
@@ -83,7 +83,7 @@ BASE_PERSONALITY = os.getenv("BASE_PERSONALITY", "ultron")
 MODE = os.getenv("PERSONALITY_MODE", "default")
 CURRENT_PERSONALITY = load_personality(BASE_PERSONALITY, MODE)
 
-listening =  False
+listening = False
 profile = get_profile()
 state = JarvisState.IDLE
 USER_NAME = profile.get("name")
@@ -233,7 +233,7 @@ def engagement_task():
 
             print(f"[Engagement] ({ev.get('topic','?')}/{ev.get('tone','gentle')}) {reply}")
             stream_speak(reply)
-            
+
             decider = Decider(memory=store)  # wherever `store` is your MemoryStore
             memory_candidate = decider.decide_memory(text, reply)
 
@@ -365,7 +365,6 @@ try:
         signal.signal(signal.SIGINT, lambda sig, frame: sys.exit(0))
         signal.signal(signal.SIGTERM, lambda sig, frame: sys.exit(0))
 
-
         while True:
             if state == JarvisState.IDLE:
                 listen_for_wake_word()
@@ -436,7 +435,6 @@ try:
                     state = JarvisState.IDLE
                     reset_session()
 
-
                     ack = None
                     if "interrupt_ack" in CURRENT_PERSONALITY:
                         ack = random.choice(CURRENT_PERSONALITY["interrupt_ack"])
@@ -455,7 +453,9 @@ try:
                     correction = listen_until_silence()
                     if correction:
                         print(f"You (clarification): {correction}")
-                        revised_input = f"Original: {last_user_input}\nUser clarification: {correction}"
+                        revised_input = (
+                            f"Original: {last_user_input}\nUser clarification: {correction}"
+                        )
                         if isinstance(reply, dict):
                             reply = reply.get("response") or reply.get("content") or str(reply)
 
@@ -471,8 +471,10 @@ try:
                                         importance=0.0,
                                         type_="chat",
                                     )
-                                    
-                                decider = Decider(memory=store)  # wherever `store` is your MemoryStore
+
+                                decider = Decider(
+                                    memory=store
+                                )  # wherever `store` is your MemoryStore
                                 memory_candidate = decider.decide_memory(text, reply)
 
                                 if memory_candidate:
@@ -495,7 +497,6 @@ try:
                     CURRENT_PERSONALITY = load_personality(BASE_PERSONALITY, MODE)
                     stream_speak("Back to default mode.")
                     continue
-
 
                 resp = repl_commands.handle_command("ultron", text, policy)
                 if resp:
@@ -524,7 +525,7 @@ try:
                         text = f"(Relevant context from past interactions: {recall_ctx})\n\n{text}"
                 except Exception:
                     pass
-                
+
                 # Default fallback: LLM or graceful error
                 if settings.openai_api_key:
                     reply = ask_jarvis_stream(text)
@@ -555,8 +556,6 @@ try:
                 except Exception as e:
                     print(f"[Memory] Failed to evaluate/save: {e}")
 
-                    
-                    
                 # if settings.openai_api_key:
                 #     reply = ask_jarvis_stream(text)
                 #     if reply:
@@ -583,7 +582,7 @@ try:
                 #         store.add_event(
                 #             f"{mem['content']} || {mem.get('response','')}", importance=0.0, type_="chat"
                 #         )
-                        
+
                 #     decider = Decider(memory=store)  # wherever `store` is your MemoryStore
                 #     memory_candidate = decider.decide_memory(text, reply)
 
@@ -591,7 +590,7 @@ try:
                 #         store.save_memory(memory_candidate)
                 # except Exception:
                 #     pass
-                
+
 except KeyboardInterrupt:
     print("Shutting Down...")
     scheduler.stop()

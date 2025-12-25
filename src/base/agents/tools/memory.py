@@ -1,7 +1,7 @@
-
-from base.memory.store import MemoryStore
 from base.database.sqlite import SQLiteConn
+from base.memory.store import MemoryStore
 from config.config import settings
+
 
 def recall_memory(query: str) -> str:
     db = SQLiteConn(settings.db_path)
@@ -13,6 +13,7 @@ def recall_memory(query: str) -> str:
     if not results:
         return ""
     return "\n".join(results)
+
 
 def write_memory(content: str) -> str:
     db = SQLiteConn(settings.db_path)

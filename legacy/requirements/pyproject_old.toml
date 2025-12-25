@@ -7,26 +7,34 @@ name = "ultron-mvp"
 version = "0.1.0"
 description = "Ultron MVP: modular assistant with SQLite memory and retrieval"
 requires-python = ">=3.10"
-
+# Put runtime deps here (not under [tool.poetry.*])
 dependencies = [
   # Core runtime
   "apscheduler==3.10.4",
   "colorama>=0.4.6",
-  "dateparser>=1.1.0,<1.2.0",
-  "faiss-cpu>=1.7.4",
+  "dateparser", # >=1.2.0",
+  "elevenlabs",
+  "faiss-cpu>=1.7.4",               # if you’re on CPU; use faiss-gpu if appropriate
+  # "faiss-cpu==1.8.0.post1",
   "loguru>=0.7.2",
+  "playsound==1.2.2", # STABLE. Other version have issues, Bad Wheel
+  # "playsound==1.2.2", # STABLE. Other version have issues, Bad Wheel
   "psutil",
   "pydantic>=2.11.9",
+  # "pydantic_core==2.33.2",
   "python-dateutil>=2.8.2",
-  "python-dotenv>=1.1.1",
+  "python-dotenv>=1.1.1",  
   "requests>=2.32.0",
   "rich>=13.7.1",
-  "tqdm",
-  "click",
+  "simpleaudio",
+  "sqlite-utils", #==3.37
+  "textblob",
+  "tqdm",  
 
   # DB / retrieval
-  "qdrant-client>=1.7.0",
+  "qdrant-client>=1.7.0",  
   "sqlite-utils",
+  
 
   # LLM / HTTP
   "httpx>=0.28.0",
@@ -37,11 +45,18 @@ dependencies = [
   "sentence-transformers>=3.0.0",
   "spacy>=3.7.2,<3.8.0",
   "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl",
+
+  # (only keep click if the CLI actually uses it)
+  "click",
 ]
 
 [project.optional-dependencies]
+# Install with: pip install -e .[voice]
 api = [
   "fastapi",
+  "pydantic",
+  "soundfile",
+  "TTS",
   "uvicorn",
 ]
 
@@ -61,7 +76,7 @@ google = [
   "google-api-python-client>=2.120.0",
   "google-auth>=2.30.0",
   "google-auth-httplib2",
-  "google-auth-oauthlib>=1.2.0",
+  "google-auth-oauthlib>=1.2.0",  
 ]
 
 voice = [
@@ -76,8 +91,13 @@ voice = [
   "pvporcupine>=3.0.0",
 ]
 
+
+# # Optional future
+# "weaviate-client==3.26.0",
+# "pymilvus==2.4.4",
+
 [tool.setuptools]
-package-dir = {"" = "src"}
+package-dir = {"" = "src"}               # tell setuptools we’re using src/
 
 [tool.setuptools.package-data]
 "base.database" = ["migrations/*.sql"]
@@ -88,6 +108,16 @@ package-dir = {"" = "src"}
 where = ["src"]
 include = ["base*", "cli*", "config*", "personalities*"]
 exclude = ["tests*", "scripts*", "ultron-desktop*", "keys*"]
+
+# If you ship non-.py files with packages, list them here
+# (uncomment and tailor paths you actually need)
+# [tool.setuptools.package-data]
+# "base" = ["**/*.json", "**/*.sql", "**/*.txt"]
+
+[project.scripts]
+# Optional: convenience entry points (only if you have these callables)
+# ultron = "base.cli:main"
+# ultron-voice = "base.io.run_voice:main"
 
 [tool.black]
 line-length = 100
@@ -106,6 +136,7 @@ exclude = [".git",".venv","__pycache__","ultron.db"]
 
 [tool.pytest.ini_options]
 addopts = "-ra"
+# With an editable install, pythonpath is not required, but harmless:
 pythonpath = ["src"]
 testpaths = ["tests"]
 markers = [

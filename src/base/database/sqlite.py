@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-
 import os
 import sqlite3
-
 from pathlib import Path
 
 from loguru import logger
@@ -48,7 +46,6 @@ class SQLiteConn:
         """
         cur = conn.cursor()
 
-        # Core tables (aligned with 0001_init.sql)
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS facts (
@@ -104,6 +101,11 @@ class SQLiteConn:
 
         conn.commit()
 
+    @staticmethod
+    def _sql_quote(value: str) -> str:
+        """Safely quote a string literal for use inside executescript()."""
+        return "'" + value.replace("'", "''") + "'"
+
     def _init_db(self) -> None:
         """
         Run tracked migrations if available, otherwise fallback schema.
@@ -111,7 +113,6 @@ class SQLiteConn:
         logger.info("Initializing database / applying migrations if needed")
 
         mig_dir = Path(__file__).parent / "migrations"
-        # files = sorted(p for p in mig_dir.glob("*.sql"))
         files = sorted(mig_dir.glob("*.sql"))
 
         # Track applied migrations
@@ -126,25 +127,26 @@ class SQLiteConn:
         )
         self.conn.commit()
 
-        # if not files:
-        #     logger.warning("No migration files found; using fallback schema.")
-        #     self._apply_fallback_schema(self.conn)
-        #     return
         if not files:
-            allow_fallback = os.getenv("ULTRON_ALLOW_DB_FALLBACK_SCHEMA", "").lower() in ("1", "true", "yes")
+            allow_fallback = os.getenv("ULTRON_ALLOW_DB_FALLBACK_SCHEMA", "").lower() in (
+                "1",
+                "true",
+                "yes",
+            )
             if not allow_fallback:
                 raise RuntimeError(
                     f"No migration files found in {mig_dir}. "
                     "Refusing to create an untracked fallback schema. "
                     "If you truly want fallback for dev/testing, set ULTRON_ALLOW_DB_FALLBACK_SCHEMA=1."
                 )
-            logger.warning("No migration files found; applying fallback schema (ULTRON_ALLOW_DB_FALLBACK_SCHEMA=1).")
+            logger.warning(
+                "No migration files found; applying fallback schema (ULTRON_ALLOW_DB_FALLBACK_SCHEMA=1)."
+            )
             self._apply_fallback_schema(self.conn)
             return
-        
+
         applied = {
-            row["filename"]
-            for row in self.conn.execute("SELECT filename FROM schema_migrations")
+            row["filename"] for row in self.conn.execute("SELECT filename FROM schema_migrations")
         }
 
         for p in files:
@@ -154,18 +156,24 @@ class SQLiteConn:
             sql = p.read_text(encoding="utf-8")
             try:
                 logger.info(f"Applying migration {p.name}")
-                self.conn.execute("SAVEPOINT migrate_one;")
-                self.conn.executescript(sql)
-                self.conn.execute("INSERT INTO schema_migrations(filename) VALUES (?)", (p.name,))
-                self.conn.execute("RELEASE SAVEPOINT migrate_one;")
-                self.conn.commit()
+
+                # IMPORTANT:
+                # executescript() has its own transaction behavior, so SAVEPOINT + executescript is unreliable.
+                # Instead, wrap migration + tracking INSERT in one explicit script transaction.
+                script = (
+                    "BEGIN;\n"
+                    + sql
+                    + "\nINSERT INTO schema_migrations(filename) VALUES ("
+                    + self._sql_quote(p.name)
+                    + ");\nCOMMIT;\n"
+                )
+                self.conn.executescript(script)
+
             except Exception as e:
-                self.conn.execute("ROLLBACK TO SAVEPOINT migrate_one;")
-                self.conn.execute("RELEASE SAVEPOINT migrate_one;")
+                # Rollback any partial work for this migration
                 self.conn.rollback()
                 logger.exception(f"Failed to apply migration {p.name}: {e}")
                 raise
-
 
     def cursor(self):
         return self.conn.cursor()

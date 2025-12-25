@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import inspect
 import re
-from typing import Any, Callable
+from typing import Any
 
 from base.core.commands import (
     handle_diagnostic_command,
@@ -106,7 +106,8 @@ def handle_command(cmd: str, text: str, policy) -> str | None:
             if not evs:
                 return f"No events in the next {days} days."
             return "\n".join(
-                f"{e['start']} – {e['title']}" + (f" @ {e['location']}" if e.get("location") else "")
+                f"{e['start']} – {e['title']}"
+                + (f" @ {e['location']}" if e.get("location") else "")
                 for e in evs
             )
 

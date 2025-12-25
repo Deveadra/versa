@@ -2,16 +2,15 @@ from __future__ import annotations
 
 import ast
 import json
-import os
 import re
 import subprocess
 import sys
-import time, subprocess
+import time
 import tracemalloc
-
 from datetime import datetime
-from loguru import logger
 from pathlib import Path
+
+from loguru import logger
 
 
 class DiagnosticEngine:
@@ -77,7 +76,6 @@ class DiagnosticEngine:
                 applied.append(issue)
         return applied
 
-
     def _run_tool(self, cmd: list[str], name: str) -> dict:
         """
         Run a diagnostic tool safely, capturing 'not installed' and other failures.
@@ -117,7 +115,9 @@ class DiagnosticEngine:
         results = []
         results.append(self._run_tool([sys.executable, "-m", "black", "--check", "."], "black"))
         results.append(self._run_tool([sys.executable, "-m", "ruff", "check", "."], "ruff"))
-        results.append(self._run_tool([sys.executable, "-m", "pytest", "-q", "--collect-only"], "pytest"))
+        results.append(
+            self._run_tool([sys.executable, "-m", "pytest", "-q", "--collect-only"], "pytest")
+        )
 
         any_fail = any(r["exit_code"] != 0 for r in results)
         report = {
@@ -127,10 +127,11 @@ class DiagnosticEngine:
             "any_failures": any_fail,
         }
 
-        out_dir = (self.root / "memory" / "reports")
+        out_dir = self.root / "memory" / "reports"
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / f"diagnostic_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json"
         out_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
         from loguru import logger
+
         logger.info(f"[diagnostics] wrote report → {out_path}")
         return str(out_path)

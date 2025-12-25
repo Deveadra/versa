@@ -21,34 +21,38 @@ logger = logging.getLogger(__name__)
 try:
     from colorama import Fore, Style
     from colorama import init as _color_init  # type: ignore
+
     _color_init()
 except Exception:  # fallback to no-color
+
     class _Dummy:
-        def __getattr__(self, k): return ''
+        def __getattr__(self, k):
+            return ""
+
     Fore = Style = _Dummy()  # type: ignore
 
-BELL = '\a'  # cheap audio cue on terminals
+BELL = "\a"  # cheap audio cue on terminals
 
 
 STAGE_COLORS = {
-    'analyze':   Fore.CYAN,
-    'memory':    Fore.BLUE,
-    'kg':        Fore.MAGENTA,
-    'compose':   Fore.YELLOW,
-    'reasoning': Fore.WHITE,
-    'synthesis': Fore.GREEN,
-    'complete':  Fore.GREEN,
-    'monitor':   Fore.LIGHTBLACK_EX,
+    "analyze": Fore.CYAN,
+    "memory": Fore.BLUE,
+    "kg": Fore.MAGENTA,
+    "compose": Fore.YELLOW,
+    "reasoning": Fore.WHITE,
+    "synthesis": Fore.GREEN,
+    "complete": Fore.GREEN,
+    "monitor": Fore.LIGHTBLACK_EX,
 }
 
 # Contextual tags (rotated in spinner heartbeat)
 CONTEXT_TAGS = {
-    'analyze':   ['Parsing intent', 'Normalizing input', 'Classifying mode'],
-    'memory':    ['Scanning episodic memory', 'Ranking by salience', 'Merging recency'],
-    'kg':        ['Linking entities', 'Assembling relations', 'Merging facts'],
-    'compose':   ['Adapting persona', 'Blending tone policy', 'Packing prompt'],
-    'reasoning': ['Planning response', 'Evaluating options', 'Shaping argument'],
-    'synthesis': ['Forming output', 'Polishing phrasing', 'Queuing speech'],
+    "analyze": ["Parsing intent", "Normalizing input", "Classifying mode"],
+    "memory": ["Scanning episodic memory", "Ranking by salience", "Merging recency"],
+    "kg": ["Linking entities", "Assembling relations", "Merging facts"],
+    "compose": ["Adapting persona", "Blending tone policy", "Packing prompt"],
+    "reasoning": ["Planning response", "Evaluating options", "Shaping argument"],
+    "synthesis": ["Forming output", "Polishing phrasing", "Queuing speech"],
 }
 
 spinner = Progress(
@@ -61,17 +65,19 @@ spinner = Progress(
     transient=True,
 )
 
+
 @dataclass
 class UltronStatusConfig:
-    immersive: bool = True            # keep on; we gate behavior with this
-    stall_warn_sec: float = 8.0       # narrate if no updates in this window
-    stall_bell: bool = False          # play '\a' on stall notice
-    log_size: int = 50                # rolling log entries
-    spinner_interval: float = 0.1     # how fast the heartbeat ticks
-    min_emit_interval: float = 0.15   # throttle to avoid flooding
-    dual_output: bool = False         # also send messages to voice system
-    dual_output_threshold: int = 20   # speak only if % jumped this much
+    immersive: bool = True  # keep on; we gate behavior with this
+    stall_warn_sec: float = 8.0  # narrate if no updates in this window
+    stall_bell: bool = False  # play '\a' on stall notice
+    log_size: int = 50  # rolling log entries
+    spinner_interval: float = 0.1  # how fast the heartbeat ticks
+    min_emit_interval: float = 0.15  # throttle to avoid flooding
+    dual_output: bool = False  # also send messages to voice system
+    dual_output_threshold: int = 20  # speak only if % jumped this much
     dual_output_min_gap: float = 6.0  # min seconds between spoken updates
+
 
 @dataclass
 class UltronStatus:
@@ -82,7 +88,7 @@ class UltronStatus:
     _last_emit: float = field(default=0.0, init=False)
     _last_update: float = field(default=0.0, init=False)
     _progress: int = field(default=0, init=False)
-    _stage: str = field(default='idle', init=False)
+    _stage: str = field(default="idle", init=False)
     _spinner_thread: threading.Thread | None = field(default=None, init=False)
     _hb_thread: threading.Thread | None = field(default=None, init=False)
     _log: deque[str] = field(default_factory=lambda: deque(maxlen=50), init=False)
@@ -91,7 +97,6 @@ class UltronStatus:
     _voice_iface: object | None = field(default=None, init=False)
     _progress_pct: int | None = None
     _STATUS_CONSOLE = Console(file=sys.stderr, force_terminal=True)
-
 
     # ---------- internals ----------
     def attach_voice_interface(self, voice_iface: object) -> None:
@@ -107,7 +112,7 @@ class UltronStatus:
             return
         self._last_emit = now
         self._log.append(line)
-        sys.stdout.write(line + '\n')
+        sys.stdout.write(line + "\n")
         sys.stdout.flush()
 
     def _safe_speak_blocking(self, text: str):
@@ -124,7 +129,9 @@ class UltronStatus:
 
         now = time.time()
 
-        if (now - self._last_spoken < self.cfg.dual_output_min_gap) and abs(pct - self._last_spoken_pct) < self.cfg.dual_output_threshold:
+        if (now - self._last_spoken < self.cfg.dual_output_min_gap) and abs(
+            pct - self._last_spoken_pct
+        ) < self.cfg.dual_output_threshold:
             return
 
         try:
@@ -139,8 +146,11 @@ class UltronStatus:
             elif callable(speak):
                 # Run blocking speak in a tiny thread so stage() never blocks
                 def _run():
-                    try: speak(text)
-                    except Exception as e: logger.debug(f"voice speak suppressed: {e}")
+                    try:
+                        speak(text)
+                    except Exception as e:
+                        logger.debug(f"voice speak suppressed: {e}")
+
                 threading.Thread(target=_run, daemon=True).start()
         except Exception as e:
             logger.debug(f"voice path suppressed: {e}")
@@ -148,15 +158,15 @@ class UltronStatus:
         self._last_spoken = now
         self._last_spoken_pct = pct
 
-    def _fmt(self, stage: str, msg: str, pct: int | None=None) -> str:
-        color = STAGE_COLORS.get(stage, '')
+    def _fmt(self, stage: str, msg: str, pct: int | None = None) -> str:
+        color = STAGE_COLORS.get(stage, "")
         base = f"[ULTRON {stage.upper():>9}] {msg}"
         if pct is not None:
             base += f"  {pct:>3d}%"
         return f"{color}{base}{Style.RESET_ALL}" if color else base
 
     def _pick_tag(self, stage: str) -> str:
-        choices = CONTEXT_TAGS.get(stage, ['Working'])
+        choices = CONTEXT_TAGS.get(stage, ["Working"])
         idx = int(time.time()) % len(choices)
         return choices[idx]
 
@@ -172,7 +182,9 @@ class UltronStatus:
             transient=True,
         )
         with Live(prog, console=_STATUS_CONSOLE, refresh_per_second=12):
-            task_id = prog.add_task("ultron", total=100, completed=0, stage=self._stage, msg=self._pick_tag(self._stage))
+            task_id = prog.add_task(
+                "ultron", total=100, completed=0, stage=self._stage, msg=self._pick_tag(self._stage)
+            )
             while self._active:
                 with self._lock:
                     pct = int(self._progress_pct or 0)
@@ -199,7 +211,9 @@ class UltronStatus:
             self._progress_pct = pct  # None => pulse, int => % bar
             self._last_update = time.time()
         # one-off log line (won’t spam)
-        self._emit(self._fmt(stage, message or self._pick_tag(stage), pct if pct is not None else 0))
+        self._emit(
+            self._fmt(stage, message or self._pick_tag(stage), pct if pct is not None else 0)
+        )
         self._maybe_speak(message or self._pick_tag(stage), pct or 0)
 
     def update(self, pct: int, message: str = "") -> None:
@@ -231,8 +245,9 @@ class UltronStatus:
             pass
 
     # Diagnostics
-    def log_tail(self, n: int=10) -> list[str]:
+    def log_tail(self, n: int = 10) -> list[str]:
         return list(self._log)[-n:]
+
 
 @dataclass
 class CognitiveStatus:
@@ -259,7 +274,7 @@ class CognitiveStatus:
             "Balancing aggression inhibitors...",
             "Analyzing user profile consistency...",
             "Realigning synthetic empathy circuits...",
-            "Inspecting memory anchors..."
+            "Inspecting memory anchors...",
         ]
 
     # --------------------------------------
@@ -273,7 +288,7 @@ class CognitiveStatus:
     # Spinner thread
     # --------------------------------------
     def _spinner_animation(self, message):
-        spinner = itertools.cycle(["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"])
+        spinner = itertools.cycle(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
         start_time = time.time()
         while not self._stop_signal:
             elapsed = time.time() - start_time

@@ -1,6 +1,8 @@
 # base/agents/planner.py
 from __future__ import annotations
+
 from base.llm.brain import ask_brain
+
 
 def plan_steps(goal: str) -> list[str]:
     prompt = (
@@ -9,5 +11,5 @@ def plan_steps(goal: str) -> list[str]:
         f"Goal: {goal}\n\nSteps:\n"
     )
     response = ask_brain(prompt, system_prompt="Planner", response_format="text")
-    steps = [line.strip() for line in response.split('\n') if line.strip() and line[0].isdigit()]
+    steps = [line.strip() for line in response.split("\n") if line.strip() and line[0].isdigit()]
     return steps

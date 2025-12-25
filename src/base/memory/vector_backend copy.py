@@ -18,19 +18,19 @@
 # try:
 #     from qdrant_client import QdrantClient
 #     from qdrant_client.http.models import (
-#         Distance, VectorParams, PointStruct, Filter, 
+#         Distance, VectorParams, PointStruct, Filter,
 #         FieldCondition, Range, MatchValue,
 #     )
 # except Exception:
 #     QdrantClient = None # type: ignore
-    
+
 # except ImportError as e:
 #     # If Qdrant client is not installed, raise an error with guidance
 #     raise ImportError("Qdrant client not installed. Please install 'qdrant-client' to use QdrantMemoryBackend.") from e
 
 # from loguru import logger
 
-# if HAVE_QDRANT:    
+# if HAVE_QDRANT:
 #     class QdrantMemoryBackend:
 #         """
 #         A VectorBackend implementation using Qdrant as the vector database.

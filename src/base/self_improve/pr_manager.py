@@ -85,7 +85,6 @@ class PRManager:
                 #     self.logger.warning(f"Stash pop had conflicts; leaving stash in place: {err.strip()}")
                 self.git.stash_pop()
 
-
     def commit_and_push(self, branch: str, title: str) -> None:
         self.client.ensure_user(settings.github_bot_name, settings.github_bot_email)
         self.client.add_all()
@@ -179,4 +178,3 @@ This change was proposed by Ultron to address: *"{title}"*
                 logger.info(f"Restored user branch: {self.original_branch}")
             except Exception as e:
                 logger.error(f"Failed to restore branch: {e}")
-

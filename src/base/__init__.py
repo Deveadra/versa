@@ -1,24 +1,28 @@
 # src/base/__init__.py
 """
-Jarvis Offline Assistant Package
+Ultron MVP package.
 
-
-Modules:
-- core: State manager, personalities, reset logic
-- audio: Wake word detection, silence listening, playback
-- brain: AI interaction, personality tuning
-- plugins: Extensible plugin system (system stats, spotify, lights, calendar, email)
+Keep this module import-safe:
+- Do NOT import optional/voice-heavy modules at import time.
+- Expose modules lazily via __getattr__.
 """
 
 __version__ = "0.1.0"
-__all__: list[str] = []
-
-from .core import audio, core
-from .llm import brain
+__all__: list[str] = ["__version__"]
 
 
 def __getattr__(name: str):
+    # Lazy imports so tests and non-voice installs don't explode.
     if name == "brain":
-        from .llm import brain  # imported only when actually accessed
+        from .llm import brain
         return brain
+
+    if name == "core":
+        from .core import core
+        return core
+
+    if name == "audio":
+        from .core import audio
+        return audio
+
     raise AttributeError(name)

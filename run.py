@@ -36,7 +36,7 @@ if __name__ == "__main__":
                 else:
                     print(f"Ultron KG: no relations found for '{entity}'.")
                 continue
-                        # Run self-improvement (manual trigger)
+                # Run self-improvement (manual trigger)
             if msg.lower() == "self-improve":
                 try:
                     orch._job_self_improvement()

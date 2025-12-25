@@ -79,9 +79,9 @@ class PromptComposerTests(unittest.TestCase):
             memories=mems,
             extra_context="KG: none",
             top_k_memories=1,
-            profile_mgr=dummy_profile, # type: ignore
-            memory_store=dummy_memory, # type: ignore
-            habit_miner=dummy_habit, # type: ignore
+            profile_mgr=dummy_profile,  # type: ignore
+            memory_store=dummy_memory,  # type: ignore
+            habit_miner=dummy_habit,  # type: ignore
         )
         self.assertIn("SYSTEM:", prompt)
         self.assertIn("Persona:", prompt)
@@ -101,6 +101,7 @@ print("Wrote test:", test_path)
 print("Running unit tests with unittest discover ...")
 res = subprocess.run(
     [sys.executable, "-m", "unittest", "discover", "-v", str(tests_dir)],
+    check=False,
     cwd=str(root),
     capture_output=True,
     text=True,

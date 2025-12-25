@@ -23,7 +23,7 @@ def run_text(orch):
             n = orch.store.forget(topic)
             print(f"Ultron: Removed {n} entries related to '{topic}'.")
             continue
-        
+
         if msg.lower() == "self-improve":
             try:
                 orch._job_self_improvement()

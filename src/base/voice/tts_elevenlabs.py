@@ -8,7 +8,9 @@ from collections.abc import Iterable
 from typing import Union
 
 import simpleaudio as sa
-from elevenlabs.client import ElevenLabs # <- matches the documented SDK usage :contentReference[oaicite:1]{index=1}
+from elevenlabs.client import (
+    ElevenLabs,  # <- matches the documented SDK usage :contentReference[oaicite:1]{index=1}
+)
 
 from config.config import settings
 
@@ -47,8 +49,9 @@ log = logging.getLogger(__name__)
 #         self.model_id = model_id or os.getenv("ELEVENLABS_MODEL", "eleven_multilingual_v2")
 #         self.output_format = output_format or os.getenv("ELEVENLABS_OUTPUT", "pcm_16000")
 
+
 class Voice:
-    _instance: "Voice | None" = None
+    _instance: Voice | None = None
     _current_playback: sa.PlayObject | None = None
     _lock = threading.Lock()
 
@@ -73,7 +76,9 @@ class Voice:
             return voice
 
         try:
-            resp = self.client.voices.search()  # documented pattern :contentReference[oaicite:2]{index=2}
+            resp = (
+                self.client.voices.search()
+            )  # documented pattern :contentReference[oaicite:2]{index=2}
             voices = getattr(resp, "voices", []) or []
             match = next((v for v in voices if getattr(v, "name", None) == voice), None)
             if match and getattr(match, "voice_id", None):
@@ -83,7 +88,7 @@ class Voice:
             log.warning("Failed to resolve voice name '%s': %s", voice, e)
 
         return voice  # fall back; if invalid, API call will fail later
-    
+
     # Singleton access
     @classmethod
     def get_instance(cls) -> Voice:

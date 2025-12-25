@@ -124,7 +124,6 @@ class CodeIndexer:
             return False
         return any(sp.startswith(a) for a in self.allowlist)
 
-
     @staticmethod
     def to_markdown(index: list[FileIndex]) -> str:
         lines = []

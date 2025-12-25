@@ -12,68 +12,146 @@
 - Current dimension = 384 (MiniLM). Adjust in `Orchestrator` if you use a different model.
 - If you expect >1M memories, consider FAISS with an IVF or HNSW index for scalability.
 
+## TESTING
+Pylint, Black, and Ruff are integrated into the venv environment.
+
+Run tests (fast/default):
+```bash
+pytest -q
+```
+
+Run database suite:
+```bash
+pytest -q tests/database -ra
+```
+
+Write test results to the repo (CI-friendly):
+```bash
+mkdir -p reports/pytest
+
+pytest tests/database \
+  -ra \
+  --junitxml=reports/pytest/junit.xml \
+  --cov=base \
+  --cov-report=term \
+  --cov-report=html:reports/pytest/htmlcov \
+  --cov-report=xml:reports/pytest/coverage.xml \
+  --log-file=reports/pytest/pytest.log \
+  --log-level=INFO
+```
+
+
+### Linting / Formatting:
+> Tools are installed via the dev extra (pip install -e ".[dev]").
+
+**Ruff (lint + autofix)**:
+```bash
+ruff check . --fix
+```
+
+**Black (format):
+```bash
+black .
+```
+
+
+### CI Install
+```bash
+pip install -e ".[dev]"
+pytest -q
+pylint src
+```
+
+
+**Pylint:**
+```bash
+pip install pylint
+python -m pylint --init-hook="import sys; sys.setrecursionlimit(2000)" --ignore=.venv --recursive=y c:/Projects/personal/versa/
+```
+
+_Generate a config file:_
+```bash
+python -m pylint --generate-rcfile > .pylintrc
+```
+**OR...**
+```bash
+python -m pylint --init-hook="import sys; sys.setrecursionlimit(2000)" --ignore=.venv --recursive=y c:/Projects/personal/versa/reports/pylint/ > pylint_report.txt
+```
+
+```bash
+python -m pylint --output-format=colorized --init-hook="import sys; sys.setrecursionlimit(2000)" --ignore=.venv --recursive=y --output-format=json . > reports/pylint/pylint_results.json 
+```
+
+**Black:**
+```bash
+pip install black
+black .
+```
+
+**Ruff:**
+```bash
+pip install ruff
+ruff check . --fix
+```
+
+## Diagnostics
+
+```bash
+pytest tests\database -ra -p no:randomly
+```
+
+--
+
+
 ## 1) Setup
 
-```bash
-## 1) Setup (recommended)
-
-```bash
-python -m venv .venv
-. .venv/bin/activate  # Windows: .venv\Scripts\activate
+### Windows (PowerShell)
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 
-# Dev install (tests + lint tools)
+# Dev install (includes pytest + black + ruff + tools)
 pip install -e ".[dev]"
 
-# Optional features
-# pip install -e ".[google]"   # Calendar/Gmail integrations
-# pip install -e ".[voice]"    # Voice/audio stack
-# pip install -e ".[api]"      # FastAPI server
+# Optional extras (install only if you need them)
+# pip install -e ".[voice]"
+# pip install -e ".[google]"
+# pip install -e ".[api]"
 
-cp .env.sample .env  # if you have it; otherwise create .env
+# Env
+Copy-Item .env.sample .env -ErrorAction SilentlyContinue
+# If .env.sample doesn't exist, create .env manually and add your keys.
+
 python run.py
 ```
 
-Core: `pip install .`
+### macOS/Linux
+```powershell
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
 
-Local development: `pip install -e ".[dev]"`
-Local dev (tests + lint): 
-```bash
-pip install -r requirements-dev.txt
-pip install -e .
-```
-Local dev (voice-enabled):
-```bash
-pip install -r requirements-dev.txt
-pip install -r requirements-voice.txt
-pip install -e .
-```
+pip install -e ".[dev]"
 
-CI (default) _only installs dev, not voice_:
-```bash
-pip install -r requirements-dev.txt
-pip install -e .
+# Optional extras
+# pip install -e ".[voice]"
+# pip install -e ".[google]"
+# pip install -e ".[api]"
+
+cp .env.sample .env 2>/dev/null || true
+python run.py
 ```
 
-Production/API container: `pip install ".[api]"`
+Alternative: use requirements wrappers (same result)
 
-Docker example:
-```
-COPY pyproject.toml ./
-COPY src ./src
-RUN pip install --no-cache-dir ".[api]"
-```
+> These files are thin wrappers around pyproject.toml extras.
 
+```powershell
+pip install -r requirements-dev.txt          # installs -e .[dev]
+# pip install -r requirements-voice.txt      # installs -e .[voice]
+# pip install -r requirements.txt            # installs -e .
 
-If you *also* want to keep requirements files, add a short “Alternative (pinned)” section:
-
-```md
-## Alternative: install from requirements (pinned)
-
-```bash
-pip install -r requirements.txt
-pip install -r requirements-dev.txt
-pip install -e .
 ```
 
 ---

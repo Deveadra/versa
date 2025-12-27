@@ -165,26 +165,15 @@ class _QdrantMemoryBackendImpl:
                 out.append(r.payload["content"])
         return out
 
-
-class QdrantMemoryBackendStub:  # stub so imports don’t crash
-    def __init__(self, *a: Any, **kw: Any):
-        raise ImportError("qdrant-client not installed. Install it or choose a different backend.")
-
-
-if TYPE_CHECKING:
-
-    class QdrantMemoryBackend(_QdrantMemoryBackendImpl): ...
-
+# Export a working Qdrant backend when available; otherwise a safe stub.
+if HAVE_QDRANT:
+    QdrantMemoryBackend = _QdrantMemoryBackendImpl  # type: ignore[misc]
 else:
-
-    class QdrantMemoryBackend:
-        """Stub so imports don’t crash when qdrant-client isn’t installed."""
-
-        def __init__(self, *a, **kw):
+    class QdrantMemoryBackend:  # type: ignore[no-redef]
+        def __init__(self, *a: Any, **kw: Any):
             raise ImportError(
                 "qdrant-client not installed. Install it or choose a different backend."
             )
-
 
 # --- No-deps, in-memory fallback ---------------------------------------------
 class InMemoryBackend:

@@ -23,8 +23,6 @@ from base.memory.vector_backend import (
 from base.utils.embeddings import get_embedder
 from config.config import settings  # OK where your settings live
 
-DB_PATH = Path("memory.db")
-
 
 class MemoryStore:
     """
@@ -84,7 +82,6 @@ class MemoryStore:
 
         # 4) schema last (unchanged)
         self._ensure_schema()
-        self.init_db()
 
     @property
     def embedder(self) -> Any | None:
@@ -240,17 +237,6 @@ class MemoryStore:
         if rowid is None:
             raise RuntimeError("Failed to insert event: lastrowid is None")
 
-        # If FTS indexing is enabled, index this content for keyword search
-        if self._fts_enabled:
-            try:
-                self.conn.execute(
-                    "INSERT INTO events_fts(rowid, content) VALUES(?, ?)",
-                    (rowid, content),
-                )
-            except sqlite3.OperationalError:
-                # FTS table might be unavailable; disable FTS to avoid further errors
-                self._fts_enabled = False
-
         self.conn.commit()
 
         # Notify any subscribers about the new event (synchronous callbacks)
@@ -389,11 +375,13 @@ class MemoryStore:
                 )  # fetch more than needed for filtering
             else:
                 # FTS not available, use LIKE query
-                sql = (
-                    "SELECT content, ts, importance, type FROM events "
-                    "WHERE content LIKE ? ESCAPE '\\' "
-                    "ORDER BY id DESC LIMIT ?"
+                 sql = (
+                    "SELECT e.content, e.ts, e.importance, e.type "
+                    "FROM events_fts JOIN events e ON events_fts.rowid = e.id "
+                    "WHERE events_fts MATCH ? "
+                    "ORDER BY e.id DESC LIMIT ?"
                 )
+
                 cur = self.conn.execute(sql, (f"%{query}%", limit * 3))
             rows = cur.fetchall()
         except Exception as e:
@@ -552,72 +540,50 @@ class MemoryStore:
         return int(cur.rowcount or 0)
 
     # ---------- retrieval ----------
-    # def keyword_search(self, query, limit):
-    #     limit = 5
-    #     # Strip commas from the query
-    #     query = query.replace(',', '')
-    #     # Existing functionality to search using FTS triggers or LIKE fallback
-    #     # Add your FTS implementation here
-    #     pass
-    #     query = query.replace(',', '')  # Strip commas from the query
-    #     # Existing functionality for FTS triggers and LIKE fallback goes here
-    #     if self._fts_enabled:
-    #         try:
-    #             sql = f"SELECT content FROM events_fts WHERE events_fts MATCH ? LIMIT {int(limit)}"
-    #             cur = self.conn.execute(sql, (query,))
-    #             return [r[0] for r in cur.fetchall()]
-    #         except sqlite3.OperationalError as e:
-    #             from loguru import logger
-    #             logger.error(f"FTS search failed, falling back to LIKE: {e}")
-    #             self._fts_enabled = False
-    #             # fallback to LIKE if FTS errors out
-    #     # fallback: LIKE
-    #     cur = self.conn.execute(
-    #         "SELECT content FROM events WHERE content LIKE ? ORDER BY id DESC LIMIT ?",
-    #         (f"%{query}%", limit),
-    #     )
-    #     # return [dict(r) for r in cur.fetchall()]
-    #     return [r[0] for r in cur.fetchall()]
-
     def keyword_search(self, query: str, limit: int = 5) -> list[str]:
         """
-        Search memory for a keyword or phrase.
-        Returns a consistent shape: list[str] of content.
+        Keyword/phrase search over EVENT memory (preferred).
+        Returns: list[str] of event content.
         """
-        try:
-            cur = self.conn.execute(
-                "SELECT content FROM memories WHERE content MATCH ? LIMIT ?",
-                (query, limit),
-            )
-            return [str(r[0]) for r in cur.fetchall()]
-        except Exception:
-            cur = self.conn.execute(
-                "SELECT content FROM memories WHERE content LIKE ? LIMIT ?",
-                (f"%{query}%", limit),
-            )
-            return [str(r[0]) for r in cur.fetchall()]
+        # Prefer FTS if available
+        if self._fts_enabled:
+            try:
+                cur = self.conn.execute(
+                    "SELECT e.content "
+                    "FROM events_fts JOIN events e ON events_fts.rowid = e.id "
+                    "WHERE events_fts MATCH ? "
+                    "ORDER BY e.id DESC "
+                    "LIMIT ?",
+                    (query, int(limit)),
+                )
+                return [str(r[0]) for r in cur.fetchall()]
+            except Exception as e:
+                logger.warning(f"MemoryStore.keyword_search: FTS failed; falling back to LIKE: {e}")
+
+        # Fallback: LIKE on events table
+        cur = self.conn.execute(
+            "SELECT content FROM events WHERE content LIKE ? ORDER BY id DESC LIMIT ?",
+            (f"%{query}%", int(limit)),
+        )
+        return [str(r[0]) for r in cur.fetchall()]
+
+
 
     # ---------- Legacy helpers for backward compatibility ----------
 
-    def _connect_for_compat(self) -> sqlite3.Connection:
-        return sqlite3.connect(settings.db_path or str(DB_PATH), check_same_thread=False)
-
-    def init_db(self) -> None:
-        with self._connect_for_compat() as conn:
-            cur = conn.cursor()
-            # run the same schema setup here if needed
-            # or simply no-op since _ensure_schema already covers this
-            conn.commit()
-
     def save_memory(self, memory: dict) -> None:
+        """
+        Legacy helper for backward compatibility.
+        Writes into the SAME database connection as facts/events.
+        """
         ts = memory.get("timestamp") or datetime.utcnow().isoformat()
         typ = memory.get("type", "event")
         content = memory.get("content", "")
         response = memory.get("response", "")
 
-        with self._connect_for_compat() as conn:
-            conn.execute(
-                "INSERT INTO memories(timestamp, type, content, response) VALUES(?, ?, ?, ?)",
-                (ts, typ, content, response),
-            )
-            conn.commit()
+        self.conn.execute(
+            "INSERT INTO memories(timestamp, type, content, response) VALUES(?, ?, ?, ?)",
+            (ts, typ, content, response),
+        )
+        self.conn.commit()
+

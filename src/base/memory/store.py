@@ -7,7 +7,6 @@ import sqlite3
 import threading
 import time
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -349,7 +348,14 @@ class MemoryStore:
                     )
                 else:
                     # Other backend (e.g., FAISS) - no built-in filtering support
-                    results = self._vector_backend.search(query, k=limit)
+                    results = self._vector_backend.search(
+                        query,
+                        k=limit,
+                        since=since,
+                        min_importance=min_importance,
+                        type_filter=type_,
+                    )
+
                     # Post-filter the results by metadata if possible (not applicable for simple text lists, skip)
                 # If we got enough results from vector search, return them
                 if results:
@@ -362,28 +368,25 @@ class MemoryStore:
         # Fallback to keyword-based search in SQLite if no vector results or vector backend is unavailable
         try:
             if self._fts_enabled:
-                # Use full-text search (FTS5) on events content
-                # Join with events table to retrieve metadata for filtering
                 query_str = query.replace(",", " ")
                 sql = (
-                    "SELECT e.content, e.ts, e.importance, e.type "
-                    "FROM events_fts f JOIN events e ON f.rowid = e.id "
-                    "WHERE f MATCH ? ORDER BY e.id DESC LIMIT ?"
-                )
-                cur = self.conn.execute(
-                    sql, (query_str, limit * 3)
-                )  # fetch more than needed for filtering
-            else:
-                # FTS not available, use LIKE query
-                 sql = (
                     "SELECT e.content, e.ts, e.importance, e.type "
                     "FROM events_fts JOIN events e ON events_fts.rowid = e.id "
                     "WHERE events_fts MATCH ? "
                     "ORDER BY e.id DESC LIMIT ?"
                 )
-
+                cur = self.conn.execute(sql, (query_str, limit * 3))
+            else:
+                sql = (
+                    "SELECT content, ts, importance, type "
+                    "FROM events "
+                    "WHERE content LIKE ? ESCAPE '\\' "
+                    "ORDER BY id DESC LIMIT ?"
+                )
                 cur = self.conn.execute(sql, (f"%{query}%", limit * 3))
+
             rows = cur.fetchall()
+
         except Exception as e:
             logger.error(f"MemoryStore.search: Database keyword search query failed: {e}")
             return results  # return any results we might have from vector search (possibly empty)

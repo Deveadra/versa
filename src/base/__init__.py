@@ -15,14 +15,17 @@ def __getattr__(name: str):
     # Lazy imports so tests and non-voice installs don't explode.
     if name == "brain":
         from .llm import brain
+
         return brain
 
     if name == "core":
         from .core import core
+
         return core
 
     if name == "audio":
         from .core import audio
+
         return audio
 
     raise AttributeError(name)

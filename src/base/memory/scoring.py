@@ -1,3 +1,5 @@
+# src/base/memory/scoring.py
+
 from __future__ import annotations
 
 import re

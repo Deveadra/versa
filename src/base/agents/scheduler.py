@@ -17,7 +17,7 @@ from base.memory.store import MemoryStore
 if TYPE_CHECKING:
     from base.learning.habit_miner import HabitMiner
     from base.memory.store import MemoryStore
-    
+
 
 class Scheduler:
     """
@@ -76,7 +76,6 @@ class Scheduler:
         self.tasks: dict[str, dict[str, Any]] = {}
         self.running = False
         self._thread: threading.Thread | None = None
-        
 
     async def run_periodic(self, interval_sec: int = 86400):
         """Legacy async loop (kept)."""
@@ -85,7 +84,9 @@ class Scheduler:
             self.miner.mine()
             await asyncio.sleep(interval_sec)
 
-    def add_daily(self, func: Callable[[], None], hour: int = 3, minute: int = 0, *, job_id: str | None = None):
+    def add_daily(
+        self, func: Callable[[], None], hour: int = 3, minute: int = 0, *, job_id: str | None = None
+    ):
         """Run `func` once a day at given hour/minute. Idempotent via job_id."""
         jid = job_id or f"daily:{getattr(func, '__name__', 'job')}"
         self.scheduler.add_job(
@@ -125,7 +126,7 @@ class Scheduler:
                     logger.exception(f"[Scheduler] Task {name} failed: {e}")
                 finally:
                     task["last_run"] = current
-                    
+
     def start(self) -> None:
         if self.running:
             return

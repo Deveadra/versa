@@ -1,5 +1,3 @@
-# src/base/memory/consolidation.py
-
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -16,7 +14,7 @@ class Consolidator:
 
     def summarize_old_events(self):
         cutoff = (datetime.utcnow() - timedelta(days=settings.memory_ttl_days)).isoformat()
-        cur = self.store.db.conn.execute(
+        cur = self.store.conn.execute(
             "SELECT id, content FROM events WHERE ts < ? ORDER BY id LIMIT 200", (cutoff,)
         )
         rows = cur.fetchall()
@@ -29,6 +27,6 @@ class Consolidator:
         if summary:
             self.store.add_event(summary, importance=40, type_="summary")
             ids = [r["id"] for r in rows]
-            self.store.db.conn.executemany("DELETE FROM events WHERE id=?", [(i,) for i in ids])
-            self.store.db.conn.commit()
+            self.store.conn.executemany("DELETE FROM events WHERE id=?", [(i,) for i in ids])
+            self.store.conn.commit()
             logger.info(f"Consolidated {len(ids)} events into summary")

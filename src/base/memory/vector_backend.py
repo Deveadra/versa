@@ -166,21 +166,13 @@ class _QdrantMemoryBackendImpl:
         return out
 
 
-class QdrantMemoryBackendStub:  # stub so imports don’t crash
-    def __init__(self, *a: Any, **kw: Any):
-        raise ImportError("qdrant-client not installed. Install it or choose a different backend.")
-
-
-if TYPE_CHECKING:
-
-    class QdrantMemoryBackend(_QdrantMemoryBackendImpl): ...
-
+# Export a working Qdrant backend when available; otherwise a safe stub.
+if HAVE_QDRANT:
+    QdrantMemoryBackend = _QdrantMemoryBackendImpl  # type: ignore[misc]
 else:
 
-    class QdrantMemoryBackend:
-        """Stub so imports don’t crash when qdrant-client isn’t installed."""
-
-        def __init__(self, *a, **kw):
+    class QdrantMemoryBackend:  # type: ignore[no-redef]
+        def __init__(self, *a: Any, **kw: Any):
             raise ImportError(
                 "qdrant-client not installed. Install it or choose a different backend."
             )
@@ -200,7 +192,7 @@ class InMemoryBackend:
             np = None
         self.np = np
         self.embedder = embedder
-        self._rows: list[tuple[str, object]] = []  # (text, vector)
+        self._rows: list[tuple[str, object, dict]] = []  # (text, vector, metadata)
 
     def index(self, texts: list[str]) -> None:
         if not texts:
@@ -217,7 +209,7 @@ class InMemoryBackend:
             v = self.embedder.encode([text])[0]
         except Exception:
             return
-        self._rows.append((text, v))
+        self._rows.append((text, v, dict(metadata or {})))
 
     def _cosine(self, a, b) -> float:
         # NumPy fast path if available
@@ -246,7 +238,28 @@ class InMemoryBackend:
             q = self.embedder.encode([query])[0]
         except Exception:
             return []
-        sims: list[tuple[float, str]] = [(self._cosine(q, v), text) for text, v in self._rows]
+
+        # Apply filters using stored metadata (if provided)
+        rows = self._rows
+
+        if since:
+            try:
+                import datetime as _dt
+                since_epoch = int(_dt.datetime.fromisoformat(since.replace("Z", "+00:00")).timestamp())
+                rows = [r for r in rows if int((r[2].get("timestamp") or 0)) >= since_epoch]
+            except Exception:
+                pass
+
+        if min_importance and min_importance > 0:
+            rows = [r for r in rows if float(r[2].get("importance") or 0.0) >= float(min_importance)]
+
+        if type_filter:
+            rows = [r for r in rows if str(r[2].get("type") or "") == str(type_filter)]
+
+        if not rows:
+            return []
+
+        sims: list[tuple[float, str]] = [(self._cosine(q, v), text) for (text, v, _m) in rows]
         sims.sort(key=lambda x: x[0], reverse=True)
         return [t for _, t in sims[:k]]
 

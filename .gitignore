@@ -15,12 +15,12 @@ dist/
 build/
 __pycache__/
 
-src/ultron_mvp.egg-info/*
+src/aerith_mvp.egg-info/*
 
 # Ignore runtime DB files
-ultron.db
-ultron.db-wal
-ultron.db-shm
+aerith.db
+aerith.db-wal
+aerith.db-shm
 
 # SQLite runtime files
 *.db

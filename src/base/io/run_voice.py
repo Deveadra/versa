@@ -4,7 +4,7 @@ from base.io.voice import record_audio, speak, transcribe
 if __name__ == "__main__":
     orch = Orchestrator()
     orch.ingest_bootstrap()
-    print("Ultron (voice) ready. Say 'exit' to quit.")
+    print("Aerith (voice) ready. Say 'exit' to quit.")
 
     try:
         while True:

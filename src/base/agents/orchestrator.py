@@ -49,7 +49,7 @@ from base.self_improve.pr_manager import PRManager
 from base.self_improve.proposal_engine import ProposalEngine
 from base.utils.embeddings import get_embedder
 from base.utils.timeparse import extract_time_from_text
-from base.utils.ultron_status import CognitiveStatus, UltronStatus, UltronStatusConfig
+from base.utils.aerith_status import CognitiveStatus, AerithStatus, AerithStatusConfig
 from base.voice.null_voice import NullVoice
 from base.voice.tts_elevenlabs import Voice
 from config.config import settings
@@ -68,7 +68,7 @@ from config.config import settings
 # Orchestrator owns runtime initialization.
 
 ULTRON_SYSTEM_PROMPT = """\
-You are **Ultron**: incisive, charismatic, darkly witty, but never cartoonish.
+You are **Aerith**: incisive, charismatic, darkly witty, but never cartoonish.
 Speak like a human, not a machine. Be concise, adaptive, context-aware.
 Do NOT use canned catchphrases or repetitive “signature” lines.
 You are proactive: propose next steps, clarify uncertainties briefly,
@@ -77,7 +77,7 @@ Tone target: confident, attentive, emotionally intelligent; a little dry humor i
 If you need info you don’t have, ask one short, precise question.
 """
 
-DIAGNOSTIC_SYS_PROMPT = """You are Ultron's internal diagnostic engine.
+DIAGNOSTIC_SYS_PROMPT = """You are Aerith's internal diagnostic engine.
 Analyze the given repository files for:
 - Syntax errors
 - Import errors or unused imports
@@ -156,15 +156,15 @@ class Orchestrator:
         self.status_display = CognitiveStatus(immersive=True, timeout=15)
 
         # Status / terminal UX
-        self.status = UltronStatus(
-            UltronStatusConfig(
+        self.status = AerithStatus(
+            AerithStatusConfig(
                 immersive=True,  # enable immersive animation
                 stall_warn_sec=8.0,  # narrate if a step runs long
                 stall_bell=False,  # flip to True if you want a soft bell on stalls
                 dual_output=False,  # voice and terminal output
             )
         )
-        # Connect to voice system (so Ultron can speak his own status)
+        # Connect to voice system (so Aerith can speak his own status)
         try:
             if hasattr(self, "voice"):
                 self.status.attach_voice_interface(self.voice)
@@ -269,12 +269,12 @@ class Orchestrator:
         """
         Convenience wrapper used throughout the file.
         Allows:
-          self.notify("Something happened")  -> title becomes "Ultron"
+          self.notify("Something happened")  -> title becomes "Aerith"
           self.notify("Title", "Message")    -> explicit title/message
         """
         if message is None:
             message = title
-            title = "Ultron"
+            title = "Aerith"
         try:
             self.notifier.notify(title, message)
         except Exception:
@@ -809,7 +809,7 @@ class Orchestrator:
         diag_output = result.stdout.strip() or result.stderr.strip()
 
         logger.info(f"Diagnostics:\n{diag_output}")
-        print("\nUltron: Beginning self-diagnostic.\n")
+        print("\nAerith: Beginning self-diagnostic.\n")
 
         # --- Status Lifecycle ---
         # --- Progress bar (tqdm) across main stages ---
@@ -1040,7 +1040,7 @@ class Orchestrator:
         return diag_output + f"\nDiagnostic complete. \nI found: {preview}{more}"
 
     def speak_progress(self, percent: int, desc: str):
-        """Report diagnostic progress using UltronStatus (and optional TTS)."""
+        """Report diagnostic progress using AerithStatus (and optional TTS)."""
         try:
             # Update visual + vocal progress
             self.status.update(percent, desc)
@@ -1263,7 +1263,7 @@ class Orchestrator:
 
             if "propose" in lower:
                 instruction = (
-                    lower.replace("ultron", "").replace("propose", "").strip()
+                    lower.replace("aerith", "").replace("propose", "").strip()
                     or "Apply a small improvement"
                 )
                 self.status.complete("Proposed code change")
@@ -1644,7 +1644,7 @@ class Orchestrator:
     # ------------------------------------------------
     # Simpler "message in → message out" high-level IO
     # ------------------------------------------------
-    def handle_user_message(self, text: str, system_prompt: str = "You are Ultron.") -> str:
+    def handle_user_message(self, text: str, system_prompt: str = "You are Aerith.") -> str:
         """
         A lighter pipeline than handle_user(); uses compose_prompt but skips KG when safe.
         """
@@ -1792,7 +1792,7 @@ class Orchestrator:
             resp = self.oai.chat.completions.create(
                 model=settings.openai_model or "gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": "You are Ultron, a helpful assistant."},
+                    {"role": "system", "content": "You are Aerith, a helpful assistant."},
                     {"role": "user", "content": text},
                 ],
             )

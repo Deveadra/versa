@@ -44,10 +44,10 @@ def listen_until_silence(threshold=0.01, timeout=8, samplerate=16000):
 
 def stream_speak(text):
     try:
-        if settings.tts_engine == "ultron":
-            from base.voice.tts_ultron import UltronVoice
+        if settings.tts_engine == "aerith":
+            from base.voice.tts_aerith import AerithVoice
 
-            UltronVoice.get_instance().speak(text)
+            AerithVoice.get_instance().speak(text)
         else:
             voice = Voice.get_instance()
             voice.stop_speaking()
@@ -116,10 +116,10 @@ def interrupt():
     # Only speak ack if not already interrupting itself
     threading.Thread(target=voice.speak_async, args=(ack,), daemon=True).start()
     try:
-        if settings.tts_engine == "ultron":
-            from base.voice.tts_ultron import UltronVoice
+        if settings.tts_engine == "aerith":
+            from base.voice.tts_aerith import AerithVoice
 
-            UltronVoice.get_instance().speak("Interrupting.")
+            AerithVoice.get_instance().speak("Interrupting.")
         else:
             from base.voice.tts_elevenlabs import Voice
 

@@ -10,7 +10,7 @@ _loaded_personalities = {}
 
 def load_personality(base: str, mode: str = "default"):
     """
-    Load a specific personality base (e.g., 'jarvis', 'ultron') and mode
+    Load a specific personality base (e.g., 'jarvis', 'aerith') and mode
     (e.g., 'default', 'sarcastic', 'formal').
 
     Returns a dictionary of voicelines.

@@ -181,7 +181,7 @@ def morning_review(text_only: bool = False):
 #         "You can review my reasoning in the logs."
 #     )
 
-#     logger.info("Ultron’s self-improvement proposals:")
+#     logger.info("Aerith’s self-improvement proposals:")
 #     for expl in explanations:
 #         logger.info("  " + expl)
 

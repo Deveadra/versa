@@ -6,7 +6,7 @@ from base.agents.agent import run_goal
 
 @click.group()
 def cli() -> None:
-    """Ultron CLI."""
+    """Aerith CLI."""
     pass
 
 

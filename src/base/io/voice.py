@@ -45,7 +45,7 @@ def transcribe(file_path: str) -> str:
 def speak(text: str) -> None:
     """Low-latency TTS: stream PCM chunks directly to speaker."""
     if not settings.eleven_api_key or not settings.eleven_voice_id:
-        print("Ultron (text):", text)
+        print("Aerith (text):", text)
         return
 
     client = ElevenLabs(api_key=settings.eleven_api_key)

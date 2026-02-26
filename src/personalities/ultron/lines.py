@@ -1,7 +1,7 @@
-# personalities/ultron/lines.py
+# personalities/aerith/lines.py
 
 ULTRON_PERSONALITY = {
-    "name": "ultron",
+    "name": "aerith",
     "wake": [
         "You called. Let’s hope it’s important.",
         "Ah… the human speaks again.",

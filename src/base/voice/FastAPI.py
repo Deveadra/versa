@@ -8,7 +8,7 @@ from pydantic import BaseModel  # type: ignore
 from TTS.api import TTS
 
 app = FastAPI()
-tts = TTS(model_path="path/to/ultron_model", gpu=True)
+tts = TTS(model_path="path/to/aerith_model", gpu=True)
 
 
 class SpeakRequest(BaseModel):

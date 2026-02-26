@@ -21,7 +21,7 @@ def apply_sql(conn: sqlite3.Connection, sql_path: Path) -> None:
 
 @pytest.fixture()
 def db(tmp_path) -> Generator[SQLiteConn, None, None]:
-    db_path = tmp_path / "ultron_test.db"
+    db_path = tmp_path / "aerith_test.db"
     conn = SQLiteConn(str(db_path))
     try:
         yield conn
@@ -31,7 +31,7 @@ def db(tmp_path) -> Generator[SQLiteConn, None, None]:
 
 @pytest.fixture()
 def db_path(tmp_path: Path) -> Path:
-    return tmp_path / "test_ultron.db"
+    return tmp_path / "test_aerith.db"
 
 
 @pytest.fixture()

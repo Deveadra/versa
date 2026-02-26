@@ -33,7 +33,7 @@ def _to_score(val: Any) -> float:
 
 class MoodEngine:
     """
-    Ultron’s mood tracker. Evaluates sentiment from user and assistant exchanges,
+    Aerith’s mood tracker. Evaluates sentiment from user and assistant exchanges,
     persists mood history, and updates ContextSignals so policies can adapt.
     """
 

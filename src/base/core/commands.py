@@ -110,11 +110,11 @@ def handle_diagnostic_command(text: str) -> str | None:
     Fallback: run scripts/diagnostic_scan.py directly.
 
     Examples:
-      - "Ultron, run a diagnostic scan"
-      - "Ultron, quick diagnostic"
-      - "Ultron, full diagnostic"
-      - "Ultron, scan and fix"
-      - "Ultron, optimize yourself"
+      - "Aerith, run a diagnostic scan"
+      - "Aerith, quick diagnostic"
+      - "Aerith, full diagnostic"
+      - "Aerith, scan and fix"
+      - "Aerith, optimize yourself"
     """
     t = (text or "").strip()
     if not t:

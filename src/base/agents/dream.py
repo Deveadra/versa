@@ -19,7 +19,7 @@ from config.self_improvements import CFG
 # @dataclass
 # class Event:
 #     ts: str
-#     role: str          # "user" | "ultron" | "system"
+#     role: str          # "user" | "aerith" | "system"
 #     text: str
 #     meta: Dict[str, Any]
 

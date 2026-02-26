@@ -37,8 +37,8 @@ class PRManager:
         Returns the final branch name.
         """
         self.git.ensure_user(
-            getattr(settings, "github_bot_name", "ultron-bot"),
-            getattr(settings, "github_bot_email", "ultron-bot@local"),
+            getattr(settings, "github_bot_name", "aerith-bot"),
+            getattr(settings, "github_bot_email", "aerith-bot@local"),
         )
         # Remember where the user was
         try:
@@ -57,7 +57,7 @@ class PRManager:
         stashed = False
         if self.git.has_uncommitted_changes():
             self.logger.info("Uncommitted changes detected — stashing")
-            self.git.stash_push("ultron-autosave")
+            self.git.stash_push("aerith-autosave")
             stashed = True
 
         try:
@@ -102,7 +102,7 @@ class PRManager:
 {chr(10).join(f"- {ch.path} ({ch.apply_mode})" for ch in proposal.changes)}
 
 ## Why This Matters
-This change was proposed by Ultron to address: *"{title}"*
+This change was proposed by Aerith to address: *"{title}"*
 
 ## Tests / Validation
 {extra_tests or "- ⚠️ No tests were run"}

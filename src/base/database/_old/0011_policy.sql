@@ -1,6 +1,6 @@
 BEGIN;
 
--- Topics Ultron may proactively speak about
+-- Topics Aerith may proactively speak about
 CREATE TABLE IF NOT EXISTS topics (
   topic_id TEXT PRIMARY KEY,
   policy   TEXT NOT NULL CHECK(policy IN ('principled','advocate','adaptive')),

@@ -1,7 +1,7 @@
 # Quickstart
 
 
-# Ultron MVP (Local, Modular, Upgradeable) 
+# Aerith MVP (Local, Modular, Upgradeable) 
 
 ### Notes
 
@@ -186,34 +186,34 @@ Voice (ElevenLabs) and Home Assistant are optional modules.
 
 ## 3) Upgrades (Where to extend)
 
-Swap embeddings: ultron/embeddings/provider.py
+Swap embeddings: aerith/embeddings/provider.py
 
 Swap vector index: build FAISS or pgvector and wire in retrieval.py
 
-Add KG: create ultron/kg/ and sync entities from facts/events
+Add KG: create aerith/kg/ and sync entities from facts/events
 
 Add background jobs: summarization, consolidation, pruning
 
-Add tools/skills: ultron/devices/ plugins
+Add tools/skills: aerith/devices/ plugins
 
 ---
 
 ### Modes
-Ultron can run in different modes, controlled by `.env`:
+Aerith can run in different modes, controlled by `.env`:
 - `ULTRON_MODE=text` → text REPL (default)
 - `ULTRON_MODE=voice` → mic input + STT (Whisper) + TTS (ElevenLabs)
 - `ULTRON_MODE=stream` → future live conversation mode
 
 ### Semantic Search with FAISS
 
-- Ultron now uses **FAISS** for vector similarity (inner product / cosine).
+- Aerith now uses **FAISS** for vector similarity (inner product / cosine).
 - All new events ingested via `Retriever.index_texts()` will be encoded and stored in FAISS.
 - At bootstrap, the last 500 events are indexed.
 - Keyword FTS fallback still exists for resilience.
 
 ### Vector Backend Abstraction
 
-- Ultron now uses a `VectorBackend` interface.
+- Aerith now uses a `VectorBackend` interface.
 - Current default: **FAISSBackend** (local, fast, MVP-friendly).
 - Future backends: WeaviateBackend, MilvusBackend — swap in with a config change.
 
@@ -227,7 +227,7 @@ Ultron can run in different modes, controlled by `.env`:
 
 ### Automatic Consolidation (Cron)
 
-- Ultron now runs a **daily consolidation job** at 03:00 server time.
+- Aerith now runs a **daily consolidation job** at 03:00 server time.
 - Uses APScheduler, running in the background.
 - Summarizes and prunes older events into concise notes.
 - Configurable: adjust hour/minute in `orchestrator.py` when adding job.
@@ -242,21 +242,21 @@ ULTRON_CONSOLIDATION_MINUTE=30
 
 ### Knowledge Graph Reasoning (MVP)
 
-- Ultron now uses the KG automatically when queries suggest entity/relationship questions.
-- Ultron now extracts **entities** and **relations** from events.
+- Aerith now uses the KG automatically when queries suggest entity/relationship questions.
+- Aerith now extracts **entities** and **relations** from events.
 - Entities and relations stored in SQLite tables (`entities`, `relations`).
 - Simple NER via spaCy; relation hints are rule-based (expandable).
 - Detection is naive (keywords: who, relation, related, about). Future: improved NER + multi-hop reasoning.
 - Auto-ingests on every new memory.
 - Example query:
 ```python
-kg = KGStore(SQLiteConn("./ultron.db"))
+kg = KGStore(SQLiteConn("./aerith.db"))
 print(kg.query_relations("Alice"))
 # → [("Alice", "has_sibling", "User")]
 ```
 
 ### Multi-Hop Traversal
-- Ultron can now follow relation chains in the KG.
+- Aerith can now follow relation chains in the KG.
 
 ### Reverse Traversal
 - KG traversal now works in **both directions**.
@@ -287,10 +287,10 @@ Facts are kept fresh by periodically bumping `confidence` and `last_reinforced` 
 Place `0002_learning.sql` next to `0001_init.sql`. Ensure orchestrator runs both on startup.
 
 ### How rules get into the DB (seed via SQL or commands)
-We don’t hardcode them. You (or Ultron, during “dream”) insert them. Example seeds (optional, purely data).
+We don’t hardcode them. You (or Aerith, during “dream”) insert them. Example seeds (optional, purely data).
 
 - If you don’t like these, delete/disable them (enabled=0)—no code changes needed.
-- Ultron can write new rows during the dream job based on correlations (below):
+- Aerith can write new rows during the dream job based on correlations (below):
 
 ```sql
 INSERT INTO engagement_rules
@@ -333,7 +333,7 @@ In your running text UI:
 propose: switch memory search to FTS triggers and LIKE fallback, and add a guard to store.py keyword_search to strip commas from MATCH query
 ```
 
-**Ultron:**
+**Aerith:**
 
 - Scans codebase
 
@@ -341,7 +341,7 @@ propose: switch memory search to FTS triggers and LIKE fallback, and add a guard
 
 - Applies local changes
 
-- Creates branch ultron/proposal/...
+- Creates branch aerith/proposal/...
 
 - Commits, pushes, opens a PR — prints the PR URL
 
@@ -373,7 +373,7 @@ propose: switch memory search to FTS triggers and LIKE fallback, and add a guard
 ---
 
 
-To change the daily consolidation time without touching code, add these to your `.env` and restart Ultron:
+To change the daily consolidation time without touching code, add these to your `.env` and restart Aerith:
 
 
 ```env

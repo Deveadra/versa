@@ -21,7 +21,7 @@ class SQLiteConn:
     def _configure_connection(self) -> None:
         """
         Connection-level safety defaults.
-        These should be true for *every* DB connection Ultron uses.
+        These should be true for *every* DB connection Aerith uses.
         """
         cur = self.conn.cursor()
 

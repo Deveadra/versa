@@ -15,7 +15,7 @@ When creating or refining rules:
 cur.execute("INSERT OR IGNORE INTO topics (id) VALUES (?)", (topic_id,))
 ```
 
-So if Ultron spawns a new rule about "screen_time", that topic is automatically registered.
+So if Aerith spawns a new rule about "screen_time", that topic is automatically registered.
 
 3. Hook Mood to Tone Memory
 
@@ -28,7 +28,7 @@ last_example = style_complaint(cluster_row["last_example"], mood=tone) if cluste
 
 4. Review Options
 
-Voice: “Ultron, approve rule 2.” → status='approved'.
+Voice: “Aerith, approve rule 2.” → status='approved'.
 
 Text: “Show me pending rules.” → he reads from DB.
 

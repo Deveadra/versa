@@ -37,7 +37,7 @@ class Settings(BaseModel):
     # simple, concrete types (no Optional for mode)
     mode: Literal["text", "voice", "stream"] = "text"
 
-    db_path: str = Field(default=os.getenv("ULTRON_DB_PATH", "./ultron.db"))
+    db_path: str = Field(default=os.getenv("ULTRON_DB_PATH", "./aerith.db"))
     memory_ttl_days: int = int(os.getenv("ULTRON_MEMORY_TTL_DAYS", 30))
     importance_threshold: int = int(os.getenv("ULTRON_IMPORTANCE_THRESHOLD", 25))
 
@@ -46,7 +46,7 @@ class Settings(BaseModel):
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
     # TTS engine choice
-    tts_engine: str = os.getenv("TTS_ENGINE", "ultron")
+    tts_engine: str = os.getenv("TTS_ENGINE", "aerith")
 
     # Embeddings
     embeddings_provider: str = os.getenv("EMBEDDINGS_PROVIDER", "sentence_transformers")
@@ -56,7 +56,7 @@ class Settings(BaseModel):
     eleven_api_key: str | None = os.getenv("ELEVENLABS_API_KEY")
     eleven_voice_id: str | None = os.getenv("ELEVENLABS_VOICE_ID")
 
-    tts_engine: str = os.getenv("TTS_ENGINE", "elevenlabs")  # or "ultron"
+    tts_engine: str = os.getenv("TTS_ENGINE", "elevenlabs")  # or "aerith"
 
     # Home Assistant
     ha_base_url: str | None = os.getenv("HA_BASE_URL")
@@ -68,9 +68,9 @@ class Settings(BaseModel):
 
     # Voice
     auto_speak: bool = False  # ✅ default enabled
-    wake_word: str = "ultron"  # ✅ wake word for vocal cues
+    wake_word: str = "aerith"  # ✅ wake word for vocal cues
     wake_commands: dict[str, str] = {
-        "text me": "disable_speak",  # Ultron will text instead of speak
+        "text me": "disable_speak",  # Aerith will text instead of speak
         "talk to me": "enable_speak",  # Explicitly turn speaking back on
     }
 
@@ -78,8 +78,8 @@ class Settings(BaseModel):
     github_token: str | None = os.getenv("GITHUB_TOKEN")  # required for PRs
     github_repo: str | None = os.getenv("GITHUB_REPO")  # e.g. "yourname/assistant"
     github_default_branch: str = os.getenv("GITHUB_DEFAULT_BRANCH", "main")
-    github_bot_name: str = os.getenv("GITHUB_BOT_NAME", "ultron-bot")
-    github_bot_email: str = os.getenv("GITHUB_BOT_EMAIL", "ultron-bot@local")
+    github_bot_name: str = os.getenv("GITHUB_BOT_NAME", "aerith-bot")
+    github_bot_email: str = os.getenv("GITHUB_BOT_EMAIL", "aerith-bot@local")
     github_remote_name: str = os.getenv("GITHUB_REMOTE_NAME", "origin")
 
     # Proposer behavior
@@ -89,7 +89,7 @@ class Settings(BaseModel):
         "run.py",
     ]
     proposer_blocklist: list[str] = [".venv/", ".git/", "data/", "models/", "__pycache__/"]
-    proposer_branch_prefix: str = os.getenv("PROPOSER_BRANCH_PREFIX", "ultron/proposal/")
+    proposer_branch_prefix: str = os.getenv("PROPOSER_BRANCH_PREFIX", "aerith/proposal/")
     proposer_max_files_per_pr: int = int(os.getenv("PROPOSER_MAX_FILES_PER_PR", "20"))
     proposer_max_patch_bytes: int = int(os.getenv("PROPOSER_MAX_PATCH_BYTES", str(256_000)))
     proposal_notify_stdout: bool = True  # simple notification channel; you can add Slack later

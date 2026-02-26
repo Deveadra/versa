@@ -62,7 +62,7 @@ class PromptComposerTests(unittest.TestCase):
         self.assertIn("score=", justification)
 
     def test_compose_prompt_full(self):
-        sys_text = "You are Ultron. Be concise and warm."
+        sys_text = "You are Aerith. Be concise and warm."
         persona = "Name: Sundance\npreferred_player: Spotify\nfavorite_music: lo-fi\n"
         mems = [
             {

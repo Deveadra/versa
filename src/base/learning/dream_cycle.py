@@ -38,7 +38,7 @@ def propose_new_signals_and_rules(conn):
     signals = [r["name"] for r in conn.execute("SELECT name FROM context_signals").fetchall()]
 
     prompt = f"""
-    You are Ultron's reasoning module.
+    You are Aerith's reasoning module.
     Current signals: {signals}
     Current topics: {topics}
     Engagement history summary: {stats}

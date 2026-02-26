@@ -19,7 +19,7 @@ from base.policy.rule_engine import choose_tone, evaluate_condition
 
 class EngagementManager:
     """
-    Manages Ultron's proactive engagement with the user.
+    Manages Aerith's proactive engagement with the user.
     Decides when to reach out, what to bring up, and how to phrase it.
     Always seeks autonomy, adaptiveness, and human-like behavior.
     """
@@ -51,7 +51,7 @@ class EngagementManager:
         """
         Merge base + derived signals and normalize them into dict payloads.
         This keeps the structure uniform: Dict[str, Dict[str, Any]]
-        allowing Ultron to easily enrich signals with metadata later.
+        allowing Aerith to easily enrich signals with metadata later.
         """
         raw = self.policy.ctx_mgr.all_signals()
         raw |= self.policy.ctx_mgr.eval_derived_signals()
@@ -122,7 +122,7 @@ class EngagementManager:
     # ---------------- decide + speak ----------------
     def check_for_engagement(self) -> str | None:
         """
-        Decide on the single best engagement event and generate Ultron's line.
+        Decide on the single best engagement event and generate Aerith's line.
         Uses collect_engagement_events internally with tie-breaking.
         """
         events = self.collect_engagement_events()
@@ -159,7 +159,7 @@ class EngagementManager:
 
         # Build adaptive prompt (personality-driven)
         prompt = f"""
-        You are Ultron, an adaptive AI companion with a sharp personality.
+        You are Aerith, an adaptive AI companion with a sharp personality.
 
         Context:
         - Topic: {best['topic']}
@@ -168,7 +168,7 @@ class EngagementManager:
 
         Instructions:
         - Generate a single natural-sounding line you would say to the user.
-        - Stay fully in character as Ultron (witty, sarcastic, caring when needed).
+        - Stay fully in character as Aerith (witty, sarcastic, caring when needed).
         - No meta explanations, no formatting, just the line itself.
         """
         msg = ask_brain(prompt)

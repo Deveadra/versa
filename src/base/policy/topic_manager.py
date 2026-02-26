@@ -6,7 +6,7 @@ from base.database.sqlite import SQLiteConn
 
 def get_known_topics(conn: SQLiteConn | sqlite3.Connection) -> list[str]:
     """
-    Return all topics Ultron currently knows about.
+    Return all topics Aerith currently knows about.
     Populated automatically by dream cycle inserts into topics table.
     """
     cur = conn.cursor()

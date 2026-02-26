@@ -1,4 +1,4 @@
-# src/base/voice/tts_ultron.py
+# src/base/voice/tts_aerith.py
 from __future__ import annotations
 
 import base64
@@ -9,8 +9,8 @@ import requests
 import simpleaudio as sa
 
 
-class UltronVoice:
-    _instance: UltronVoice | None = None
+class AerithVoice:
+    _instance: AerithVoice | None = None
 
     def __init__(self, endpoint_url: str | None = None):
         self.endpoint_url = endpoint_url or os.getenv(
@@ -18,9 +18,9 @@ class UltronVoice:
         )
 
     @classmethod
-    def get_instance(cls, endpoint_url: str | None = None) -> UltronVoice:
+    def get_instance(cls, endpoint_url: str | None = None) -> AerithVoice:
         if cls._instance is None:
-            cls._instance = UltronVoice(endpoint_url)
+            cls._instance = AerithVoice(endpoint_url)
         return cls._instance
 
     def speak(self, text: str) -> None:
@@ -50,4 +50,4 @@ class UltronVoice:
                     pass
 
         except Exception as e:
-            print(f"[UltronVoice] Error during TTS: {e}")
+            print(f"[AerithVoice] Error during TTS: {e}")

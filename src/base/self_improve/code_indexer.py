@@ -31,7 +31,7 @@ class CodeIndexer:
 
     def _cache_path(self) -> Path:
         root = Path(self.repo_root)
-        return root / ".ultron_index_cache.json"
+        return root / ".aerith_index_cache.json"
 
     def _load_cache(self) -> dict:
         p = self._cache_path()

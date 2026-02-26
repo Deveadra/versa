@@ -1,6 +1,6 @@
 # src/base/__init__.py
 """
-Ultron MVP package.
+Aerith MVP package.
 
 Keep this module import-safe:
 - Do NOT import optional/voice-heavy modules at import time.

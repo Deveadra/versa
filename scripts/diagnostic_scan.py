@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # assistant/scripts/diagnostic_scan.py
 """
-Diagnostic scan runner for Ultron.
+Diagnostic scan runner for Aerith.
 
 Features:
 - Runs Black, Ruff, Pytest, and Python syntax compilation.

@@ -4,7 +4,7 @@ import os
 import random
 import sqlite3
 
-DB = "/tmp/ultron_local_sim.db"
+DB = "/tmp/aerith_local_sim.db"
 
 try:
     os.remove(DB)

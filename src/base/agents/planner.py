@@ -6,7 +6,7 @@ from base.llm.brain import ask_brain
 
 def plan_steps(goal: str) -> list[str]:
     prompt = (
-        f"You are Ultron's autonomous planning module. Break the following user goal into clear, numbered steps "
+        f"You are Aerith's autonomous planning module. Break the following user goal into clear, numbered steps "
         f"that an agent can execute with tools like memory access, file reading, writing, shell, web browsing, etc.\n\n"
         f"Goal: {goal}\n\nSteps:\n"
     )

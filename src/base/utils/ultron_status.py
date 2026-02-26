@@ -1,4 +1,4 @@
-# base/utils/ultron_status.py
+# base/utils/aerith_status.py
 from __future__ import annotations
 
 import itertools
@@ -67,7 +67,7 @@ spinner = Progress(
 
 
 @dataclass
-class UltronStatusConfig:
+class AerithStatusConfig:
     immersive: bool = True  # keep on; we gate behavior with this
     stall_warn_sec: float = 8.0  # narrate if no updates in this window
     stall_bell: bool = False  # play '\a' on stall notice
@@ -80,9 +80,9 @@ class UltronStatusConfig:
 
 
 @dataclass
-class UltronStatus:
+class AerithStatus:
     _voice_lock: threading.Lock = field(default_factory=threading.Lock, init=False)
-    cfg: UltronStatusConfig = field(default_factory=UltronStatusConfig)
+    cfg: AerithStatusConfig = field(default_factory=AerithStatusConfig)
     _active: bool = field(default=False, init=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False)
     _last_emit: float = field(default=0.0, init=False)
@@ -183,7 +183,7 @@ class UltronStatus:
         )
         with Live(prog, console=_STATUS_CONSOLE, refresh_per_second=12):
             task_id = prog.add_task(
-                "ultron", total=100, completed=0, stage=self._stage, msg=self._pick_tag(self._stage)
+                "aerith", total=100, completed=0, stage=self._stage, msg=self._pick_tag(self._stage)
             )
             while self._active:
                 with self._lock:
@@ -252,7 +252,7 @@ class UltronStatus:
 @dataclass
 class CognitiveStatus:
     """
-    Manages Ultron's terminal output during active processes.
+    Manages Aerith's terminal output during active processes.
     Provides immersive, low-latency status feedback to indicate activity,
     prevent perceived hangs, and add personality to long-running tasks.
     """

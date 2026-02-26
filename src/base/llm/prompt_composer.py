@@ -82,7 +82,7 @@ def compose_retrieval_block(memories: list[dict[str, Any]], top_k: int = 3) -> s
 
 def synthesize_memories(memories: list[dict[str, Any]], top_k: int = 3) -> str:
     """
-    Turn raw memory dicts into a natural narrative Ultron can use.
+    Turn raw memory dicts into a natural narrative Aerith can use.
     """
     if not memories:
         return ""
@@ -119,7 +119,7 @@ def compose_prompt(
 ) -> str:
     """
     Compose a dynamic prompt that fuses:
-    - Ultron's evolving persona
+    - Aerith's evolving persona
     - Habits and preferences
     - Relevant memories
     - Sentiment/tone analysis
@@ -132,7 +132,7 @@ def compose_prompt(
 
     # Persona (dynamic, evolving)
     if persona_text:
-        parts.append(f"You are Ultron. {persona_text.strip()}\n")
+        parts.append(f"You are Aerith. {persona_text.strip()}\n")
 
     persona_block = compose_persona_block(persona_text)
     if persona_block:
@@ -182,7 +182,7 @@ def compose_style_plan(
     channel: str = "text",  # "voice" or "text"
 ) -> dict[str, Any]:
     """
-    Produce a concrete style plan Ultron follows for *this* response.
+    Produce a concrete style plan Aerith follows for *this* response.
     Combines: sentiment, policy bandit, habits, and channel.
     """
     profile = profile_mgr.load_profile()  # assume it returns dict

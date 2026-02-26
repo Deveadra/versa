@@ -48,7 +48,7 @@ from base.calendar import calendar_flow
 from base.core.audio import interrupt, listen_for_wake_word, listen_until_silence, stream_speak
 from base.core.commands import handle_policy_command
 
-# ---------- Ultron imports ----------
+# ---------- Aerith imports ----------
 from base.core.core import SLEEP_WORDS, STOP_WORDS, JarvisState, reset_session
 from base.core.decider import Decider
 from base.core.mode_classifier import classify_mode
@@ -79,7 +79,7 @@ from personalities.loader import load_personality
 # Schema/table creation is handled by the stores themselves (or we’ll wire it up in store.py next).
 
 # Personality/setup
-BASE_PERSONALITY = os.getenv("BASE_PERSONALITY", "ultron")
+BASE_PERSONALITY = os.getenv("BASE_PERSONALITY", "aerith")
 MODE = os.getenv("PERSONALITY_MODE", "default")
 CURRENT_PERSONALITY = load_personality(BASE_PERSONALITY, MODE)
 
@@ -134,7 +134,7 @@ manager.register(
     flow=True,
 )
 
-print(f"[Ultron initialized] base={BASE_PERSONALITY}, mode={MODE}")
+print(f"[Aerith initialized] base={BASE_PERSONALITY}, mode={MODE}")
 
 # ---------------------------------------------------------------------------
 #                        HOME ASSISTANT PRESENCE (optional)
@@ -439,7 +439,7 @@ try:
                     if "interrupt_ack" in CURRENT_PERSONALITY:
                         ack = random.choice(CURRENT_PERSONALITY["interrupt_ack"])
 
-                    # policy commands (e.g., “Ultron disable speak” etc.)
+                    # policy commands (e.g., “Aerith disable speak” etc.)
                     reply = handle_policy_command(text, policy)
                     if reply:
                         print(f"[Policy] {reply}")
@@ -498,7 +498,7 @@ try:
                     stream_speak("Back to default mode.")
                     continue
 
-                resp = repl_commands.handle_command("ultron", text, policy)
+                resp = repl_commands.handle_command("aerith", text, policy)
                 if resp:
                     print(f"[Command] {resp}")
                     stream_speak(resp)
@@ -533,13 +533,13 @@ try:
                         print(f"{BASE_PERSONALITY.capitalize()}: {reply}")
                         stream_speak(reply)
                 else:
-                    print("[Ultron] LLM is disabled or not configured.")
+                    print("[Aerith] LLM is disabled or not configured.")
                     stream_speak("I'm not currently connected to my AI core.")
                     reply = None
 
                 # Final fallback if no reply generated
                 if not reply:
-                    print("[Ultron] No response generated.")
+                    print("[Aerith] No response generated.")
                     stream_speak("I didn't catch that. Could you rephrase?")
 
                 # Store memory of the exchange
@@ -562,13 +562,13 @@ try:
                 #         print(f"{BASE_PERSONALITY.capitalize()}: {reply}")
                 #         stream_speak(reply)
                 # else:
-                #     print("[Ultron] LLM is disabled or not configured.")
+                #     print("[Aerith] LLM is disabled or not configured.")
                 #     stream_speak("I'm not currently connected to my AI core.")
                 #     reply = None
 
                 # # Final fallback if no reply generated
                 # if not reply:
-                #     print("[Ultron] No response generated.")
+                #     print("[Aerith] No response generated.")
                 #     stream_speak("I didn't catch that. Could you rephrase?")
 
                 # # Store memory of the exchange

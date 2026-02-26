@@ -68,7 +68,7 @@ def record_rule_feedback(
     summary = f"User {outcome} {topic_id} reminder. Context: {context}"
     importance = 0.3 if outcome in ("ignore", "angry") else 0.6
 
-    # Memory integration: every feedback is an event Ultron can learn from
+    # Memory integration: every feedback is an event Aerith can learn from
     mem = MemoryStore(db)
     mem.add_event(
         summary,

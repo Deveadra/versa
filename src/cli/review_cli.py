@@ -124,7 +124,7 @@ def cmd_revert(conn, name: str):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Ultron rule review CLI")
+    parser = argparse.ArgumentParser(description="Aerith rule review CLI")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("list", help="List pending proposals")

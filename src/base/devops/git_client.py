@@ -28,7 +28,7 @@ class GitClient:
     def ensure_user(self, name: str, email: str) -> None:
         """
         Ensure Git has a user identity set for commits.
-        Ensure git commits on this branch are attributed to Ultron (or whatever identity is passed).
+        Ensure git commits on this branch are attributed to Aerith (or whatever identity is passed).
         Does not overwrite your global identity unless explicitly run.
         """
         try:
@@ -148,7 +148,7 @@ class GitClient:
     def has_uncommitted_changes(self) -> bool:
         return bool(self._run(["status", "--porcelain"], check=False).strip())
 
-    def stash_push(self, message: str = "ultron-autosave") -> None:
+    def stash_push(self, message: str = "aerith-autosave") -> None:
         try:
             self._run(["stash", "push", "-u", "-m", message])
         except GitError as e:
@@ -194,8 +194,8 @@ class GitClient:
         """
 
         self.ensure_user(
-            getattr(settings, "github_bot_name", "ultron-bot"),
-            getattr(settings, "github_bot_email", "ultron-bot@local"),
+            getattr(settings, "github_bot_name", "aerith-bot"),
+            getattr(settings, "github_bot_email", "aerith-bot@local"),
         )
 
         dirty = self.has_uncommitted_changes()
@@ -233,7 +233,7 @@ class GitClient:
         # stashed = False
         # if self.has_uncommitted_changes():
         #     self.logger.info("Uncommitted changes detected — stashing")
-        #     self.run(["git", "stash", "push", "-u", "-m", "ultron-autosave"])
+        #     self.run(["git", "stash", "push", "-u", "-m", "aerith-autosave"])
         #     stashed = True
 
         # try:

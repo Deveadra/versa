@@ -2,7 +2,7 @@ from .voice import record_audio, speak, transcribe
 
 
 def run_voice(orch):
-    print("Ultron (voice) ready. Say 'exit' to quit.")
+    print("Aerith (voice) ready. Say 'exit' to quit.")
     while True:
         path = record_audio(duration=5)
         msg = transcribe(path)

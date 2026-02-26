@@ -1,7 +1,7 @@
 
 BEGIN;
 
--- 1) Usage log for *everything* Ultron does or is asked to do
+-- 1) Usage log for *everything* Aerith does or is asked to do
 CREATE TABLE IF NOT EXISTS usage_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_text TEXT,

@@ -90,5 +90,5 @@ def format_memories(memories):
         return None
     lines = []
     for ts, mtype, content, response in memories:
-        lines.append(f"[{ts}] You said: '{content}' | Ultron replied: '{response}'")
+        lines.append(f"[{ts}] You said: '{content}' | Aerith replied: '{response}'")
     return "\n".join(lines)

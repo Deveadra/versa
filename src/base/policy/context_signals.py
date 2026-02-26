@@ -16,7 +16,7 @@ def _unwrap_conn(db: SQLiteConn | sqlite3.Connection) -> sqlite3.Connection:
 class ContextSignals:
     """
     Registry and manager for context signals.
-    Signals are dynamic: Ultron can invent new ones during dream cycle.
+    Signals are dynamic: Aerith can invent new ones during dream cycle.
     Each signal has:
       - name (str)
       - value (str/float/bool)

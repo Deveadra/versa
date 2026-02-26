@@ -4,7 +4,7 @@ from __future__ import annotations
 def test_events_fts_can_search_after_rebuild(db) -> None:
     db.conn.execute(
         "INSERT INTO events(content, ts, importance, type) VALUES(?, ?, ?, ?)",
-        ("hello ultron world", "2025-01-01T00:00:00", 0.5, "event"),
+        ("hello aerith world", "2025-01-01T00:00:00", 0.5, "event"),
     )
     db.conn.commit()
 
@@ -13,7 +13,7 @@ def test_events_fts_can_search_after_rebuild(db) -> None:
 
     rows = db.conn.execute(
         "SELECT rowid, content FROM events_fts WHERE events_fts MATCH ?;",
-        ("ultron",),
+        ("aerith",),
     ).fetchall()
 
     assert len(rows) >= 1

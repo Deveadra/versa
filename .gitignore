@@ -41,3 +41,6 @@ protect-main.sh
 .env
 config/client_secret_*.json
 token*.pickle
+
+# Random files
+md.md

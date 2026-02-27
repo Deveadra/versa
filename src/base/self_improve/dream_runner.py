@@ -24,21 +24,24 @@ class DreamRunner:
 
         self.gaps.mark(gap.id, "in_progress")
 
-        # 1) Scan + propose fix plan
-        findings = self.janitor.scan()
-        plan = self.janitor.propose_autofix(findings)
+        try:
+            # 1) Scan + propose fix plan
+            findings = self.janitor.scan()
+            plan = self.janitor.propose_autofix(findings)
 
-        # 2) Apply fixes in a branch/worktree (implementation detail)
-        # 3) Run tests (prefer sandbox)
-        ruff = self.tests.ruff()
-        black = self.tests.black_check()
-        pytest = self.tests.pytest_quick()
+            # 2–3) Apply fixes and run tests
+            ruff = self.tests.ruff()
+            black = self.tests.black_check()
+            pytest = self.tests.pytest_quick()
 
-        ok = ruff.ok and black.ok and pytest.ok
-        if not ok:
+            if not (ruff.ok and black.ok and pytest.ok):
+                self.gaps.mark(gap.id, "open")
+                return DreamRunResult(False, "Fix attempt failed tests; gap remains open.")
+
+            # 4) Open PR + update scoreboard
+            self.gaps.mark(gap.id, "resolved")
+            return DreamRunResult(True, "Fix validated; PR opened.", pr_url="(pr url here)")
+
+        except Exception as e:
             self.gaps.mark(gap.id, "open")
-            return DreamRunResult(False, "Fix attempt failed tests; gap remains open.")
-
-        # 4) Open PR (or produce compare URL) + update scoreboard
-        self.gaps.mark(gap.id, "resolved")
-        return DreamRunResult(True, "Fix validated; PR opened.", pr_url="(pr url here)")
+            return DreamRunResult(False, f"Unhandled exception during fix attempt: {e}")

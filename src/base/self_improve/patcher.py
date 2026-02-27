@@ -16,7 +16,8 @@ class Patcher:
 
     def _allowed(self, relpath: str) -> bool:
         # conservative: only allow edits within known-safe trees
-        return any(relpath.startswith(p) for p in self.allowlist_prefixes)
+        target = (self.root / relpath).resolve()
+        return any(target.is_relative_to(self.root / p) for p in self.allowlist_prefixes)
 
     def apply_anchor_replace(self, relpath: str, anchor: str, replacement: str) -> PatchOutcome:
         if not self._allowed(relpath):

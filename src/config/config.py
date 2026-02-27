@@ -9,23 +9,41 @@ from pydantic import BaseModel, Field
 
 
 def _read_secret(path_env: str) -> str | None:
+    """
+    Read a secret value from a file path stored in an environment variable.
+    Example:
+        GITHUB_SSH_KEY_FILE=/path/to/key
+    """
     path = os.getenv(path_env)
     if path and Path(path).exists():
         return Path(path).read_text(encoding="utf-8").strip()
     return None
 
 
-USE_LLM = bool(os.getenv("OPENAI_API_KEY"))
+def _get_int(env: str, default: int) -> int:
+    raw = os.getenv(env)
+    if raw is None or raw == "":
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
 
-github_ssh_key = _read_secret("GITHUB_SSH_KEY_FILE")
-github_gpg_key = _read_secret("GITHUB_GPG_KEY_FILE")
+
+def _get_bool(env: str, default: bool = False) -> bool:
+    raw = os.getenv(env)
+    if raw is None or raw == "":
+        return default
+    return raw.strip().lower() in {"1", "true", "t", "yes", "y", "on"}
 
 
+# ------------------------------------------------------------
+# Load environment FIRST (so anything below sees the .env values)
+# ------------------------------------------------------------
 env_override = os.getenv("AERITH_ENV_PATH")
 if env_override and os.path.exists(env_override):
     load_dotenv(env_override, override=True)
 else:
-    # 2) Otherwise, find the nearest .env (project root)
     found = find_dotenv(filename=".env", usecwd=True)
     if found:
         load_dotenv(found, override=True)
@@ -34,53 +52,67 @@ else:
 
 
 class Settings(BaseModel):
-    # simple, concrete types (no Optional for mode)
-    mode: Literal["text", "voice", "stream"] = "text"
+    # Runtime mode (allow env override)
+    mode: Literal["text", "voice", "stream"] = Field(
+        default_factory=lambda: os.getenv("AERITH_MODE", "text")  # type: ignore[return-value]
+    )
 
-    db_path: str = Field(default=os.getenv("AERITH_DB_PATH", "./aerith.db"))
-    memory_ttl_days: int = int(os.getenv("AERITH_MEMORY_TTL_DAYS", 30))
-    importance_threshold: int = int(os.getenv("AERITH_IMPORTANCE_THRESHOLD", 25))
+    # Core storage
+    db_path: str = Field(default_factory=lambda: os.getenv("AERITH_DB_PATH", "./aerith.db"))
+    memory_ttl_days: int = Field(default_factory=lambda: _get_int("AERITH_MEMORY_TTL_DAYS", 30))
+    importance_threshold: int = Field(
+        default_factory=lambda: _get_int("AERITH_IMPORTANCE_THRESHOLD", 25)
+    )
 
     # LLM
-    openai_api_key: str | None = os.getenv("OPENAI_API_KEY")
-    openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    openai_api_key: str | None = Field(default_factory=lambda: os.getenv("OPENAI_API_KEY"))
+    openai_model: str = Field(default_factory=lambda: os.getenv("OPENAI_MODEL", "gpt-4o-mini"))
 
-    # TTS engine choice
-    tts_engine: str = os.getenv("TTS_ENGINE", "aerith")
+    # TTS engine choice (single source of truth)
+    # valid examples: "elevenlabs", "aerith"
+    tts_engine: str = Field(default_factory=lambda: os.getenv("TTS_ENGINE", "elevenlabs"))
 
     # Embeddings
-    embeddings_provider: str = os.getenv("EMBEDDINGS_PROVIDER", "sentence_transformers")
-    embeddings_model: str = os.getenv("EMBEDDINGS_MODEL", "all-MiniLM-L6-v2")
+    embeddings_provider: str = Field(
+        default_factory=lambda: os.getenv("EMBEDDINGS_PROVIDER", "sentence_transformers")
+    )
+    embeddings_model: str = Field(
+        default_factory=lambda: os.getenv("EMBEDDINGS_MODEL", "all-MiniLM-L6-v2")
+    )
 
     # ElevenLabs
-    eleven_api_key: str | None = os.getenv("ELEVENLABS_API_KEY")
-    eleven_voice_id: str | None = os.getenv("ELEVENLABS_VOICE_ID")
-
-    tts_engine: str = os.getenv("TTS_ENGINE", "elevenlabs")  # or "aerith"
+    eleven_api_key: str | None = Field(default_factory=lambda: os.getenv("ELEVENLABS_API_KEY"))
+    eleven_voice_id: str | None = Field(default_factory=lambda: os.getenv("ELEVENLABS_VOICE_ID"))
 
     # Home Assistant
-    ha_base_url: str | None = os.getenv("HA_BASE_URL")
-    ha_token: str | None = os.getenv("HA_TOKEN")
+    ha_base_url: str | None = Field(default_factory=lambda: os.getenv("HA_BASE_URL"))
+    ha_token: str | None = Field(default_factory=lambda: os.getenv("HA_TOKEN"))
 
     # Consolidation cron
-    consolidation_hour: int = int(os.getenv("AERITH_CONSOLIDATION_HOUR", 3))
-    consolidation_minute: int = int(os.getenv("AERITH_CONSOLIDATION_MINUTE", 0))
+    consolidation_hour: int = Field(default_factory=lambda: _get_int("AERITH_CONSOLIDATION_HOUR", 3))
+    consolidation_minute: int = Field(
+        default_factory=lambda: _get_int("AERITH_CONSOLIDATION_MINUTE", 0)
+    )
 
-    # Voice
-    auto_speak: bool = False  # ✅ default enabled
-    wake_word: str = "aerith"  # ✅ wake word for vocal cues
+    # Voice UX
+    auto_speak: bool = Field(default_factory=lambda: _get_bool("AERITH_AUTO_SPEAK", False))
+    wake_word: str = Field(default_factory=lambda: os.getenv("AERITH_WAKE_WORD", "aerith"))
     wake_commands: dict[str, str] = {
-        "text me": "disable_speak",  # Aerith will text instead of speak
-        "talk to me": "enable_speak",  # Explicitly turn speaking back on
+        "text me": "disable_speak",
+        "talk to me": "enable_speak",
     }
 
     # --- GitHub / PR settings ---
-    github_token: str | None = os.getenv("GITHUB_TOKEN")  # required for PRs
-    github_repo: str | None = os.getenv("GITHUB_REPO")  # e.g. "yourname/assistant"
-    github_default_branch: str = os.getenv("GITHUB_DEFAULT_BRANCH", "main")
-    github_bot_name: str = os.getenv("GITHUB_BOT_NAME", "aerith-bot")
-    github_bot_email: str = os.getenv("GITHUB_BOT_EMAIL", "aerith-bot@local")
-    github_remote_name: str = os.getenv("GITHUB_REMOTE_NAME", "origin")
+    github_token: str | None = Field(default_factory=lambda: os.getenv("GITHUB_TOKEN"))
+    github_repo: str | None = Field(default_factory=lambda: os.getenv("GITHUB_REPO"))
+    github_default_branch: str = Field(default_factory=lambda: os.getenv("GITHUB_DEFAULT_BRANCH", "main"))
+    github_bot_name: str = Field(default_factory=lambda: os.getenv("GITHUB_BOT_NAME", "aerith-bot"))
+    github_bot_email: str = Field(default_factory=lambda: os.getenv("GITHUB_BOT_EMAIL", "aerith-bot@local"))
+    github_remote_name: str = Field(default_factory=lambda: os.getenv("GITHUB_REMOTE_NAME", "origin"))
+
+    # Optional: key material from files (handy for git signing / SSH operations)
+    github_ssh_key: str | None = Field(default_factory=lambda: _read_secret("GITHUB_SSH_KEY_FILE"))
+    github_gpg_key: str | None = Field(default_factory=lambda: _read_secret("GITHUB_GPG_KEY_FILE"))
 
     # Proposer behavior
     proposer_allowlist: list[str] = [
@@ -88,23 +120,33 @@ class Settings(BaseModel):
         "config/",
         "run.py",
     ]
-    proposer_blocklist: list[str] = [".venv/", ".git/", "data/", "models/", "__pycache__/"]
-    proposer_branch_prefix: str = os.getenv("PROPOSER_BRANCH_PREFIX", "aerith/proposal/")
-    proposer_max_files_per_pr: int = int(os.getenv("PROPOSER_MAX_FILES_PER_PR", "20"))
-    proposer_max_patch_bytes: int = int(os.getenv("PROPOSER_MAX_PATCH_BYTES", str(256_000)))
-    proposal_notify_stdout: bool = True  # simple notification channel; you can add Slack later
+    proposer_blocklist: list[str] = [
+        ".venv/",
+        ".git/",
+        "data/",
+        "models/",
+        "__pycache__/",
+    ]
+    proposer_branch_prefix: str = Field(
+        default_factory=lambda: os.getenv("PROPOSER_BRANCH_PREFIX", "aerith/proposal/")
+    )
+    proposer_max_files_per_pr: int = Field(
+        default_factory=lambda: _get_int("PROPOSER_MAX_FILES_PER_PR", 20)
+    )
+    proposer_max_patch_bytes: int = Field(
+        default_factory=lambda: _get_int("PROPOSER_MAX_PATCH_BYTES", 256_000)
+    )
+    proposal_notify_stdout: bool = True
 
     # Qdrant vector database settings
-    qdrant_url: str | None = os.getenv(
-        "QDRANT_URL"
-    )  # e.g. "https://your-cluster-id.aws.cloud.qdrant.io" or "http://localhost:6333"
-    qdrant_api_key: str | None = os.getenv("QDRANT_API_KEY")  # API key for Qdrant Cloud, if used
-    qdrant_collection: str = os.getenv("QDRANT_COLLECTION", "events")
+    qdrant_url: str | None = Field(default_factory=lambda: os.getenv("QDRANT_URL"))
+    qdrant_api_key: str | None = Field(default_factory=lambda: os.getenv("QDRANT_API_KEY"))
+    qdrant_collection: str = Field(default_factory=lambda: os.getenv("QDRANT_COLLECTION", "events"))
+
+    @property
+    def use_llm(self) -> bool:
+        # computed AFTER dotenv load
+        return bool(self.openai_api_key)
 
 
 settings = Settings()
-
-# class Settings(BaseModel):
-#     mode: str = os.getenv("AERITH_MODE", "text")
-
-# settings = Settings()

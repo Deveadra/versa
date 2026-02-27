@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, UTC
+from models import Gap, GapType, GapStatus
 from typing import Any, Literal
 
+import json
+
 GapType = Literal["unhandled_tool", "tool_error", "missing_capability", "test_failure", "lint_failure"]
+GapStatus = Literal["open", "in_progress", "blocked", "resolved"]
 
 @dataclass
 class Gap:
@@ -13,7 +17,7 @@ class Gap:
     title: str
     detail_json: dict[str, Any]
     created_at: str
-    status: Literal["open", "in_progress", "blocked", "resolved"]
+    status: GapStatus
     severity: int  # 1-10
     occurrences: int
 
@@ -45,6 +49,8 @@ class GapQueue:
         ).fetchone()
         return Gap(**dict(row)) if row else None
 
-    def mark(self, gap_id: int, status: str) -> None:
+    def mark(self, gap_id: int, status: GapStatus) -> None:
+        if status not in ("open", "in_progress", "blocked", "resolved"):
+            raise ValueError(f"Invalid status: {status}")
         self.conn.execute("UPDATE capability_gaps SET status=? WHERE id=?", (status, gap_id))
         self.conn.commit()

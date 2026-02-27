@@ -128,7 +128,7 @@ class SQLiteConn:
         self.conn.commit()
 
         if not files:
-            allow_fallback = os.getenv("ULTRON_ALLOW_DB_FALLBACK_SCHEMA", "").lower() in (
+            allow_fallback = os.getenv("AERITH_ALLOW_DB_FALLBACK_SCHEMA", "").lower() in (
                 "1",
                 "true",
                 "yes",
@@ -137,10 +137,10 @@ class SQLiteConn:
                 raise RuntimeError(
                     f"No migration files found in {mig_dir}. "
                     "Refusing to create an untracked fallback schema. "
-                    "If you truly want fallback for dev/testing, set ULTRON_ALLOW_DB_FALLBACK_SCHEMA=1."
+                    "If you truly want fallback for dev/testing, set AERITH_ALLOW_DB_FALLBACK_SCHEMA=1."
                 )
             logger.warning(
-                "No migration files found; applying fallback schema (ULTRON_ALLOW_DB_FALLBACK_SCHEMA=1)."
+                "No migration files found; applying fallback schema (AERITH_ALLOW_DB_FALLBACK_SCHEMA=1)."
             )
             self._apply_fallback_schema(self.conn)
             return

@@ -17,4 +17,4 @@ def launch_interface(orch):
 
         run_stream(orch)
     else:
-        raise ValueError(f"Unknown ULTRON_MODE: {mode!r}")
+        raise ValueError(f"Unknown AERITH_MODE: {mode!r}")

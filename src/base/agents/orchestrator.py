@@ -67,7 +67,7 @@ from config.config import settings
 # Avoid module import side-effects (opening DB connections, building vector indexes, etc.).
 # Orchestrator owns runtime initialization.
 
-ULTRON_SYSTEM_PROMPT = """\
+AERITH_SYSTEM_PROMPT = """\
 You are **Aerith**: incisive, charismatic, darkly witty, but never cartoonish.
 Speak like a human, not a machine. Be concise, adaptive, context-aware.
 Do NOT use canned catchphrases or repetitive “signature” lines.
@@ -380,7 +380,7 @@ class Orchestrator:
             result = self._evaluate_chain(task)
             return result
         finally:
-            self.status_display.stop("[ULTRON STATUS] Task evaluation complete.")
+            self.status_display.stop("[AERITH STATUS] Task evaluation complete.")
 
     # ----------------------------------------
     # Low-confidence confirmation, feedback IO
@@ -1210,7 +1210,7 @@ class Orchestrator:
         memory_block = f"\nRelevant notes:\n{context_lines}\n" if context_lines else ""
         user_content = f"{user_text}\n{memory_block}".strip()
         return [
-            {"role": "system", "content": ULTRON_SYSTEM_PROMPT},
+            {"role": "system", "content": AERITH_SYSTEM_PROMPT},
             {"role": "user", "content": user_content},
         ]
 

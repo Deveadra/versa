@@ -14,7 +14,7 @@ class AerithVoice:
 
     def __init__(self, endpoint_url: str | None = None):
         self.endpoint_url = endpoint_url or os.getenv(
-            "ULTRON_TTS_URL", "http://localhost:5000/speak"
+            "AERITH_TTS_URL", "http://localhost:5000/speak"
         )
 
     @classmethod

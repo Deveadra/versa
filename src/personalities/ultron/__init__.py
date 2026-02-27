@@ -1,1 +1,1 @@
-from .lines import ULTRON_PERSONALITY
+from .lines import AERITH_PERSONALITY

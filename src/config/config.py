@@ -21,7 +21,7 @@ github_ssh_key = _read_secret("GITHUB_SSH_KEY_FILE")
 github_gpg_key = _read_secret("GITHUB_GPG_KEY_FILE")
 
 
-env_override = os.getenv("ULTRON_ENV_PATH")
+env_override = os.getenv("AERITH_ENV_PATH")
 if env_override and os.path.exists(env_override):
     load_dotenv(env_override, override=True)
 else:
@@ -37,9 +37,9 @@ class Settings(BaseModel):
     # simple, concrete types (no Optional for mode)
     mode: Literal["text", "voice", "stream"] = "text"
 
-    db_path: str = Field(default=os.getenv("ULTRON_DB_PATH", "./aerith.db"))
-    memory_ttl_days: int = int(os.getenv("ULTRON_MEMORY_TTL_DAYS", 30))
-    importance_threshold: int = int(os.getenv("ULTRON_IMPORTANCE_THRESHOLD", 25))
+    db_path: str = Field(default=os.getenv("AERITH_DB_PATH", "./aerith.db"))
+    memory_ttl_days: int = int(os.getenv("AERITH_MEMORY_TTL_DAYS", 30))
+    importance_threshold: int = int(os.getenv("AERITH_IMPORTANCE_THRESHOLD", 25))
 
     # LLM
     openai_api_key: str | None = os.getenv("OPENAI_API_KEY")
@@ -63,8 +63,8 @@ class Settings(BaseModel):
     ha_token: str | None = os.getenv("HA_TOKEN")
 
     # Consolidation cron
-    consolidation_hour: int = int(os.getenv("ULTRON_CONSOLIDATION_HOUR", 3))
-    consolidation_minute: int = int(os.getenv("ULTRON_CONSOLIDATION_MINUTE", 0))
+    consolidation_hour: int = int(os.getenv("AERITH_CONSOLIDATION_HOUR", 3))
+    consolidation_minute: int = int(os.getenv("AERITH_CONSOLIDATION_MINUTE", 0))
 
     # Voice
     auto_speak: bool = False  # ✅ default enabled
@@ -105,6 +105,6 @@ class Settings(BaseModel):
 settings = Settings()
 
 # class Settings(BaseModel):
-#     mode: str = os.getenv("ULTRON_MODE", "text")
+#     mode: str = os.getenv("AERITH_MODE", "text")
 
 # settings = Settings()

@@ -1,6 +1,6 @@
 # personalities/aerith/lines.py
 
-ULTRON_PERSONALITY = {
+AERITH_PERSONALITY = {
     "name": "aerith",
     "wake": [
         "You called. Let’s hope it’s important.",

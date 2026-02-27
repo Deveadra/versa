@@ -123,6 +123,10 @@ pip install -e ".[dev]"
 Copy-Item .env.sample .env -ErrorAction SilentlyContinue
 # If .env.sample doesn't exist, create .env manually and add your keys.
 
+# Run baseline tests
+pytest -q
+
+# Run Aerith REPL:
 python run.py
 ```
 
@@ -200,9 +204,9 @@ Add tools/skills: aerith/devices/ plugins
 
 ### Modes
 Aerith can run in different modes, controlled by `.env`:
-- `ULTRON_MODE=text` → text REPL (default)
-- `ULTRON_MODE=voice` → mic input + STT (Whisper) + TTS (ElevenLabs)
-- `ULTRON_MODE=stream` → future live conversation mode
+- `AERITH_MODE=text` → text REPL (default)
+- `AERITH_MODE=voice` → mic input + STT (Whisper) + TTS (ElevenLabs)
+- `AERITH_MODE=stream` → future live conversation mode
 
 ### Semantic Search with FAISS
 
@@ -232,12 +236,12 @@ Aerith can run in different modes, controlled by `.env`:
 - Summarizes and prunes older events into concise notes.
 - Configurable: adjust hour/minute in `orchestrator.py` when adding job.
 - Configure via `.env`:
-- `ULTRON_CONSOLIDATION_HOUR` (0–23)
-- `ULTRON_CONSOLIDATION_MINUTE` (0–59)
+- `AERITH_CONSOLIDATION_HOUR` (0–23)
+- `AERITH_CONSOLIDATION_MINUTE` (0–59)
 - Example: run every day at 1:30 AM:
 ```env
-ULTRON_CONSOLIDATION_HOUR=1
-ULTRON_CONSOLIDATION_MINUTE=30
+AERITH_CONSOLIDATION_HOUR=1
+AERITH_CONSOLIDATION_MINUTE=30
 ```
 
 ### Knowledge Graph Reasoning (MVP)
@@ -378,8 +382,8 @@ To change the daily consolidation time without touching code, add these to your 
 
 ```env
 # Scheduler (24h format)
-ULTRON_CRON_HOUR=3
-ULTRON_CRON_MINUTE=0
+AERITH_CRON_HOUR=3
+AERITH_CRON_MINUTE=0
 ```
 
 # CLI Commands

@@ -8,26 +8,26 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class SelfImproveConfig:
     # Paths
-    repo_root: str = os.getenv("ULTRON_REPO_ROOT", ".")
-    logs_dir: str = os.getenv("ULTRON_LOGS_DIR", "logs")
-    learning_dir: str = os.getenv("ULTRON_LEARNING_DIR", "memory/learning")
-    reports_dir: str = os.getenv("ULTRON_REPORTS_DIR", "memory/reports")
+    repo_root: str = os.getenv("AERITH_REPO_ROOT", ".")
+    logs_dir: str = os.getenv("AERITH_LOGS_DIR", "logs")
+    learning_dir: str = os.getenv("AERITH_LEARNING_DIR", "memory/learning")
+    reports_dir: str = os.getenv("AERITH_REPORTS_DIR", "memory/reports")
 
     # Git / MR
-    git_remote: str = os.getenv("ULTRON_GIT_REMOTE", "origin")
-    git_default_branch: str = os.getenv("ULTRON_GIT_DEFAULT_BRANCH", "main")
-    gitlab_api_url: str = os.getenv("ULTRON_GITLAB_API_URL", "").rstrip("/")
-    gitlab_project_id: str = os.getenv("ULTRON_GITLAB_PROJECT_ID", "")
-    gitlab_token: str = os.getenv("ULTRON_GITLAB_TOKEN", "")
+    git_remote: str = os.getenv("AERITH_GIT_REMOTE", "origin")
+    git_default_branch: str = os.getenv("AERITH_GIT_DEFAULT_BRANCH", "main")
+    gitlab_api_url: str = os.getenv("AERITH_GITLAB_API_URL", "").rstrip("/")
+    gitlab_project_id: str = os.getenv("AERITH_GITLAB_PROJECT_ID", "")
+    gitlab_token: str = os.getenv("AERITH_GITLAB_TOKEN", "")
 
     # Diagnostics
-    ruff_args: str = os.getenv("ULTRON_RUFF_ARGS", "ruff --config pyproject.toml check .")
-    mypy_args: str = os.getenv("ULTRON_MYPY_ARGS", "mypy --install-types --non-interactive")
-    pytest_collect_args: str = os.getenv("ULTRON_PYTEST_COLLECT_ARGS", "pytest -q --collect-only")
-    perf_sample_seconds: int = int(os.getenv("ULTRON_PERF_SAMPLE_SECONDS", "5"))
+    ruff_args: str = os.getenv("AERITH_RUFF_ARGS", "ruff --config pyproject.toml check .")
+    mypy_args: str = os.getenv("AERITH_MYPY_ARGS", "mypy --install-types --non-interactive")
+    pytest_collect_args: str = os.getenv("AERITH_PYTEST_COLLECT_ARGS", "pytest -q --collect-only")
+    perf_sample_seconds: int = int(os.getenv("AERITH_PERF_SAMPLE_SECONDS", "5"))
 
     # Proposal thresholds
-    open_mr_on_any_fix: bool = os.getenv("ULTRON_OPEN_MR_ON_ANY_FIX", "1") == "1"
+    open_mr_on_any_fix: bool = os.getenv("AERITH_OPEN_MR_ON_ANY_FIX", "1") == "1"
 
 
 CFG = SelfImproveConfig()

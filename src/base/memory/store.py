@@ -62,7 +62,7 @@ class MemoryStore:
             self._embedder, self._embed_dim = None, None
 
         # 3) vector backend selection (AFTER embedder)
-        backend_choice = (os.getenv("ULTRON_VECTOR_BACKEND", "auto") or "auto").lower()
+        backend_choice = (os.getenv("AERITH_VECTOR_BACKEND", "auto") or "auto").lower()
         self._vector_backend: VectorBackend | None = None
         try:
             if backend_choice in ("qdrant", "auto") and HAVE_QDRANT and self._embedder:

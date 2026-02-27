@@ -57,7 +57,7 @@ CONTEXT_TAGS = {
 
 spinner = Progress(
     SpinnerColumn("earth", speed=0.6),  # or "bouncingBall", "aesthetic", "dots12"
-    TextColumn("[bold violet]ULTRON[/bold violet] {task.fields[stage]}"),
+    TextColumn("[bold violet]AERITH[/bold violet] {task.fields[stage]}"),
     BarColumn(bar_width=None, complete_style="bright_blue"),
     TextColumn("{task.fields[msg]}"),
     TimeElapsedColumn(),
@@ -160,7 +160,7 @@ class AerithStatus:
 
     def _fmt(self, stage: str, msg: str, pct: int | None = None) -> str:
         color = STAGE_COLORS.get(stage, "")
-        base = f"[ULTRON {stage.upper():>9}] {msg}"
+        base = f"[AERITH {stage.upper():>9}] {msg}"
         if pct is not None:
             base += f"  {pct:>3d}%"
         return f"{color}{base}{Style.RESET_ALL}" if color else base
@@ -174,7 +174,7 @@ class AerithStatus:
         _STATUS_CONSOLE = Console(file=sys.stderr, force_terminal=True)
         prog = Progress(
             SpinnerColumn("dots2", speed=0.8),
-            TextColumn("[bold violet]ULTRON[/bold violet] • {task.fields[stage]}"),
+            TextColumn("[bold violet]AERITH[/bold violet] • {task.fields[stage]}"),
             BarColumn(bar_width=None, complete_style="bright_blue"),
             TextColumn("{task.fields[msg]}"),
             TimeElapsedColumn(),
@@ -295,7 +295,7 @@ class CognitiveStatus:
             if elapsed > self.timeout:
                 self._timeout_reaction()
                 break
-            msg = f"[ULTRON STATUS] {message} {next(spinner)}"
+            msg = f"[AERITH STATUS] {message} {next(spinner)}"
             self._print(msg)
             time.sleep(0.1)
         self._print(" " * 80 + "\r")  # clear line when finished
@@ -313,14 +313,14 @@ class CognitiveStatus:
     # Timeout handling
     # --------------------------------------
     def _timeout_reaction(self):
-        self._print("[ULTRON WARNING] Response latency detected. Adjusting protocols...")
+        self._print("[AERITH WARNING] Response latency detected. Adjusting protocols...")
         time.sleep(1.0)
-        self.display_random_message(prefix="[ULTRON RECOVERY]")
+        self.display_random_message(prefix="[AERITH RECOVERY]")
 
     # --------------------------------------
     # Contextual message display
     # --------------------------------------
-    def display_random_message(self, prefix="[ULTRON STATUS]"):
+    def display_random_message(self, prefix="[AERITH STATUS]"):
         message = random.choice(self.messages)
         self._print(f"\r{prefix} {message}")
         sys.stdout.flush()
@@ -339,7 +339,7 @@ class CognitiveStatus:
         else:
             self.display_random_message()
 
-    def stop(self, final_message="[ULTRON STATUS] Task complete."):
+    def stop(self, final_message="[AERITH STATUS] Task complete."):
         """Stop spinner and display final completion message."""
         self._stop_signal = True
         if self._spinner_thread:

@@ -19,7 +19,7 @@ class TestRunner:
 
     def _run(self, cmd: list[str], timeout_sec: int = 600) -> TestResult:
         p = subprocess.run(
-            cmd= [shlex..quote(arg) for arg in cmd],
+            cmd=[shlex.quote(arg) for arg in cmd],
             cwd=self.repo_root,
             text=True,
             capture_output=True,

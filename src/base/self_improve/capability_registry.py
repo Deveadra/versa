@@ -1,3 +1,5 @@
+# src/base/self_improve/capability_registry.py
+
 from __future__ import annotations
 
 from dataclasses import dataclass

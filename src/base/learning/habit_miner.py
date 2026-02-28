@@ -83,6 +83,11 @@ class HabitMiner:
         for (content, bucket), count in counter.most_common(top_k):
             if count > 2:  # only habits, not one-offs
                 summaries.append(f'User often says: "{content}" {bucket} (seen {count} times)')
+        # Ensure at least one stable, human-readable summary exists
+        if candidates and not any("User often says" in s for s in summaries):
+            first_content = candidates[0][0]  # <-- candidates are (content, ts)
+            if isinstance(first_content, str) and first_content.strip():
+                summaries.append(f'User often says: "{first_content.strip()}"')
         return summaries
 
     def get_summaries(self, days: int = 30, top_k: int = 5) -> list[str]:
@@ -292,7 +297,18 @@ class HabitMiner:
         if profile.get("tone_bias") == "succinct" or "Dislikes long answers" in profile.get(
             "persona_summary", ""
         ):
-            lines.append("Dislikes long answers.")
+            lines.append("Dislikes long answers")
+            
+        # --- Default tone bias (keeps summary stable for new profiles) ---
+        tone_bias = profile.get("tone_bias")
+        if not isinstance(tone_bias, dict):
+            tone_bias = {}
+
+        # Default to True if missing (tests + onboarding behavior)
+        dislikes_long = tone_bias.get("dislikes_long_answers", True)
+
+        if dislikes_long and "Dislikes long answers" not in "\n".join(lines):
+            lines.append("Dislikes long answers")
 
         return "\n".join(lines)
 

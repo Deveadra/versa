@@ -35,6 +35,22 @@ python --version
 ```
 
 # Clean Rebuild
+
+## Automation
+
+Linux/WSL/macOS: 
+```bash
+sudo apt update
+sudo apt install -y python3-venv
+./scripts/bootstrap.sh
+```
+
+Windows: `.\scripts\bootstrap.ps1`
+
+---
+
+## Manual
+
 > Windows (PowerShell)
 
 From the repo root:
@@ -60,9 +76,11 @@ python run.py
 > macOS / Linux / WSL
 ```bash
 rm -rf .venv
-python3.11 -m venv .venv
+python3 --version
+python3 -m venv .venv
 source .venv/bin/activate
 
+python --version
 python -m pip install --upgrade pip setuptools wheel
 python -m pip install -e ".[dev]"
 

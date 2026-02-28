@@ -27,8 +27,6 @@ aerith.db-shm
 *.db-wal
 *.db-shm
 
-/.env/
-.env
 # tests/
 reports/
 base/agents/orchestrator1.py
@@ -38,6 +36,7 @@ base/agents/orchestrator.py.bak
 protect-main.sh
 
 # Secrets
+/.env/
 .env
 config/client_secret_*.json
 token*.pickle

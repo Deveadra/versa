@@ -20,6 +20,9 @@ def quick_polarity(text: str) -> float:
         return float(polarity)
     except Exception:
         return 0.0
+    
+    if TextBlob is None:
+        return 0.0
 
 
 def quick_polarity_label(text: str) -> str:

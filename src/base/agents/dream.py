@@ -14,7 +14,7 @@ from base.database.sqlite import SQLiteConn
 from base.llm.brain import ask_brain
 from base.memory.store import MemoryStore
 from config.config import settings
-from config.self_improvements import CFG
+# from config.self_improvements import CFG
 
 # @dataclass
 # class Event:
@@ -43,14 +43,14 @@ class DreamCycle:
 
     def _collect_log_snippets(self) -> dict[str, list[str]]:
         result: dict[str, list[str]] = {}
-        if not os.path.isdir(CFG.logs_dir):
+        if not os.path.isdir(settings.logs_dir):
             return result
-        for path in glob.glob(os.path.join(CFG.logs_dir, "**/*.*"), recursive=True):
+        for path in glob.glob(os.path.join(settings.logs_dir, "**/*.*"), recursive=True):
             try:
                 # keep tail of each file to avoid huge payloads
                 with open(path, encoding="utf-8", errors="ignore") as f:
                     lines = f.readlines()[-400:]
-                key = os.path.relpath(path, CFG.logs_dir)
+                key = os.path.relpath(path, settings.logs_dir)
                 result[key] = [ln.rstrip("\n") for ln in lines]
             except Exception:
                 # best-effort
@@ -130,7 +130,7 @@ class DreamCycle:
     #         "duration_sec": round(time.time() - t0, 3),
     #     }
     #     out_path = os.path.join(
-    #         CFG.learning_dir,
+    #         settings.learning_dir,
     #         f"dream_summary_{self.now.strftime('%Y%m%d_%H%M%S')}.json",
     #     )
     #     with open(out_path, "w", encoding="utf-8") as f:

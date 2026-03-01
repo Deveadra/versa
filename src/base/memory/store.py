@@ -79,8 +79,16 @@ class MemoryStore:
                 self._vector_backend = InMemoryBackend(embedder=self._embedder)
                 logger.info("MemoryStore: Vector backend = InMemory")
         except Exception as e:
-            logger.error(f"MemoryStore: vector backend init failed; disabling semantic search: {e}")
-            self._vector_backend = None
+            # logger.error(f"MemoryStore: vector backend init failed; disabling semantic search: {e}")
+            # self._vector_backend = None
+            # Backend init failed; fall back to in-memory backend (always available).
+            logger.warning(f"MemoryStore: vector backend init failed ({e}); falling back to InMemoryBackend.")
+            try:
+                self._vector_backend = InMemoryBackend(embedder=self._embedder)
+                logger.info("MemoryStore: Vector backend = InMemory (fallback)")
+            except Exception as e2:
+                logger.error(f"MemoryStore: InMemory backend init failed; disabling semantic search: {e2}")
+                self._vector_backend = None
 
         # 4) schema last (unchanged)
         self._ensure_schema()
@@ -349,8 +357,18 @@ class MemoryStore:
         Falls back to keyword search if semantic search is unavailable.
         """
         results: list[str] = []
+
+        # Use vector search only when the backend can properly honor filters,
+        # OR when no filters are requested (semantic "question" style query).
+        use_vector = self._vector_backend is not None
+        if use_vector and not isinstance(self._vector_backend, QdrantMemoryBackend):
+            # Non-Qdrant backends often don't support metadata filtering.
+            # If filters are requested, prefer SQLite keyword search so results stay correct/deterministic.
+            if since is not None or type_ is not None or float(min_importance or 0.0) > 0.0:
+                use_vector = False
+
         # If semantic vector search is available, use it
-        if self._vector_backend:
+        if use_vector:
             try:
                 if isinstance(self._vector_backend, QdrantMemoryBackend):
                     # Use vector search with filters in Qdrant
@@ -363,11 +381,74 @@ class MemoryStore:
                     )
                 else:
                     # Other backend (e.g., FAISS) - no built-in filtering support
-                    results = self._vector_backend.search(query, k=limit)
-                    # Post-filter the results by metadata if possible (not applicable for simple text lists, skip)
-                # If we got enough results from vector search, return them
-                if results:
-                    return results[:limit]
+                    # Other backend (Fake/InMemory/FAISS/etc.) – try to get richer hits, then post-filter
+                    try:
+                        raw_hits = self._vector_backend.search(query, k=limit * 5)  # grab more for filtering
+                    except TypeError:
+                        raw_hits = self._vector_backend.search(query, k=limit * 5)  # same call, just safe
+
+                    filtered: list[str] = []
+
+                    for hit in raw_hits:
+                        text = ""
+                        meta: dict[str, Any] = {}
+
+                        # Support dict hits: {"text": "...", "metadata": {...}}
+                        if isinstance(hit, dict):
+                            text = str(hit.get("text") or hit.get("content") or "")
+                            meta = hit.get("metadata") or hit.get("meta") or {}
+                            if not isinstance(meta, dict):
+                                meta = {}
+
+                        # Support tuple hits: (text, metadata) or (id, text, metadata)
+                        elif isinstance(hit, tuple):
+                            if len(hit) >= 2 and isinstance(hit[1], str):
+                                text = hit[1]
+                            elif len(hit) >= 1 and isinstance(hit[0], str):
+                                text = hit[0]
+                            if len(hit) >= 3 and isinstance(hit[2], dict):
+                                meta = hit[2]
+                            elif len(hit) >= 2 and isinstance(hit[1], dict):
+                                meta = hit[1]
+
+                        # Fallback: plain strings
+                        else:
+                            text = str(hit)
+
+                        # Apply min_importance filter when metadata provides it
+                        imp = meta.get("importance", 0.0)
+                        try:
+                            imp_f = float(imp)
+                        except Exception:
+                            imp_f = 0.0
+                        if min_importance and imp_f < float(min_importance):
+                            continue
+
+                        # Apply type filter if metadata provides it
+                        if type_:
+                            typ = meta.get("type") or meta.get("type_")
+                            if typ is not None and typ != type_:
+                                continue
+
+                        # Apply since filter if metadata provides ts_iso (best effort)
+                        if since:
+                            ts_iso = meta.get("ts_iso")
+                            if isinstance(ts_iso, str):
+                                try:
+                                    ev_time = datetime.fromisoformat(ts_iso.replace("Z", "+00:00"))
+                                    since_time = datetime.fromisoformat(since.replace("Z", "+00:00"))
+                                    if ev_time < since_time:
+                                        continue
+                                except Exception:
+                                    pass
+
+                        if text:
+                            filtered.append(text)
+                        if len(filtered) >= limit:
+                            break
+
+                    if filtered:
+                        return filtered
             except Exception as e:
                 logger.error(
                     f"MemoryStore.search: Vector search failed (falling back to keyword search): {e}"

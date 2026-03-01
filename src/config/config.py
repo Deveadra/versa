@@ -143,6 +143,50 @@ class Settings(BaseModel):
     qdrant_api_key: str | None = Field(default_factory=lambda: os.getenv("QDRANT_API_KEY"))
     qdrant_collection: str = Field(default_factory=lambda: os.getenv("QDRANT_COLLECTION", "events"))
 
+        # ------------------------------------------------------------
+    # Self-improvement / dream-cycle settings (single source of truth)
+    # ------------------------------------------------------------
+    self_improve_enabled: bool = Field(
+        default_factory=lambda: _get_bool("AERITH_SELF_IMPROVE_ENABLED", False)
+    )
+
+    repo_root: str = Field(default_factory=lambda: os.getenv("AERITH_REPO_ROOT", "."))
+    logs_dir: str = Field(default_factory=lambda: os.getenv("AERITH_LOGS_DIR", "logs"))
+    learning_dir: str = Field(
+        default_factory=lambda: os.getenv("AERITH_LEARNING_DIR", "memory/learning")
+    )
+    reports_dir: str = Field(
+        default_factory=lambda: os.getenv("AERITH_REPORTS_DIR", "memory/reports")
+    )
+
+    git_remote: str = Field(default_factory=lambda: os.getenv("AERITH_GIT_REMOTE", "origin"))
+    git_default_branch: str = Field(
+        default_factory=lambda: os.getenv("AERITH_GIT_DEFAULT_BRANCH", "main")
+    )
+
+    ruff_args: str = Field(
+        default_factory=lambda: os.getenv(
+            "AERITH_RUFF_ARGS", "ruff --config pyproject.toml check ."
+        )
+    )
+    mypy_args: str = Field(
+        default_factory=lambda: os.getenv(
+            "AERITH_MYPY_ARGS", "mypy --install-types --non-interactive"
+        )
+    )
+    pytest_collect_args: str = Field(
+        default_factory=lambda: os.getenv(
+            "AERITH_PYTEST_COLLECT_ARGS", "pytest -q --collect-only"
+        )
+    )
+    perf_sample_seconds: int = Field(
+        default_factory=lambda: _get_int("AERITH_PERF_SAMPLE_SECONDS", 5)
+    )
+    open_mr_on_any_fix: bool = Field(
+        default_factory=lambda: _get_bool("AERITH_OPEN_MR_ON_ANY_FIX", True)
+    )
+    
+    
     @property
     def use_llm(self) -> bool:
         # computed AFTER dotenv load

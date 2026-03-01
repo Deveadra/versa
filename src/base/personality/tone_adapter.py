@@ -6,10 +6,22 @@ from typing import Any
 from .policy import PolicyBandit
 
 
-class ToneAdapter:
-    def __init__(self, profile: dict[str, Any]):
-        self.profile = profile
+class ToneAdapter:        
+    def __init__(self, profile: Any | None = None):
+        # Accept None / non-dict profiles gracefully (helps tests and bootstrapping)
+        if isinstance(profile, dict):
+            self.profile = profile
+        else:
+            self.profile = {}
         self.bandit = PolicyBandit()
+    # def __init__(self, profile: Any | None = None):
+    #     # Accept None / non-dict profiles gracefully (helps tests and bootstrapping)
+    #     self.profile = profile if isinstance(profile, dict) else {}
+    #     self.bandit = PolicyBandit()
+    
+    # def __init__(self, profile: dict[str, Any]):
+    #     self.profile = profile
+    #     self.bandit = PolicyBandit()
 
     @staticmethod
     def adapt(polarity: str) -> str:

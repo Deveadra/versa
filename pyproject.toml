@@ -36,6 +36,7 @@ dependencies = [
   "numpy>=1.26",
   "sentence-transformers>=3.0.0",
   "spacy>=3.7.2,<3.8.0",
+  "textblob>=0.18.0.post0",
   "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl",
 ]
 
@@ -105,7 +106,7 @@ exclude = [".git",".venv","__pycache__","aerith.db"]
 "scripts/diagnostic_scan.py" = ["PLR0915"]
 
 [tool.pytest.ini_options]
-addopts = "-ra"
+addopts = "-ra --randomly-seed=1 --randomly-dont-reset-seed"
 pythonpath = ["src"]
 testpaths = ["tests"]
 markers = [

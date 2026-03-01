@@ -31,8 +31,12 @@ def justify_memory(mem: dict[str, Any]) -> str:
             parts.append(f"score={float(mem['score']):.2f}")
         except Exception:
             parts.append(f"score={mem.get('score')}")
-    ts = mem.get("last_used") or mem.get("created_at") or mem.get("timestamp")
-    if ts:
+    # ts = mem.get("last_used") or mem.get("created_at") or mem.get("timestamp")
+    if (
+        ts := mem.get("last_used")
+        or mem.get("created_at")
+        or mem.get("timestamp")
+    ):
         parts.append(f"as of {_format_timestamp(ts)}")
     return ", ".join(parts) if parts else "relevant memory"
 
@@ -185,7 +189,13 @@ def compose_style_plan(
     Produce a concrete style plan Aerith follows for *this* response.
     Combines: sentiment, policy bandit, habits, and channel.
     """
-    profile = profile_mgr.load_profile()  # assume it returns dict
+    try:
+        profile = profile_mgr.load_profile()
+    except Exception:
+        profile = {}
+
+    if not isinstance(profile, dict):
+        profile = {}
     polarity = quick_polarity(user_text)
 
     # basic time-of-day vibe
@@ -210,12 +220,12 @@ def compose_style_plan(
     }
 
     # adapt for sentiment
-    if polarity == "negative":
+    if polarity_label == "negative":
         plan["humor"] = False
         plan["formality"] = "warm"
         plan["tts"]["wpm"] = 150
         plan["tts"]["pause_ms"] = 160
-    elif polarity == "positive":
+    elif polarity_label == "positive":
         plan["tts"]["wpm"] = 185
         plan["tts"]["pause_ms"] = 100
 

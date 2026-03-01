@@ -12,20 +12,141 @@
 - Current dimension = 384 (MiniLM). Adjust in `Orchestrator` if you use a different model.
 - If you expect >1M memories, consider FAISS with an IVF or HNSW index for scalability.
 
-## TESTING
-Pylint, Black, and Ruff are integrated into the venv environment.
+> This repo uses **pyproject.toml** as the source of truth for dependencies.
 
-Run tests (fast/default):
+Install extras as needed:
+
+- `.[dev]` → pytest + tooling (ruff/black/pylint/etc.)
+- `.[voice]` → voice/TTS-related deps (optional)
+- `.[google]` → Google integrations (optional)
+- `.[api]` → API-related deps (optional)
+
+---
+
+## Prerequisites
+
+- Python **3.11.x**
+- Git
+- (Optional) Any system deps required by your chosen extras (voice/google/api)
+
+Verify Python:
+```bash
+python --version
+```
+
+# Clean Rebuild
+
+## Automation
+
+Linux/WSL/macOS: 
+```bash
+sudo apt update
+sudo apt install -y python3-venv
+./scripts/bootstrap.sh
+```
+
+Windows: `.\scripts\bootstrap.ps1`
+
+---
+
+## Manual
+
+> Windows (PowerShell)
+
+From the repo root:
+
+```powershell
+Remove-Item -Recurse -Force .venv -ErrorAction SilentlyContinue
+
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -e ".[dev]"
+
+Copy-Item .env.sample .env -ErrorAction SilentlyContinue
+# If .env.sample does not exist, create .env manually.
+
+pytest -q
+python run.py
+```
+
+---
+
+> macOS / Linux / WSL
+```bash
+rm -rf .venv
+python3 --version
+python3 -m venv .venv
+source .venv/bin/activate
+
+python --version
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -e ".[dev]"
+
+cp .env.sample .env 2>/dev/null || true
+# If .env.sample does not exist, create .env manually.
+
+pytest -q
+python run.py
+```
+
+---
+
+# Environment variables (.env)
+
+Create `.env` in the repo root.
+
+Minimum common keys:
+
+- `OPENAI_API_KEY` (enables LLM features)
+
+> Optional keys depend on extras you install (`voice`, `google`, `api`).
+
+# Install Options (extras)
+
+## Dev install (recommended)
+```bash
+python -m pip install -e ".[dev]"
+```
+
+## Optional extras (add only what you need)
+```bash
+python -m pip install -e ".[dev,voice]"
+python -m pip install -e ".[dev,google]"
+python -m pip install -e ".[dev,api]"
+```
+
+## Prod install (no dev tooling)
+```bash
+python -m pip install -e .
+```
+
+---
+
+## Run
+```bash
+python run.py
+```
+
+## Testing
+
+### Fast/default
 ```bash
 pytest -q
 ```
 
-Run database suite:
+### Database test suite
 ```bash
 pytest -q tests/database -ra
 ```
 
-Write test results to the repo (CI-friendly):
+### Diagnostics (example: disable pytest-randomly if it’s installed)
+```bash
+pytest tests/database -ra -p no:randomly
+```
+
+Write CI-friendly test reports into the repo
 ```bash
 mkdir -p reports/pytest
 
@@ -40,141 +161,75 @@ pytest tests/database \
   --log-level=INFO
 ```
 
+---
 
-### Linting / Formatting:
-> Tools are installed via the dev extra (pip install -e ".[dev]").
+# Linting / Formatting
 
-**Ruff (lint + autofix)**:
+> All tools below are installed by: python -m pip install -e ".[dev]"
+> Installed by `python -m pip install -e ".[dev]"`
+
+### Ruff (lint + autofix)
 ```bash
 ruff check . --fix
 ```
 
-**Black (format):
+### Black (format)
 ```bash
 black .
 ```
 
+### Pylint (optional if you want it)
 
-### CI Install
+Run against your source directory (adjust if your code lives elsewhere):
 ```bash
-pip install -e ".[dev]"
-pytest -q
 pylint src
 ```
 
-
-**Pylint:**
+Generate a config file:
 ```bash
-pip install pylint
-python -m pylint --init-hook="import sys; sys.setrecursionlimit(2000)" --ignore=.venv --recursive=y c:/Projects/personal/versa/
+pylint --generate-rcfile > .pylintrc
 ```
 
-_Generate a config file:_
+Optional: Write a report file
 ```bash
-python -m pylint --generate-rcfile > .pylintrc
-```
-**OR...**
-```bash
-python -m pylint --init-hook="import sys; sys.setrecursionlimit(2000)" --ignore=.venv --recursive=y c:/Projects/personal/versa/reports/pylint/ > pylint_report.txt
-```
-
-```bash
-python -m pylint --output-format=colorized --init-hook="import sys; sys.setrecursionlimit(2000)" --ignore=.venv --recursive=y --output-format=json . > reports/pylint/pylint_results.json 
-```
-
-**Black:**
-```bash
-pip install black
-black .
-```
-
-**Ruff:**
-```bash
-pip install ruff
-ruff check . --fix
-```
-
-## Diagnostics
-
-```bash
-pytest tests\database -ra -p no:randomly
-```
-
---
-
-
-## 1) Setup
-
-### Windows (PowerShell)
-```powershell
-py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-
-# Dev install (includes pytest + black + ruff + tools)
-pip install -e ".[dev]"
-
-# Optional extras (install only if you need them)
-# pip install -e ".[voice]"
-# pip install -e ".[google]"
-# pip install -e ".[api]"
-
-# Env
-Copy-Item .env.sample .env -ErrorAction SilentlyContinue
-# If .env.sample doesn't exist, create .env manually and add your keys.
-
-# Run baseline tests
-pytest -q
-
-# Run Aerith REPL:
-python run.py
-```
-
-### macOS/Linux
-```powershell
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-
-pip install -e ".[dev]"
-
-# Optional extras
-# pip install -e ".[voice]"
-# pip install -e ".[google]"
-# pip install -e ".[api]"
-
-cp .env.sample .env 2>/dev/null || true
-python run.py
-```
-
-Alternative: use requirements wrappers (same result)
-
-> These files are thin wrappers around pyproject.toml extras.
-
-```powershell
-pip install -r requirements-dev.txt          # installs -e .[dev]
-# pip install -r requirements-voice.txt      # installs -e .[voice]
-# pip install -r requirements.txt            # installs -e .
-
+mkdir -p reports/pylint
+pylint src > reports/pylint/pylint_report.txt
 ```
 
 ---
 
-## Your CI workflow should match this
+# CI (recommended)
 
-`pyproject.toml` is now authoritative, CI should install like production:
-
-- `pip install -e ".[dev]"` (instead of mixing requirements files)
-
-In the workflow step:
-
-```yaml
+CI should install from `pyproject.toml` (avoid mixing reqs files):
+```YAML
 - name: Install dependencies
   run: |
     python -m pip install --upgrade pip
     python -m pip install -e ".[dev]"
+
+- name: Test
+  run: pytest -q
+
+- name: Lint
+  run: |
+    ruff check .
+    black --check .
+    pylint src
 ```
 
+---
+
+Requirements `*.txt` wrappers (optional)
+
+If you kept wrapper files, treat them as convenience only.
+They should effectively map back to pyproject extras (same end result).
+
+Examples:
+```bash
+pip install -r requirements-dev.txt     # should equal: pip install -e ".[dev]"
+# pip install -r requirements-voice.txt # should equal: pip install -e ".[voice]"
+# pip install -r requirements.txt       # should equal: pip install -e "."
+```
 
 ## 2) Design Notes
 

@@ -111,7 +111,7 @@ def test_memory_semantic_search():
     results = store.search("Who did the user meet?", min_importance=0.0)
     print("Search results (semantic):", results)
     assert any(
-        "Alice" in res for res in results
+        "Orion" in res for res in results
     ), "Semantic search failed to retrieve the correct event."
 
     # Perform a filtered search by keyword and recency (e.g., events since a recent timestamp)

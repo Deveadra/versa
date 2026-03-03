@@ -17,7 +17,7 @@ from dateutil import parser as dateparser
 from loguru import logger
 from openai import OpenAI
 
-from base.agents.dream import DreamCycle
+# from base.agents.dream import DreamCycle
 from base.agents.scheduler import Scheduler
 from base.calendar.rrule_helpers import rrule_from_phrase
 from base.calendar.store import CalendarStore
@@ -55,7 +55,7 @@ from base.self_improve.proposal_engine import ProposalEngine
 from base.self_improve.service import SelfImproveService
 from base.utils.embeddings import get_embedder
 from base.utils.timeparse import extract_time_from_text
-from base.utils.aerith_status import CognitiveStatus, AerithStatus, AerithStatusConfig
+from base.utils.status import CognitiveStatus, AerithStatus, AerithStatusConfig
 from base.voice.null_voice import NullVoice
 from base.voice.tts_elevenlabs import Voice
 from config.config import settings
@@ -1881,9 +1881,12 @@ class Orchestrator:
 
     def cmd_self_improve(self, *args):
         try:
+            from base.agents.dream import DreamCycle #lazy import to avoid circular
+            dc = DreamCycle()
             result = self.self_improve.run_manual(include_dream=True)
             self.notify(f"Manual self-improve complete: {result.get('pr_url') or 'no PR opened'}")
         except Exception as e:
+            self.notify(f"Dream cycle unavailable or failed: {e}")
             self.notify(f"Manual self-improve failed: {e}")
     # def cmd_self_improve(self, *args):
     #     repo_root = str(self.repo_root)

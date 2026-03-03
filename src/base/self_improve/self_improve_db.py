@@ -52,6 +52,14 @@ def ensure_self_improve_schema(conn: sqlite3.Connection) -> None:
           status TEXT NOT NULL DEFAULT 'new',
           metadata_json TEXT
         );
+        
+        CREATE INDEX IF NOT EXISTS idx_repo_score_runs_created_at ON repo_score_runs(created_at);
+        CREATE INDEX IF NOT EXISTS idx_repo_score_runs_run_type ON repo_score_runs(run_type);
+        CREATE INDEX IF NOT EXISTS idx_repo_improvement_attempts_created_at ON repo_improvement_attempts(created_at);
+        CREATE INDEX IF NOT EXISTS idx_repo_improvement_attempts_branch ON repo_improvement_attempts(branch);
+        CREATE INDEX IF NOT EXISTS idx_capability_gaps_status_priority ON capability_gaps(status, priority);
+        CREATE INDEX IF NOT EXISTS idx_capability_gaps_created_at ON capability_gaps(created_at);
+        CREATE INDEX IF NOT EXISTS idx_capability_gaps_status ON capability_gaps(status);
         """
     )
     conn.commit()

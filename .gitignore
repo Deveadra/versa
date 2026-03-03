@@ -38,7 +38,7 @@ protect-main.sh
 
 # Secrets
 /.env/
-.env.*
+.env
 config/client_secret_*.json
 token*.pickle
 

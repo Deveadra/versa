@@ -22,6 +22,7 @@ dependencies = [
   "python-dotenv>=1.1.1",
   "requests>=2.32.0",
   "rich>=13.7.1",
+  "setuptools<70",
   "tqdm",
   "click",
 
@@ -72,8 +73,9 @@ voice = [
   "soundfile>=0.13.1",
   "simpleaudio",
   "elevenlabs>=1.0.0",
-  "TTS",
-  "openai-whisper==20231117",
+  'TTS; python_version < "3.12"',
+  "openai-whisper==20231117; python_version < '3.12'",
+  "faster-whisper>=1.1.0; python_version >= '3.12'",
   "imageio-ffmpeg",
   "pvporcupine>=3.0.0",
 ]

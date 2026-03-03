@@ -14,6 +14,7 @@ pyrightconfig.json
 dist/
 build/
 __pycache__/
+.aerith/
 
 src/aerith_mvp.egg-info/*
 

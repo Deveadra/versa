@@ -1,97 +1,118 @@
-# base/self_improve/code_indexer.py
 from __future__ import annotations
 
+import ast
 import json
 from dataclasses import dataclass
+from fnmatch import fnmatch
 from pathlib import Path
-
-# from base.self_improve.code_indexer import CodeIndexer
+from typing import Any
 
 
 @dataclass
 class CodeSymbol:
-    kind: str  # "class" | "def"
+    kind: str  # "class" | "def" | "async def"
     name: str
     lineno: int
     col: int
 
 
-@dataclass
-class FileIndex:
-    path: str
-    symbols: list[CodeSymbol]
-
-
 class CodeIndexer:
+    """
+    Robust repo indexer used for proposal context.
+
+    - root MUST be the repo root (Orchestrator passes Path(".").resolve()).
+    - allowlist/blocklist are glob patterns (e.g. "src/base/**").
+    - scan() returns a dict suitable for persistence + LLM context.
+    - to_markdown() accepts that dict (no type mismatch).
+    """
+
     def __init__(self, root: str, allowlist: list[str], blocklist: list[str]):
-        self.root = Path(root).resolve()
-        self.repo_root = self.root.parent
-        self.allowlist = [str((self.root / a).resolve()) for a in allowlist]
-        self.blocklist = [str((self.root / b).resolve()) for b in blocklist]
+        self.root = Path(root).resolve()  # repo root
+        self.allowlist = tuple(a.replace("\\", "/") for a in (allowlist or ["**/*.py"]))
+        self.blocklist = tuple(b.replace("\\", "/") for b in (blocklist or []))
 
     def _cache_path(self) -> Path:
-        root = Path(self.repo_root)
-        return root / ".aerith_index_cache.json"
+        d = self.root / ".aerith"
+        d.mkdir(parents=True, exist_ok=True)
+        return d / "index_cache.json"
 
-    def _load_cache(self) -> dict:
+    def _load_cache(self) -> dict[str, Any]:
         p = self._cache_path()
-        if p.exists():
-            try:
-                return json.load(p.open("r", encoding="utf-8"))
-            except Exception:
-                return {}
-        return {}
+        if not p.exists():
+            return {}
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
 
-    def _save_cache(self, cache: dict) -> None:
+    def _save_cache(self, cache: dict[str, Any]) -> None:
         p = self._cache_path()
         try:
-            json.dump(cache, p.open("w", encoding="utf-8"))
+            p.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
         except Exception:
             pass
 
-    def _index_file(self, p: Path) -> dict:
-        return {
-            "path": str(p.relative_to(self.root)),
-            "summary": "...",
-            "symbols": [],
-        }
+    def _rel(self, p: Path) -> str:
+        return p.relative_to(self.root).as_posix()
 
-    # def scan(self) -> list[FileIndex]:
-    #     files: list[FileIndex] = []
-    #     for p in self.root.rglob("*.py"):
-    #         if not self._allowed(p):
-    #             continue
-    #         try:
-    #             txt = p.read_text(encoding="utf-8", errors="ignore")
-    #             tree = ast.parse(txt)
-    #             symbols: list[CodeSymbol] = []
-    #             for node in ast.walk(tree):
-    #                 if isinstance(node, ast.FunctionDef):
-    #                     symbols.append(CodeSymbol("def", node.name, node.lineno, node.col_offset))
-    #                 elif isinstance(node, ast.ClassDef):
-    #                     symbols.append(CodeSymbol("class", node.name, node.lineno, node.col_offset))
-    #             files.append(FileIndex(str(p.relative_to(self.root)), symbols))
-    #         except Exception as e:
-    #             logger.debug(f"Index skip {p}: {e}")
-    #     return files
+    def _allowed(self, relpath: str) -> bool:
+        rp = relpath.replace("\\", "/")
+        if any(fnmatch(rp, pat) for pat in self.blocklist):
+            return False
+        return any(fnmatch(rp, pat) for pat in self.allowlist)
 
-    def scan(self, incremental: bool = True) -> dict:
+    def _index_file(self, p: Path) -> dict[str, Any]:
+        relpath = self._rel(p)
+        try:
+            txt = p.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            return {"path": relpath, "summary": "", "symbols": []}
+
+        summary = ""
+        try:
+            tree = ast.parse(txt)
+            doc = ast.get_docstring(tree) or ""
+            summary = doc.strip().splitlines()[0] if doc.strip() else ""
+            symbols: list[dict[str, Any]] = []
+            for node in tree.body:
+                if isinstance(node, ast.ClassDef):
+                    symbols.append(
+                        {"kind": "class", "name": node.name, "lineno": node.lineno, "col": node.col_offset}
+                    )
+                elif isinstance(node, ast.FunctionDef):
+                    symbols.append(
+                        {"kind": "def", "name": node.name, "lineno": node.lineno, "col": node.col_offset}
+                    )
+                elif isinstance(node, ast.AsyncFunctionDef):
+                    symbols.append(
+                        {"kind": "async def", "name": node.name, "lineno": node.lineno, "col": node.col_offset}
+                    )
+        except Exception:
+            symbols = []
+        return {"path": relpath, "summary": summary, "symbols": symbols}
+
+    def scan(self, incremental: bool = True) -> dict[str, Any]:
         """
-        Return a dict index. If incremental, only re-read files whose mtime changed since last scan.
-        Cache format: { "files": { relpath: { "mtime": float, "summary": "...", ... } } }
+        Returns:
+          {
+            "files": {
+              "src/base/...py": {"mtime": float, "summary": str, "symbols": [...]},
+              ...
+            }
+          }
         """
-        root = Path(self.repo_root)
         cache = self._load_cache() if incremental else {}
         files_cache = cache.get("files", {}) if incremental else {}
-        out = {"files": {}}
+        out: dict[str, Any] = {"files": {}}
 
-        def rel(p: Path) -> str:
-            return str(p.relative_to(root)).replace("\\", "/")
-
-        for p in root.rglob("*.py"):
+        for p in self.root.rglob("*.py"):
             if "__pycache__" in p.parts:
                 continue
-            rp = rel(p)
+
+            rp = self._rel(p)
+            if not self._allowed(rp):
+                continue
+
             try:
                 mtime = p.stat().st_mtime
             except Exception:
@@ -101,34 +122,23 @@ class CodeIndexer:
                 out["files"][rp] = files_cache[rp]
                 continue
 
-            # re-index this file (whatever you already do: summary, symbols, etc.)
-            info = self._index_file(p)  # your existing method
+            info = self._index_file(p)
             info["mtime"] = mtime
             out["files"][rp] = info
-
-        # optionally: drop entries that no longer exist
-        if incremental:
-            existing = set(out["files"].keys())
-            for rp in list(files_cache.keys()):
-                if rp not in existing:
-                    # removed file; skip keeping stale entry
-                    pass
 
         if incremental:
             self._save_cache(out)
         return out
 
-    def _allowed(self, path: Path) -> bool:
-        sp = str(path.resolve())
-        if any(sp.startswith(b) for b in self.blocklist):
-            return False
-        return any(sp.startswith(a) for a in self.allowlist)
-
     @staticmethod
-    def to_markdown(index: list[FileIndex]) -> str:
-        lines = []
-        for fi in index:
-            lines.append(f"- `{fi.path}`")
-            for s in fi.symbols[:50]:
-                lines.append(f"  - {s.kind} {s.name} @ L{s.lineno}")
+    def to_markdown(index: dict[str, Any]) -> str:
+        files = (index or {}).get("files", {}) or {}
+        lines: list[str] = ["# Repository Index", ""]
+        for path in sorted(files.keys()):
+            info = files[path] or {}
+            summary = info.get("summary") or ""
+            lines.append(f"- `{path}`" + (f" — {summary}" if summary else ""))
+            syms = info.get("symbols") or []
+            for s in syms[:12]:
+                lines.append(f"  - {s.get('kind')} {s.get('name')} @ L{s.get('lineno')}")
         return "\n".join(lines)

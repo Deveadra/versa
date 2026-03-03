@@ -1,0 +1,13 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff check
+        entry: python -m ruff check .
+        language: system
+        types: [python]
+      - id: black
+        name: black check
+        entry: python -m black --check .
+        language: system
+        types: [python]

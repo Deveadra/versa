@@ -47,6 +47,11 @@ from base.self_improve.diagnostic_engine import DiagnosticEngine
 from base.self_improve.models import Proposal, ProposedChange
 from base.self_improve.pr_manager import PRManager
 from base.self_improve.proposal_engine import ProposalEngine
+from base.self_improve.iteration_controller import (
+    RepoJanitorIterationController,
+    IterationBudget,
+    LeashPolicy,
+)
 from base.utils.embeddings import get_embedder
 from base.utils.timeparse import extract_time_from_text
 from base.utils.aerith_status import CognitiveStatus, AerithStatus, AerithStatusConfig
@@ -252,13 +257,24 @@ class Orchestrator:
 
         # --- Scheduler
         self.scheduler = Scheduler(db=self.db, memory=self.store, store=self.store)
+
+        # daily consolidation (keep)
         self.scheduler.add_daily(
             self.consolidator.summarize_old_events,
             hour=settings.consolidation_hour,
             minute=settings.consolidation_minute,
         )
-        self.scheduler.add_daily(self._job_self_improvement, hour=3, minute=15)
+
+        # daily self-improve (ONLY schedule once, ONLY if enabled)
+        if settings.self_improve_enabled:
+            self.scheduler.add_daily(
+                self._job_self_improvement,
+                hour=3,
+                minute=15,
+            )  # runs daily at 3:15am
+
         self.scheduler.start()
+        
 
         logger.info("Orchestrator initialized")
 
@@ -306,13 +322,8 @@ class Orchestrator:
         return {"label": label, "latency_ms": latency, "ok": ok, "msg": msg}
 
     def _now_iso_utc(self) -> str:
-        """Return an ISO8601 timestamp in UTC, robust to import/order issues."""
-        try:
-            # return dt.datetime.now(dt.timezone.utc).isoformat()
-            return self._now_iso_utc()
-        except Exception:
-            # absolute fallback if timezone were ever missing in this scope
-            return dt.datetime.utcnow().replace(tzinfo=dt.UTC).isoformat()
+        """Return an ISO8601 timestamp in UTC."""
+        return dt.datetime.now(dt.UTC).isoformat()
 
     def _now_utc(self) -> dt.datetime:
         return dt.datetime.now(dt.UTC)
@@ -1226,7 +1237,29 @@ class Orchestrator:
         # Resolve repo root for the tools
         # repo_root = getattr(settings, "repo_root", str(Path(__file__).resolve().parents[3]))
         repo_root = str(self.repo_root)
+        policy = LeashPolicy(
+            allowlist=(
+                "src/base/**",
+                "src/config/**",
+                "scripts/**",
+                "tests/**",
+                ".github/workflows/**",
+                "pyproject.toml",
+                "README.md",
+                "run.py",
+            )
+        )
 
+        ctl = RepoJanitorIterationController(
+            repo_root=repo_root,
+            db_path=settings.db_path,     # or wherever aerith.db lives
+            pr_manager=self.pr_manager,   # whatever your orchestrator stores it as
+            policy=policy,
+        )
+
+        result = ctl.run(goal="Daily self-improvement based on diagnostics", budget=IterationBudget())
+        logger.info(f"[self-improve] result={result}")
+        
         try:
             diag = DiagnosticEngine(repo_root=repo_root)
             report_path = diag.run()

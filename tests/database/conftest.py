@@ -11,7 +11,8 @@ from base.database.sqlite import SQLiteConn
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 MIGRATIONS_DIR = PROJECT_ROOT / "src" / "base" / "database" / "migrations"
-INIT_SQL = MIGRATIONS_DIR / "0001_init.sql"
+INIT_SQL = sorted(MIGRATIONS_DIR.glob("*.sql"))
+# INIT_SQL = MIGRATIONS_DIR / "0001_init.sql"
 
 
 def apply_sql(conn: sqlite3.Connection, sql_path: Path) -> None:
@@ -41,7 +42,8 @@ def raw_conn(db_path: Path) -> Generator[sqlite3.Connection, None, None]:
         # Safety defaults; your sqlite.py may override/expand these.
         conn.execute("PRAGMA foreign_keys = ON;")
         conn.execute("PRAGMA busy_timeout = 2000;")
-        apply_sql(conn, INIT_SQL)
+        for p in INIT_SQL:
+            apply_sql(conn, p)
         yield conn
     finally:
         conn.close()

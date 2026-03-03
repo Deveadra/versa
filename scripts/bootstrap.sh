@@ -4,7 +4,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-echo "== Aerith/Ultron bootstrap =="
+echo "== Aerith bootstrap =="
 
 # 1) Ensure python3 exists
 if ! command -v python3 >/dev/null 2>&1; then

@@ -4,7 +4,7 @@ $ErrorActionPreference = "Stop"
 
 Set-Location (Join-Path $PSScriptRoot "..")
 
-Write-Host "== Aerith/Ultron bootstrap =="
+Write-Host "== Aerith bootstrap =="
 
 if (-not (Get-Command py -ErrorAction SilentlyContinue)) {
   throw "ERROR: Python launcher 'py' not found. Install Python 3.11+ from python.org."

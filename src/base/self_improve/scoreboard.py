@@ -5,13 +5,18 @@ import os
 import subprocess
 import sys
 import time
-import xml.etree.ElementTree as ET
+from defusedxml.etree import ElementTree as ET
 from dataclasses import dataclass
 from loguru import logger
 from pathlib import Path
 from typing import Any
 
 from base.self_improve.score_types import ScoreboardRun, ToolResult
+
+
+
+_ALLOWED_TOOLS = {"ruff", "black", "pytest", "compileall"}
+
 
 @dataclass
 class ScoreboardSnapshot:
@@ -27,8 +32,21 @@ def _tail(text: str, max_lines: int = 80, max_chars: int = 8000) -> str:
     out = "\n".join(lines)
     return out[-max_chars:]
 
+def _run_tool(tool: str, cwd: Path, timeout_sec: int = 600) -> tuple[int, str, str, float]:
+    if tool not in _ALLOWED_TOOLS:
+        raise ValueError(f"refused to run unknown tool: {tool}")
 
-def _run(cmd: list[str], cwd: Path, timeout_sec: int = 600) -> tuple[int, str, str, float]:
+    if tool == "ruff":
+        cmd = [sys.executable, "-m", "ruff", "check", "--output-format=json", "."]
+    elif tool == "black":
+        cmd = [sys.executable, "-m", "black", "--check", "."]
+    elif tool == "pytest":
+    raise RuntimeError("pytest requires junit_path; call _run_pytest_with_junit(...)")
+        # caller creates junit_path; this function runs tests only
+        cmd = [sys.executable, "-m", "pytest", "-q"]
+    else:  # compileall
+        cmd = [sys.executable, "-m", "compileall", "-q", "."]
+
     start = time.perf_counter()
     proc = subprocess.run(
         cmd,
@@ -42,6 +60,20 @@ def _run(cmd: list[str], cwd: Path, timeout_sec: int = 600) -> tuple[int, str, s
     dur_ms = (time.perf_counter() - start) * 1000
     return proc.returncode, proc.stdout or "", proc.stderr or "", dur_ms
 
+def _run_pytest_with_junit(cwd: Path, junit_path: Path, timeout_sec: int = 1200) -> tuple[int, str, str, float]:
+    cmd = [sys.executable, "-m", "pytest", "-q", f"--junitxml={junit_path}"]
+    start = time.perf_counter()
+    proc = subprocess.run(
+        cmd,
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=timeout_sec,
+        env={**os.environ, "PYTHONUTF8": "1"},
+    )
+    dur_ms = (time.perf_counter() - start) * 1000
+    return proc.returncode, proc.stdout or "", proc.stderr or "", dur_ms
 
 def _parse_pytest_junit(junit_path: Path) -> dict[str, Any]:
     if not junit_path.exists():
@@ -84,7 +116,7 @@ class ScoreboardRunner:
 
         # Ruff: JSON for machine-readability
         ruff_cmd = [sys.executable, "-m", "ruff", "check", "--output-format=json", "."]
-        rc, out, err, ms = _run(ruff_cmd, self.repo, timeout_sec=600)
+        rc, out, err, ms = _run_tool("ruff", self.repo, timeout_sec=600)
         parsed = {}
         try:
             parsed = {"count": len(json.loads(out))} if out.strip() else {"count": 0}

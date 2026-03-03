@@ -165,7 +165,7 @@ class SelfImproveService:
     # -------------------------
 
     def run_daily(self, *, cfg: SelfImproveRunConfig = SelfImproveRunConfig()) -> dict[str, Any]:
-        return self._run_unified(branch_label="daily-self-improve", cfg=cfg, include_dream=False)
+        return self._run_unified(branch_label="daily-self-improve", cfg=cfg, extra_context=None)
 
     def run_manual(self, *, cfg: SelfImproveRunConfig = SelfImproveRunConfig(), include_dream: bool = True) -> dict[str, Any]:
         dream_context = ""
@@ -179,7 +179,7 @@ class SelfImproveService:
             except Exception as e:
                 logger.warning(f"[self-improve] dream cycle failed (non-fatal): {e}")
 
-        result = self._run_unified(branch_label="manual-self-improve", cfg=cfg, include_dream=False)
+        result = self._run_unified(branch_label="manual-self-improve", cfg=cfg, extra_context=dream_context)
         if dream_context.strip():
             # log dream context as a gap-like signal (doesn't spam duplicates)
             fp = make_gap_fingerprint("dream", dream_context[:500])
@@ -307,7 +307,7 @@ class SelfImproveService:
     # unified engine
     # -------------------------
 
-    def _run_unified(self, *, branch_label: str, cfg: SelfImproveRunConfig, include_dream: bool) -> dict[str, Any]:
+    def _run_unified(self, *, branch_label: str, cfg: SelfImproveRunConfig, extra_context: str | None = None) -> dict[str, Any]:
         base = settings.github_default_branch
         suffix = self._sanitize_suffix(f"{branch_label}-{int(time.time())}")
         branch = self.pr_manager.prepare_branch(suffix, base=base)
@@ -317,6 +317,8 @@ class SelfImproveService:
         self.log_gaps_from_scoreboard(baseline, source="scoreboard")
 
         goal, gap_ids = self.build_goal_from_gaps(limit=cfg.gap_limit)
+        if extra_context and extra_context.strip():
+            goal += "\n\nDream context:\n" + extra_context.strip()[:4000]
         for gid in gap_ids:
             mark_gap_status(self.conn, gid, "in_progress")
 
@@ -383,47 +385,49 @@ class SelfImproveService:
         return result
       
       
-      def _record_dream_summary_event(self, *, result: dict[str, Any], goal: str) -> None:
-        """
-        Persist a human-readable summary of the self-improve run into MemoryStore/events.
-        This makes continuity visible and retrievable in normal conversation.
-        """
-        try:
-            pr_url = result.get("pr_url") or ""
-            branch = result.get("branch") or ""
-            baseline = result.get("baseline") or {}
-            best = result.get("best") or {}
-            attempts = result.get("attempts") or []
-            improved = bool(result.get("improved"))
+    def _record_dream_summary_event(self, *, result: dict[str, Any], goal: str) -> None:
+      """
+      Persist a human-readable summary of the self-improve run into MemoryStore/events.
+      Makes continuity visible and retrievable in normal conversation.
+      """
+      try:
+          pr_url = result.get("pr_url") or ""
+          branch = result.get("branch") or ""
+          baseline = result.get("baseline") or {}
+          best = result.get("best") or {}
+          attempts = result.get("attempts") or []
+          improved = bool(result.get("improved"))
 
-            rollbacks = 0
-            for a in attempts:
-                if isinstance(a, dict) and a.get("improved") is False and a.get("error") is None:
-                    # not perfect, but a good heuristic; you can refine later
-                    pass
+          # Controller attempts include {"error": "..."} on hard failures.
+          errors = sum(1 for a in attempts if isinstance(a, dict) and a.get("error"))
+          rollbacks = sum(
+              1
+              for a in attempts
+              if isinstance(a, dict) and a.get("improved") is False and not a.get("error")
+          )
 
-            # Pull the newest remaining gaps (still open)
-            gaps = fetch_open_gaps(self.conn, limit=3)
-            gap_lines = []
-            for g in gaps:
-                gap_lines.append(f"- ({g['classification']}) {g['requested_capability']} [prio={g['priority']}]")
+          gaps = fetch_open_gaps(self.conn, limit=3)
+          gap_lines = []
+          for g in gaps:
+              gap_lines.append(
+                  f"- ({g['classification']}) {g['requested_capability']} [prio={g['priority']}]"
+              )
+          gap_block = "\n".join(gap_lines) if gap_lines else "- none"
 
-            gap_block = "\n".join(gap_lines) if gap_lines else "- none"
+          text = (
+              "[dream_summary]\n"
+              f"Goal:\n{goal}\n\n"
+              f"Result: {'IMPROVED' if improved else 'NO CHANGE'}\n"
+              f"Branch: {branch}\n"
+              f"PR: {pr_url or '(none)'}\n\n"
+              f"Baseline: score={float(baseline.get('score', 0.0)):.2f} gates={baseline.get('gates')}\n"
+              f"Best: score={float(best.get('score', 0.0)):.2f} gates={best.get('gates')}\n"
+              f"Attempts: {len(attempts)} | Rollbacks: {rollbacks} | Errors: {errors}\n\n"
+              "Top remaining gaps:\n"
+              f"{gap_block}\n"
+          )
 
-            text = (
-                "[dream_summary]\n"
-                f"Goal:\n{goal}\n\n"
-                f"Result: {'IMPROVED' if improved else 'NO CHANGE'}\n"
-                f"Branch: {branch}\n"
-                f"PR: {pr_url or '(none)'}\n\n"
-                f"Baseline: score={baseline.get('score'):.2f} gates={baseline.get('gates')}\n"
-                f"Best: score={best.get('score'):.2f} gates={best.get('gates')}\n"
-                f"Attempts: {len(attempts)}\n\n"
-                "Top remaining gaps:\n"
-                f"{gap_block}\n"
-            )
-
-            if hasattr(self.store, "add_event"):
-                self.store.add_event(content=text, importance=0.2, type_="dream_summary")
-        except Exception as e:
-            logger.debug(f"[self-improve] dream summary event skipped: {e}")
+          if hasattr(self.store, "add_event"):
+              self.store.add_event(content=text, importance=0.2, type_="dream_summary")
+      except Exception as e:
+          logger.debug(f"[self-improve] dream summary event skipped: {e}")

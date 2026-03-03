@@ -377,7 +377,7 @@ class SelfImproveService:
         except Exception:
             pass
           
-          
+        # self._record_dream_summary_event(summary_text, meta={"dream_id": dream_id})
         self._record_dream_summary_event(result=result, goal=goal)
 
         result["pr_url"] = pr_url
@@ -385,48 +385,48 @@ class SelfImproveService:
         return result
       
       
-        def _record_dream_summary_event(self, *, result: dict[str, Any], goal: str) -> None:
-          """
-          Persist a human-readable summary of the self-improve run into MemoryStore/events.
-          Makes continuity visible and retrievable in normal conversation.
-          """
-          try:
-              pr_url = result.get("pr_url") or ""
-              branch = result.get("branch") or ""
-              baseline = result.get("baseline") or {}
-              best = result.get("best") or {}
-              attempts = result.get("attempts") or []
-              improved = bool(result.get("improved"))
+    def _record_dream_summary_event(self, *, result: dict[str, Any], goal: str) -> None:
+        """
+        Persist a human-readable summary of the self-improve run into MemoryStore/events.
+        Makes continuity visible and retrievable in normal conversation.
+        """
+        try:
+            pr_url = result.get("pr_url") or ""
+            branch = result.get("branch") or ""
+            baseline = result.get("baseline") or {}
+            best = result.get("best") or {}
+            attempts = result.get("attempts") or []
+            improved = bool(result.get("improved"))
 
-              errors = sum(1 for a in attempts if isinstance(a, dict) and a.get("error"))
-              rollbacks = sum(
-                  1
-                  for a in attempts
-                  if isinstance(a, dict) and a.get("improved") is False and not a.get("error")
-              )
+            errors = sum(1 for a in attempts if isinstance(a, dict) and a.get("error"))
+            rollbacks = sum(
+                1
+                for a in attempts
+                if isinstance(a, dict) and a.get("improved") is False and not a.get("error")
+            )
 
-              gaps = fetch_open_gaps(self.conn, limit=3)
-              gap_lines = []
-              for g in gaps:
-                  gap_lines.append(
-                      f"- ({g['classification']}) {g['requested_capability']} [prio={g['priority']}]"
-                  )
-              gap_block = "\n".join(gap_lines) if gap_lines else "- none"
+            gaps = fetch_open_gaps(self.conn, limit=3)
+            gap_lines = []
+            for g in gaps:
+                gap_lines.append(
+                    f"- ({g['classification']}) {g['requested_capability']} [prio={g['priority']}]"
+                )
+            gap_block = "\n".join(gap_lines) if gap_lines else "- none"
 
-              text = (
-                  "[dream_summary]\n"
-                  f"Goal:\n{goal}\n\n"
-                  f"Result: {'IMPROVED' if improved else 'NO CHANGE'}\n"
-                  f"Branch: {branch}\n"
-                  f"PR: {pr_url or '(none)'}\n\n"
-                  f"Baseline: score={float(baseline.get('score', 0.0)):.2f} gates={baseline.get('gates')}\n"
-                  f"Best: score={float(best.get('score', 0.0)):.2f} gates={best.get('gates')}\n"
-                  f"Attempts: {len(attempts)} | Rollbacks: {rollbacks} | Errors: {errors}\n\n"
-                  "Top remaining gaps:\n"
-                  f"{gap_block}\n"
-              )
+            text = (
+                "[dream_summary]\n"
+                f"Goal:\n{goal}\n\n"
+                f"Result: {'IMPROVED' if improved else 'NO CHANGE'}\n"
+                f"Branch: {branch}\n"
+                f"PR: {pr_url or '(none)'}\n\n"
+                f"Baseline: score={float(baseline.get('score', 0.0)):.2f} gates={baseline.get('gates')}\n"
+                f"Best: score={float(best.get('score', 0.0)):.2f} gates={best.get('gates')}\n"
+                f"Attempts: {len(attempts)} | Rollbacks: {rollbacks} | Errors: {errors}\n\n"
+                "Top remaining gaps:\n"
+                f"{gap_block}\n"
+            )
 
-              if hasattr(self.store, "add_event"):
-                  self.store.add_event(content=text, importance=0.2, type_="dream_summary")
-          except Exception as e:
-              logger.debug(f"[self-improve] dream summary event skipped: {e}")
+            if hasattr(self.store, "add_event"):
+                self.store.add_event(content=text, importance=0.2, type_="dream_summary")
+        except Exception as e:
+            logger.debug(f"[self-improve] dream summary event skipped: {e}")

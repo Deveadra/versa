@@ -94,16 +94,20 @@ class CodeIndexer:
     def scan(self, incremental: bool = True) -> dict[str, Any]:
         """
         Returns:
-          {
+        {
             "files": {
-              "src/base/...py": {"mtime": float, "summary": str, "symbols": [...]},
-              ...
+            "src/base/...py": {"mtime": float, "summary": str, "symbols": [...]},
+            ...
             }
-          }
+        }
         """
         cache = self._load_cache() if incremental else {}
         files_cache = cache.get("files", {}) if incremental else {}
-        out: dict[str, Any] = {"files": {}}
+
+        # Start from the existing cache when incremental, then update changed/new files.
+        # This makes pruning behavior explicit and prevents stale entries from accumulating.
+        out_files: dict[str, Any] = dict(files_cache) if incremental else {}
+        seen: set[str] = set()
 
         for p in self.root.rglob("*.py"):
             if "__pycache__" in p.parts:
@@ -113,21 +117,31 @@ class CodeIndexer:
             if not self._allowed(rp):
                 continue
 
+            seen.add(rp)
+
             try:
                 mtime = p.stat().st_mtime
             except Exception:
                 continue
 
-            if incremental and rp in files_cache and files_cache[rp].get("mtime") == mtime:
-                out["files"][rp] = files_cache[rp]
+            # Cache hit: keep existing entry as-is
+            if incremental and rp in out_files and out_files[rp].get("mtime") == mtime:
                 continue
 
             info = self._index_file(p)
             info["mtime"] = mtime
-            out["files"][rp] = info
+            out_files[rp] = info
+
+        if incremental:
+            # Prune deleted or no-longer-allowed files from the cache.
+            for stale in [k for k in list(out_files.keys()) if k not in seen]:
+                del out_files[stale]
+
+        out: dict[str, Any] = {"files": out_files}
 
         if incremental:
             self._save_cache(out)
+
         return out
 
     @staticmethod

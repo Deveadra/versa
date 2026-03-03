@@ -17,7 +17,7 @@ from dateutil import parser as dateparser
 from loguru import logger
 from openai import OpenAI
 
-from base.agents.dream import DreamCycle
+# from base.agents.dream import DreamCycle
 from base.agents.scheduler import Scheduler
 from base.calendar.rrule_helpers import rrule_from_phrase
 from base.calendar.store import CalendarStore
@@ -44,12 +44,18 @@ from base.memory.store import MemoryStore
 from base.personality.tone_adapter import ToneAdapter
 from base.self_improve.code_indexer import CodeIndexer
 from base.self_improve.diagnostic_engine import DiagnosticEngine
+from base.self_improve.iteration_controller import (
+    RepoJanitorIterationController,
+    IterationBudget,
+    LeashPolicy,
+)
 from base.self_improve.models import Proposal, ProposedChange
 from base.self_improve.pr_manager import PRManager
 from base.self_improve.proposal_engine import ProposalEngine
+from base.self_improve.service import SelfImproveService
 from base.utils.embeddings import get_embedder
 from base.utils.timeparse import extract_time_from_text
-from base.utils.aerith_status import CognitiveStatus, AerithStatus, AerithStatusConfig
+from base.utils.status import CognitiveStatus, AerithStatus, AerithStatusConfig
 from base.voice.null_voice import NullVoice
 from base.voice.tts_elevenlabs import Voice
 from config.config import settings
@@ -184,6 +190,15 @@ class Orchestrator:
         self.proposal_engine = ProposalEngine(str(self.repo_root), brain=self.brain)
         self.pr_manager = PRManager(str(self.repo_root))
 
+        self.self_improve = SelfImproveService(
+            repo_root=str(self.repo_root),
+            db=self.db,
+            store=self.store,
+            brain=self.brain,
+            code_indexer=self.code_indexer,
+            proposal_engine=self.proposal_engine,
+            pr_manager=self.pr_manager,
+        )
         # learning & feedback components (inserted)
         try:
             self.feedback = Feedback(self.db)
@@ -252,13 +267,24 @@ class Orchestrator:
 
         # --- Scheduler
         self.scheduler = Scheduler(db=self.db, memory=self.store, store=self.store)
+
+        # daily consolidation (keep)
         self.scheduler.add_daily(
             self.consolidator.summarize_old_events,
             hour=settings.consolidation_hour,
             minute=settings.consolidation_minute,
         )
-        self.scheduler.add_daily(self._job_self_improvement, hour=3, minute=15)
+
+        # daily self-improve (ONLY schedule once, ONLY if enabled)
+        if settings.self_improve_enabled:
+            self.scheduler.add_daily(
+                self._job_self_improvement,
+                hour=3,
+                minute=15,
+            )  # runs daily at 3:15am
+
         self.scheduler.start()
+        
 
         logger.info("Orchestrator initialized")
 
@@ -306,13 +332,8 @@ class Orchestrator:
         return {"label": label, "latency_ms": latency, "ok": ok, "msg": msg}
 
     def _now_iso_utc(self) -> str:
-        """Return an ISO8601 timestamp in UTC, robust to import/order issues."""
-        try:
-            # return dt.datetime.now(dt.timezone.utc).isoformat()
-            return self._now_iso_utc()
-        except Exception:
-            # absolute fallback if timezone were ever missing in this scope
-            return dt.datetime.utcnow().replace(tzinfo=dt.UTC).isoformat()
+        """Return an ISO8601 timestamp in UTC."""
+        return dt.datetime.now(dt.UTC).isoformat()
 
     def _now_utc(self) -> dt.datetime:
         return dt.datetime.now(dt.UTC)
@@ -450,84 +471,89 @@ class Orchestrator:
 
         return issues
 
+
     def propose_code_change(self, instruction: str) -> str:
-        """
-        Natural-language → code proposal → branch+commit+PR → notify user.
-        """
-        # 1) Build repo index (for LLM context)
-        index = self.code_indexer.scan()
-        index_md = self.code_indexer.to_markdown(cast(Any, index))
+        return self.self_improve.run_interactive_proposal(instruction=instruction)
 
-        # 2) Ask LLM for proposal
-        proposal = self.proposal_engine.propose(instruction, index_md=index_md)
 
-        # 3) Prepare branch
+    # def propose_code_change(self, instruction: str) -> str:
+    #     """
+    #     Natural-language → code proposal → branch+commit+PR → notify user.
+    #     """
+    #     # 1) Build repo index (for LLM context)
+    #     index = self.code_indexer.scan()
+    #     index_md = self.code_indexer.to_markdown(cast(Any, index))
 
-        suffix = re.sub(r"[^a-z0-9_\-]+", "-", proposal.title.lower())[:40]
-        suffix = suffix or f"proposal-{int(time.time())}"
+    #     # 2) Ask LLM for proposal
+    #     proposal = self.proposal_engine.propose(instruction, index_md=index_md)
 
-        try:
-            branch = self.pr_manager.prepare_branch(suffix)
-        except Exception as e:
-            return f"Failed to prepare proposal branch: {e}"
+    #     # 3) Prepare branch
 
-        pr_url = ""
-        try:
-            # 4) Apply proposal on that branch
-            results = self.proposal_engine.apply_proposal(proposal)
-            failed = [f"- {c.path}: {msg}" for (c, ok, msg) in results if not ok]
+    #     suffix = re.sub(r"[^a-z0-9_\-]+", "-", proposal.title.lower())[:40]
+    #     suffix = suffix or f"proposal-{int(time.time())}"
 
-            # 4.5) Validation (non-fatal, we include in PR)
-            issues = self._validate_changes()
+    #     try:
+    #         branch = self.pr_manager.prepare_branch(suffix)
+    #     except Exception as e:
+    #         return f"Failed to prepare proposal branch: {e}"
 
-            # Bail if absolutely nothing applied
-            if not results or (failed and not any(ok for (_, ok, _) in results)):
-                return "Proposal aborted — no changes could be safely applied."
+    #     pr_url = ""
+    #     try:
+    #         # 4) Apply proposal on that branch
+    #         results = self.proposal_engine.apply_proposal(proposal)
+    #         failed = [f"- {c.path}: {msg}" for (c, ok, msg) in results if not ok]
 
-            # 5) Commit + push
-            try:
-                self.pr_manager.commit_and_push(branch, proposal.title)
-            except Exception as e:
-                return f"Failed to commit/push PR: {e}"
+    #         # 4.5) Validation (non-fatal, we include in PR)
+    #         issues = self._validate_changes()
 
-            # 6) Open PR
-            pr_title = proposal.title if not (failed or issues) else "[Partial] " + proposal.title
-            pr_url = self.pr_manager.open_pr(branch=branch, proposal=proposal)
+    #         # Bail if absolutely nothing applied
+    #         if not results or (failed and not any(ok for (_, ok, _) in results)):
+    #             return "Proposal aborted — no changes could be safely applied."
 
-            # 7) Run tests and append to PR body (best-effort)
-            try:
-                self.pr_manager.run_tests_and_update_pr(branch)
-            except Exception:
-                pass
+    #         # 5) Commit + push
+    #         try:
+    #             self.pr_manager.commit_and_push(branch, proposal.title)
+    #         except Exception as e:
+    #             return f"Failed to commit/push PR: {e}"
 
-            # 8) Notify
-            report = []
-            if failed:
-                report.append("⚠️ Some changes could not be applied:\n" + "\n".join(failed))
-            if issues:
-                report.append("⚠️ Validation issues:\n" + "\n".join(issues))
-            report_text = "\n\n".join(report) if report else "✅ All changes applied successfully."
+    #         # 6) Open PR
+    #         pr_title = proposal.title if not (failed or issues) else "[Partial] " + proposal.title
+    #         pr_url = self.pr_manager.open_pr(branch=branch, proposal=proposal)
 
-            if settings.proposal_notify_stdout:
-                self.notifier.notify("New Code Proposal", f"{pr_title}\n{pr_url}\n\n{report_text}")
+    #         # 7) Run tests and append to PR body (best-effort)
+    #         try:
+    #             self.pr_manager.run_tests_and_update_pr(branch)
+    #         except Exception:
+    #             pass
 
-            try:
-                if hasattr(self.store, "add_event"):
-                    self.store.add_event(
-                        content=f"[proposal] {pr_title} → {pr_url}\n{report_text}",
-                        importance=0.0,
-                        type_="proposal",
-                    )
-            except Exception:
-                pass
+    #         # 8) Notify
+    #         report = []
+    #         if failed:
+    #             report.append("⚠️ Some changes could not be applied:\n" + "\n".join(failed))
+    #         if issues:
+    #             report.append("⚠️ Validation issues:\n" + "\n".join(issues))
+    #         report_text = "\n\n".join(report) if report else "✅ All changes applied successfully."
 
-            return f"Proposal opened: {pr_url}\n\n{report_text}"
-        finally:
-            # 9) Always get you back to where you were
-            try:
-                self.pr_manager.restore_original_branch()
-            except Exception:
-                pass
+    #         if settings.proposal_notify_stdout:
+    #             self.notifier.notify("New Code Proposal", f"{pr_title}\n{pr_url}\n\n{report_text}")
+
+    #         try:
+    #             if hasattr(self.store, "add_event"):
+    #                 self.store.add_event(
+    #                     content=f"[proposal] {pr_title} → {pr_url}\n{report_text}",
+    #                     importance=0.0,
+    #                     type_="proposal",
+    #                 )
+    #         except Exception:
+    #             pass
+
+    #         return f"Proposal opened: {pr_url}\n\n{report_text}"
+    #     finally:
+    #         # 9) Always get you back to where you were
+    #         try:
+    #             self.pr_manager.restore_original_branch()
+    #         except Exception:
+    #             pass
 
     def _git_run(self, args: list[str], cwd: Path | None = None) -> tuple[int, str, str]:
         p = subprocess.run(
@@ -940,98 +966,121 @@ class Orchestrator:
         #     lag_summary = "; ".join(f"{b['label']} {b['latency_ms']:.1f}ms" for b in benchmarks)
         #     return diag_output + f"\nDiagnostic complete. ⚠️ I noticed lag: {lag_summary}. Optimization suggested."
 
-        # ===== Feedback loop: auto-propose fixes (only when fix=True) =====
+        # # ===== Feedback loop: auto-propose fixes (only when fix=True) =====
         if fix:
-            changed = self._git_changed_paths()
-            if changed:
-                # ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-                ts = self._now_iso_utc()
-                branch = f"diag/autofix/{ts}"
-                self._git_ensure_branch(branch)
-
-                commit_msg = "chore(diagnostics): auto-fix (ruff --fix, black) and housekeeping"
-                committed = self._git_commit_all(commit_msg)
-
-                if committed:
-                    pushed = self._git_push_branch(branch)
-                    title = "chore(diagnostics): auto-fix & hygiene"
-                    # Build a compact PR body
-                    benchmarks_str = (
-                        ", ".join(f"{b['label']} {b['latency_ms']:.1f}ms" for b in benchmarks)
-                        if benchmarks
-                        else "n/a"
-                    )
-                    preview = "; ".join(
-                        f"{i.get('file','?')}: {i.get('summary', i.get('issue','?'))}"
-                        for i in issues[:5]
-                    )
-                    more = "" if len(issues) <= 5 else f"\n…plus {len(issues)-5} more findings."
-                    body = (
-                        "Automated diagnostics completed.\n\n"
-                        f"**Mode:** {mode}  |  **Fix:** {fix}  |  **Lag:** {'yes' if laggy else 'no'}\n\n"
-                        "### Summary\n"
-                        f"- Benchmarks: {benchmarks_str}\n"
-                        f"- Issues (sample): {preview or 'none'}{more}\n\n"
-                        "### Tool Output (tail)\n"
-                        f"```\n{(diag_output or '')[-2000:]}\n```"
-                    )
-
-                    pr_url = None
-                    if pushed:
-                        pr_url = self._try_open_pr_via_manager(
-                            branch, title, body
-                        ) or self._remote_compare_url(branch, base)
-
-                    # Record in memory for recall
-                    try:
-                        self.store.add_event(
-                            content=json.dumps(
-                                {
-                                    "type": "diagnostic_pr",
-                                    "branch": branch,
-                                    "pushed": pushed,
-                                    "pr_url": pr_url,
-                                    "title": title,
-                                    "body_preview": body[:1000],
-                                    # "created_at": datetime.now(timezone.utc).isoformat(),
-                                    "created_at": self._now_iso_utc(),
-                                }
-                            ),
-                            importance=0.0,
-                            type_="diagnostic",
-                        )
-                    except Exception:
-                        pass
-
-                    # Append a friendly tail to the conversational response
-                    tail = f"\nAuto-fix branch: {branch}"
-                    if pr_url:
-                        tail += f"\nPR ready: {pr_url}"
-                    else:
-                        tail += (
-                            "\nPR not auto-created; use the compare link above or open manually."
-                        )
-                    # Combine with your existing return text
-                    return (
-                        (diag_output + "\n" if diag_output else "")
-                        + (
-                            "Diagnostic complete. I found: "
-                            + "; ".join(
-                                f"{i['file']}: {i.get('summary', i.get('issue','?'))}"
-                                for i in issues[:3]
-                            )
-                            + ("" if len(issues) <= 3 else f" …and {len(issues)-3} more.")
-                        )
-                        + tail
-                    )
-                else:
-                    # Nothing actually staged/committed (possible if fix tools made no changes)
-                    pass
-            else:
-                # No file changes detected; nothing to propose.
-                pass
-
+            try:
+                benchmarks_str = (
+                    ", ".join(f"{b['label']} {b['latency_ms']:.1f}ms" for b in benchmarks)
+                    if benchmarks
+                    else "n/a"
+                )
+                issues_preview = "; ".join(
+                    f"{i.get('file','?')}: {i.get('summary', i.get('issue','?'))}"
+                    for i in issues[:5]
+                )
+                pr_url = self.self_improve.run_diagnostic_autofix_pr(
+                    mode=mode,
+                    diag_output=diag_output,
+                    issues_preview=issues_preview,
+                    benchmarks_preview=benchmarks_str,
+                )
+                if pr_url:
+                    return (diag_output + "\n" if diag_output else "") + f"Auto-fix PR opened: {pr_url}"
+            except Exception as e:
+                logger.exception(f"Diagnostic autofix PR failed: {e}")
         # ===== End feedback loop =====
+        # ===== End feedback loop =====
+        # if fix:
+        #     changed = self._git_changed_paths()
+        #     if changed:
+        #         # ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        #         ts = self._now_iso_utc()
+        #         branch = f"diag/autofix/{ts}"
+        #         self._git_ensure_branch(branch)
+
+        #         commit_msg = "chore(diagnostics): auto-fix (ruff --fix, black) and housekeeping"
+        #         committed = self._git_commit_all(commit_msg)
+
+        #         if committed:
+        #             pushed = self._git_push_branch(branch)
+        #             title = "chore(diagnostics): auto-fix & hygiene"
+        #             # Build a compact PR body
+        #             benchmarks_str = (
+        #                 ", ".join(f"{b['label']} {b['latency_ms']:.1f}ms" for b in benchmarks)
+        #                 if benchmarks
+        #                 else "n/a"
+        #             )
+        #             preview = "; ".join(
+        #                 f"{i.get('file','?')}: {i.get('summary', i.get('issue','?'))}"
+        #                 for i in issues[:5]
+        #             )
+        #             more = "" if len(issues) <= 5 else f"\n…plus {len(issues)-5} more findings."
+        #             body = (
+        #                 "Automated diagnostics completed.\n\n"
+        #                 f"**Mode:** {mode}  |  **Fix:** {fix}  |  **Lag:** {'yes' if laggy else 'no'}\n\n"
+        #                 "### Summary\n"
+        #                 f"- Benchmarks: {benchmarks_str}\n"
+        #                 f"- Issues (sample): {preview or 'none'}{more}\n\n"
+        #                 "### Tool Output (tail)\n"
+        #                 f"```\n{(diag_output or '')[-2000:]}\n```"
+        #             )
+
+        #             pr_url = None
+        #             if pushed:
+        #                 pr_url = self._try_open_pr_via_manager(
+        #                     branch, title, body
+        #                 ) or self._remote_compare_url(branch, base)
+
+        #             # Record in memory for recall
+        #             try:
+        #                 self.store.add_event(
+        #                     content=json.dumps(
+        #                         {
+        #                             "type": "diagnostic_pr",
+        #                             "branch": branch,
+        #                             "pushed": pushed,
+        #                             "pr_url": pr_url,
+        #                             "title": title,
+        #                             "body_preview": body[:1000],
+        #                             # "created_at": datetime.now(timezone.utc).isoformat(),
+        #                             "created_at": self._now_iso_utc(),
+        #                         }
+        #                     ),
+        #                     importance=0.0,
+        #                     type_="diagnostic",
+        #                 )
+        #             except Exception:
+        #                 pass
+
+        #             # Append a friendly tail to the conversational response
+        #             tail = f"\nAuto-fix branch: {branch}"
+        #             if pr_url:
+        #                 tail += f"\nPR ready: {pr_url}"
+        #             else:
+        #                 tail += (
+        #                     "\nPR not auto-created; use the compare link above or open manually."
+        #                 )
+        #             # Combine with your existing return text
+        #             return (
+        #                 (diag_output + "\n" if diag_output else "")
+        #                 + (
+        #                     "Diagnostic complete. I found: "
+        #                     + "; ".join(
+        #                         f"{i['file']}: {i.get('summary', i.get('issue','?'))}"
+        #                         for i in issues[:3]
+        #                     )
+        #                     + ("" if len(issues) <= 3 else f" …and {len(issues)-3} more.")
+        #                 )
+        #                 + tail
+        #             )
+        #         else:
+        #             # Nothing actually staged/committed (possible if fix tools made no changes)
+        #             pass
+        #     else:
+        #         # No file changes detected; nothing to propose.
+        #         pass
+
+        # # ===== End feedback loop =====
 
         preview = "; ".join(
             f"{i['file']}: {i.get('summary', i.get('issue','?'))}" for i in issues[:3]
@@ -1217,32 +1266,61 @@ class Orchestrator:
     # ------------------------------------
     # High-level user flow with composer
     # ------------------------------------
-    def _job_self_improvement(self):
-        """
-        Daily self-improvement pipeline:
-        1) Run diagnostics and write a report.
-        2) Open a proposal/PR referencing that report.
-        """
-        # Resolve repo root for the tools
-        # repo_root = getattr(settings, "repo_root", str(Path(__file__).resolve().parents[3]))
-        repo_root = str(self.repo_root)
-
+    
+    def _job_self_improvement(self) -> None:
         try:
-            diag = DiagnosticEngine(repo_root=repo_root)
-            report_path = diag.run()
+            result = self.self_improve.run_daily()
+            logger.info(f"[self-improve] daily result={result}")
         except Exception as e:
-            logger.exception(f"[self-improve] Diagnostics failed: {e}")
-            return
+            logger.exception(f"[self-improve] daily run failed: {e}")
+    # def _job_self_improvement(self):
+    #     """
+    #     Daily self-improvement pipeline:
+    #     1) Run diagnostics and write a report.
+    #     2) Open a proposal/PR referencing that report.
+    #     """
+    #     # Resolve repo root for the tools
+    #     # repo_root = getattr(settings, "repo_root", str(Path(__file__).resolve().parents[3]))
+    #     repo_root = str(self.repo_root)
+    #     policy = LeashPolicy(
+    #         allowlist=(
+    #             "src/base/**",
+    #             "src/config/**",
+    #             "scripts/**",
+    #             "tests/**",
+    #             ".github/workflows/**",
+    #             "pyproject.toml",
+    #             "README.md",
+    #             "run.py",
+    #         )
+    #     )
 
-        try:
-            self._propose_self_improvement(
-                repo_root=repo_root,
-                instruction="Daily self-improvement based on diagnostics",
-                diagnostic_path=report_path,
-            )
-            logger.info("[self-improve] Proposal opened.")
-        except Exception as e:
-            logger.exception(f"[self-improve] Proposal failed: {e}")
+    #     ctl = RepoJanitorIterationController(
+    #         repo_root=repo_root,
+    #         db_path=settings.db_path,     # or wherever aerith.db lives
+    #         pr_manager=self.pr_manager,   # whatever your orchestrator stores it as
+    #         policy=policy,
+    #     )
+
+    #     result = ctl.run(goal="Daily self-improvement based on diagnostics", budget=IterationBudget())
+    #     logger.info(f"[self-improve] result={result}")
+        
+    #     # try:
+    #     #     diag = DiagnosticEngine(repo_root=repo_root)
+    #     #     report_path = diag.run()
+    #     # except Exception as e:
+    #     #     logger.exception(f"[self-improve] Diagnostics failed: {e}")
+    #     #     return
+
+    #     # try:
+    #     #     self._propose_self_improvement(
+    #     #         repo_root=repo_root,
+    #     #         instruction="Daily self-improvement based on diagnostics",
+    #     #         diagnostic_path=report_path,
+    #     #     )
+    #     #     logger.info("[self-improve] Proposal opened.")
+    #     # except Exception as e:
+    #     #     logger.exception(f"[self-improve] Proposal failed: {e}")
 
     def handle_user(self, msg: str) -> str:
         """
@@ -1802,38 +1880,59 @@ class Orchestrator:
             return f"[Chat fallback error] {e}"
 
     def cmd_self_improve(self, *args):
-        repo_root = str(self.repo_root)
-        dream_path = None
         try:
+            from base.agents.dream import DreamCycle #lazy import to avoid circular
             dc = DreamCycle()
-            notes = dc.run()
-            if isinstance(notes, dict):
-                dream_path = dc.write_summary(notes)
-            self.notify("Dream cycle completed.")
+            result = self.self_improve.run_manual(include_dream=True)
+            self.notify(f"Manual self-improve complete: {result.get('pr_url') or 'no PR opened'}")
         except Exception as e:
-            self.notify(f"Dream cycle failed: {e}")
+            self.notify(f"Dream cycle unavailable or failed: {e}")
+            self.notify(f"Manual self-improve failed: {e}")
+    # def cmd_self_improve(self, *args):
+    #     repo_root = str(self.repo_root)
 
-        diag_path = None
-        try:
-            diag = DiagnosticEngine(repo_root=repo_root)
-            diag_path = diag.run()
-            self.notify("Diagnostics completed.")
-        except Exception as e:
-            self.notify(f"Diagnostics failed: {e}")
+    #     dream_context = ""
+    #     try:
+    #         dc = DreamCycle()
+    #         notes = dc.run()
+    #         if isinstance(notes, dict):
+    #             dream_path = dc.write_summary(notes)
+    #             try:
+    #                 dream_context = Path(dream_path).read_text(encoding="utf-8")
+    #             except Exception:
+    #                 dream_context = ""
+    #         self.notify("Dream cycle completed.")
+    #     except Exception as e:
+    #         self.notify(f"Dream cycle failed: {e}")
 
-        try:
-            if diag_path:
-                self._propose_self_improvement(
-                    repo_root=repo_root,
-                    instruction="Manual self-improvement run",
-                    diagnostic_path=diag_path,
-                    dream_path=dream_path,
-                )
-                self.notify("Proposal opened.")
-            else:
-                self.notify("Skipped proposal; no diagnostic report.")
-        except Exception as e:
-            self.notify(f"Proposal failed: {e}")
+    #     policy = LeashPolicy(
+    #         allowlist=(
+    #             "src/base/**",
+    #             "src/config/**",
+    #             "scripts/**",
+    #             "tests/**",
+    #             ".github/workflows/**",
+    #             "pyproject.toml",
+    #             "README.md",
+    #             "run.py",
+    #         )
+    #     )
+
+    #     goal = "Manual self-improvement run"
+    #     if dream_context.strip():
+    #         goal += "\n\nDream context:\n" + dream_context[:4000]
+
+    #     try:
+    #         ctl = RepoJanitorIterationController(
+    #             repo_root=repo_root,
+    #             db_path=settings.db_path,
+    #             pr_manager=self.pr_manager,
+    #             policy=policy,
+    #         )
+    #         result = ctl.run(goal=goal, budget=IterationBudget())
+    #         self.notify(f"Self-improve run complete: {result.get('pr_url') or 'no PR opened'}")
+    #     except Exception as e:
+    #         self.notify(f"Self-improve controller failed: {e}")
 
     # --------
     # Cleanup

@@ -89,7 +89,7 @@ class MemoryStore:
             except Exception as e2:
                 logger.error(f"MemoryStore: InMemory backend init failed; disabling semantic search: {e2}")
                 self._vector_backend = None
-
+        
         # 4) schema last (unchanged)
         self._ensure_schema()
         self.init_db()

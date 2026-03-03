@@ -87,56 +87,68 @@ class ProposalEngine:
 
     def _apply_change(self, change: ProposedChange) -> tuple[bool, str]:
         """
-        Apply a ProposedChange robustly:
-        - If 'apply_mode' == 'full_file': write replacement to a .aerith shadow (no destructive overwrite).
-        - If 'apply_mode' == 'replace_block':
-            * If file missing -> create new with replacement.
-            * If anchor present -> replace first occurrence.
-            * If anchor missing -> backup original to .bak and replace entire file.
-        Returns True if any file content was written.
+        Apply a ProposedChange safely.
+
+        Modes:
+        - full_file:
+            * backup original into .aerith/backups/<relpath>.bak (gitignored)
+            * overwrite target file
+        - replace_block:
+            * if file missing -> create new with replacement
+            * if anchor present and found -> replace first occurrence
+            * if anchor missing/empty or not found -> do NOT rewrite entire file (fail safely)
         """
         try:
             target = (self.root / change.path).resolve()
             target.parent.mkdir(parents=True, exist_ok=True)
 
-            # full_file writes a shadow copy to prevent accidental overwrites
-            if getattr(change, "apply_mode", None) == "full_file":
-                shadow = target.with_suffix(target.suffix + ".aerith")
-                shadow.write_text(change.replacement, encoding="utf-8")
-                logger.info(f"[apply_change] full_file → wrote shadow {shadow}")
-                return True, f"wrote shadow {shadow.name}"
+            mode = getattr(change, "apply_mode", None) or "replace_block"
+            replacement = change.replacement or ""
+            anchor = getattr(change, "search_anchor", None) or ""
 
-            # Default mode: replace_block
+            # ---- full_file (safe overwrite) ----
+            if mode == "full_file":
+                backups = self.root / ".aerith" / "backups"
+                backups.mkdir(parents=True, exist_ok=True)
+
+                if target.exists():
+                    rel = target.relative_to(self.root).as_posix().replace("/", "__")
+                    backup_path = backups / f"{rel}.bak"
+                    try:
+                        backup_path.write_text(target.read_text(encoding="utf-8", errors="ignore"), encoding="utf-8")
+                    except Exception:
+                        # best-effort backup only
+                        pass
+
+                original = target.read_text(encoding="utf-8", errors="ignore") if target.exists() else ""
+                if original == replacement:
+                    return False, "no diff (full_file)"
+
+                target.write_text(replacement, encoding="utf-8")
+                logger.info(f"[apply_change] full_file → wrote {target}")
+                return True, "full_file write"
+
+            # ---- replace_block ----
             if not target.exists():
-                target.write_text(change.replacement, encoding="utf-8")
+                target.write_text(replacement, encoding="utf-8")
                 logger.info(f"[apply_change] created new file {target}")
                 return True, "created new file"
 
-            original = target.read_text(encoding="utf-8", errors="ignore")
-            anchor = getattr(change, "search_anchor", None) or ""
+            if not anchor.strip():
+                # Safety: do not allow empty-anchor rewrite of existing files
+                return False, "replace_block refused: empty anchor for existing file"
 
-            if anchor and anchor in original:
-                new_content = original.replace(anchor, change.replacement, 1)
-                if new_content != original:
-                    target.write_text(new_content, encoding="utf-8")
-                    logger.info(f"[apply_change] block replaced in {target}")
-                    return True, "block replaced"
-                logger.info(f"[apply_change] no diff after anchor replace in {target}")
+            original = target.read_text(encoding="utf-8", errors="ignore")
+            if anchor not in original:
+                return False, "replace_block refused: anchor not found"
+
+            new_content = original.replace(anchor, replacement, 1)
+            if new_content == original:
                 return False, "no diff after anchor replace"
 
-            # Fallback when anchor missing → non-destructive backup + full rewrite
-            backup = target.with_suffix(target.suffix + ".bak")
-            try:
-                backup.write_text(original, encoding="utf-8")
-                logger.warning(
-                    f"[apply_change] anchor not found; backed up {target.name} → {backup.name}"
-                )
-            except Exception as be:
-                logger.error(f"[apply_change] failed to backup {target}: {be}")
-
-            target.write_text(change.replacement, encoding="utf-8")
-            logger.info(f"[apply_change] anchor missing → replaced entire file {target}")
-            return True, "anchor missing; replaced entire file"
+            target.write_text(new_content, encoding="utf-8")
+            logger.info(f"[apply_change] block replaced in {target}")
+            return True, "block replaced"
 
         except Exception as e:
             logger.exception(f"[apply_change] error for {change.path}: {e}")
@@ -181,9 +193,9 @@ Respond with strictly the JSON schema described.
             obj.setdefault("changes", []).append(
                 {
                     "path": "tests/test_autogenerated.py",
-                    "apply_mode": "replace_block",
-                    "search_anchor": "",
-                    "replacement": "def test_autogenerated():\n    assert True",
+                    "apply_mode": "full_file",
+                    "search_anchor": None,
+                    "replacement": "def test_autogenerated():\n    assert True\n",
                 }
             )
 

@@ -93,6 +93,10 @@ class PRManager:
         self.client.commit(title)
         self.client.push(branch)
 
+    def push_branch(self, branch: str) -> None:
+        """Push branch without committing (controller already committed)."""
+        self.client.push(branch)
+        
     def open_pr(self, branch: str, proposal: Proposal, extra_tests: str = "") -> str:
         title = proposal.title
         body = f"""## Summary

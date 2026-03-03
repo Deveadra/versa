@@ -1,16 +1,10 @@
 {
-  "python.defaultInterpreterPath": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
   "python.terminal.activateEnvironment": true,
 
   "python.analysis.extraPaths": [
     "${workspaceFolder}",
-    "${workspaceFolder}\\src"
+    "${workspaceFolder}/src"
   ],
-  // "python.analysis.typeCheckingMode": "basic",
-  // "python.analysis.diagnosticMode": "workspace",
-  // "python.analysis.diagnosticSeverityOverrides": {
-  //   "reportMissingTypeStubs": "none"
-  // },
 
   "python.analysis.typeCheckingMode": "off",
   "python.analysis.diagnosticMode": "openFilesOnly",

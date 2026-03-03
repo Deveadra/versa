@@ -11,6 +11,9 @@ def quick_polarity(text: str) -> float:
     Return sentiment polarity as a float in [-1.0, 1.0].
     -1.0 = very negative, 0.0 = neutral, 1.0 = very positive.
     """
+    if TextBlob is None:
+        return 0.0
+    
     if not text:
         return 0.0
     blob: Any = TextBlob(text)
@@ -19,9 +22,6 @@ def quick_polarity(text: str) -> float:
     try:
         return float(polarity)
     except Exception:
-        return 0.0
-    
-    if TextBlob is None:
         return 0.0
 
 

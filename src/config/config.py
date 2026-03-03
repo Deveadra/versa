@@ -116,8 +116,13 @@ class Settings(BaseModel):
 
     # Proposer behavior
     proposer_allowlist: list[str] = [
-        "base/",
-        "config/",
+        "src/base/",
+        "src/config/",
+        "scripts/",
+        "tests/",
+        ".github/workflows/",
+        "pyproject.toml",
+        "README.md",
         "run.py",
     ]
     proposer_blocklist: list[str] = [
@@ -143,7 +148,7 @@ class Settings(BaseModel):
     qdrant_api_key: str | None = Field(default_factory=lambda: os.getenv("QDRANT_API_KEY"))
     qdrant_collection: str = Field(default_factory=lambda: os.getenv("QDRANT_COLLECTION", "events"))
 
-        # ------------------------------------------------------------
+    # ------------------------------------------------------------
     # Self-improvement / dream-cycle settings (single source of truth)
     # ------------------------------------------------------------
     self_improve_enabled: bool = Field(

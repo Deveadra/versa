@@ -171,24 +171,103 @@ class _QdrantMemoryBackendImpl:
         if conds:
             q_filter = Filter(must=conds)
 
-        try:
-            results = self.client.search(
-                collection_name=self.collection_name,
-                query_vector=query_vec.tolist(),
-                limit=k,
-                with_payload=True,
-                filter=q_filter,
+        def _call_search() -> Any:
+            # Build common kwargs (only include filter arg if we actually have one)
+            base_kwargs: dict[str, Any] = {
+                "collection_name": self.collection_name,
+                "limit": k,
+                "with_payload": True,
+            }
+
+            # Vector arg name varies across versions
+            vec_list = query_vec.tolist() if hasattr(query_vec, "tolist") else list(query_vec)
+
+            # 1) Try modern/expected client.search(...)
+            if hasattr(self.client, "search"):
+                # Some clients want query_vector=..., some accept filter=..., some query_filter=...
+                # Try a couple safe permutations.
+                attempts: list[dict[str, Any]] = []
+
+                kw = dict(base_kwargs)
+                kw["query_vector"] = vec_list
+                if q_filter is not None:
+                    kw["query_filter"] = q_filter
+                attempts.append(kw)
+
+                kw = dict(base_kwargs)
+                kw["query_vector"] = vec_list
+                if q_filter is not None:
+                    kw["filter"] = q_filter
+                attempts.append(kw)
+
+                last_err: Exception | None = None
+                for kw in attempts:
+                    try:
+                        return self.client.search(**kw)
+                    except TypeError as e:
+                        last_err = e
+                        continue
+                if last_err is not None:
+                    raise last_err
+
+            # 2) Fallback: client.query_points(...)
+            if hasattr(self.client, "query_points"):
+                attempts = []
+
+                # variant A
+                kw = dict(base_kwargs)
+                kw["query_vector"] = vec_list
+                if q_filter is not None:
+                    kw["query_filter"] = q_filter
+                attempts.append(kw)
+
+                # variant B (some versions call it `query`)
+                kw = dict(base_kwargs)
+                kw["query"] = vec_list
+                if q_filter is not None:
+                    kw["query_filter"] = q_filter
+                attempts.append(kw)
+
+                # filter param name variant
+                kw = dict(base_kwargs)
+                kw["query_vector"] = vec_list
+                if q_filter is not None:
+                    kw["filter"] = q_filter
+                attempts.append(kw)
+
+                last_err = None
+                for kw in attempts:
+                    try:
+                        return self.client.query_points(**kw)
+                    except TypeError as e:
+                        last_err = e
+                        continue
+                if last_err is not None:
+                    raise last_err
+
+            raise AttributeError(
+                "Qdrant client has neither search() nor query_points(); incompatible qdrant-client."
             )
+
+        try:
+            raw = _call_search()
         except Exception as e:
             logger.error(f"QdrantMemoryBackend.search: failed: {e}")
             return []
 
-        out: list[str] = []
-        for r in results or []:
-            if r.payload and "content" in r.payload:
-                out.append(r.payload["content"])
-        return out
+        # Normalize response shape
+        scored = raw
+        if hasattr(scored, "points"):
+            scored = getattr(scored, "points")
+        elif hasattr(scored, "result"):
+            scored = getattr(scored, "result")
 
+        out: list[str] = []
+        for r in scored or []:
+            payload = getattr(r, "payload", None)
+            if payload and isinstance(payload, dict) and "content" in payload:
+                out.append(payload["content"])
+        return out
 
 class QdrantMemoryBackendStub:
     def __init__(self, *a: Any, **kw: Any):

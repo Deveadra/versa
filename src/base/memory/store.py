@@ -478,8 +478,8 @@ class MemoryStore:
                 query_str = query.replace(",", " ")
                 sql = (
                     "SELECT e.content, e.ts, e.importance, e.type "
-                    "FROM events_fts f JOIN events e ON f.rowid = e.id "
-                    "WHERE f MATCH ? ORDER BY e.id DESC LIMIT ?"
+                    "FROM events_fts JOIN events e ON events_fts.rowid = e.id "
+                    "WHERE events_fts MATCH ? ORDER BY e.id DESC LIMIT ?"
                 )
                 cur = self.conn.execute(
                     sql, (query_str, limit * 3)

@@ -52,7 +52,7 @@ from base.self_improve.iteration_controller import (
 from base.self_improve.models import Proposal, ProposedChange
 from base.self_improve.pr_manager import PRManager
 from base.self_improve.proposal_engine import ProposalEngine
-from base.self_improve.service import SelfImproveService
+from base.self_improve.service import SelfImproveService, SelfImproveRunConfig
 from base.utils.embeddings import get_embedder
 from base.utils.timeparse import extract_time_from_text
 from base.utils.status import CognitiveStatus, AerithStatus, AerithStatusConfig
@@ -1268,8 +1268,9 @@ class Orchestrator:
     # ------------------------------------
     
     def _job_self_improvement(self) -> None:
+        cfg = SelfImproveRunConfig()
         try:
-            result = self.self_improve.run_daily()
+            result = self.self_improve.run_daily(cfg=cfg)
             logger.info(f"[self-improve] daily result={result}")
         except Exception as e:
             logger.exception(f"[self-improve] daily run failed: {e}")
@@ -1346,6 +1347,11 @@ class Orchestrator:
                 )
                 self.status.complete("Proposed code change")
                 return self.propose_code_change(instruction)
+            if lower.startswith("selfimprove"):
+                cfg = SelfImproveRunConfig()
+                result = self.self_improve.run_manual(cfg=cfg, include_dream=False)
+                self.status.complete("Self-improvement run complete")
+                return json.dumps(result, indent=2)
 
             if any(
                 k in lower for k in ("laggy", "slow", "optimize", "diagnose", "diagnostic", "scan")

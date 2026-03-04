@@ -3,7 +3,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
@@ -31,25 +31,35 @@ class IterationBudget:
     gap_limit: int = 5
 
 
-@dataclass(frozen=True)
+@dataclass
 class LeashPolicy:
-    allowlist: tuple[str, ...]
-    blocklist: tuple[str, ...] = (
-        ".git/**",
-        ".venv/**",
-        "**/__pycache__/**",
-        "keys/**",
-        ".aerith/**",
-        "**/*.bak",
-        "**/*.aerith",
-    )
+    """
+    Controls which repo paths RepoJanitor is allowed to touch.
+
+    allowlist: if non-empty, ONLY these patterns are permitted
+    blocklist: if a path matches any blocklist pattern, it is denied
+    """
+    allowlist: list[str] = field(default_factory=list)
+    blocklist: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        # Normalize patterns to forward slashes for consistent matching across OSes
+        self.allowlist = [p.replace("\\", "/") for p in (self.allowlist or [])]
+        self.blocklist = [p.replace("\\", "/") for p in (self.blocklist or [])]
 
     def is_allowed(self, relpath: str) -> bool:
-        rel = relpath.replace("\\", "/")
-        if any(fnmatch(rel, pat) for pat in self.blocklist):
-            return False
-        return any(fnmatch(rel, pat) for pat in self.allowlist)
+        rp = (relpath or "").replace("\\", "/")
 
+        # Blocklist wins
+        if self.blocklist and any(fnmatch(rp, pat) for pat in self.blocklist):
+            return False
+
+        # If allowlist is provided, require match
+        if self.allowlist:
+            return any(fnmatch(rp, pat) for pat in self.allowlist)
+
+        # No allowlist means allow by default (except blocklist)
+        return True
 
 class RepoJanitorIterationController:
     """
@@ -72,8 +82,10 @@ class RepoJanitorIterationController:
         policy: LeashPolicy,
     ):
         self.repo = Path(repo_root).resolve()
-        self.db = db_conn
-        self.conn = db_conn.conn
+        # self.db = db_conn
+        # self.conn = db_conn.conn
+        self.conn = getattr(db_conn, "conn", db_conn)
+        self.db = self.conn
         self.code_indexer = code_indexer
         self.proposal_engine = proposal_engine
         self.pr_manager = pr_manager
@@ -264,7 +276,7 @@ class RepoJanitorIterationController:
         base_branch = self._current_branch()
         logger.info(f"[self-improve] base_branch={base_branch}")
 
-                # Normalize run base: work from the PR base branch so scoring + diffs match what will be merged.
+        # Normalize run base: work from the PR base branch so scoring + diffs match what will be merged.
         user_branch = base_branch
         base_for_branches = (settings.github_default_branch or base_branch or "main").strip()
 

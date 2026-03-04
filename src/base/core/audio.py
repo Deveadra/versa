@@ -13,7 +13,7 @@ from TTS.api import TTS
 from base.voice.tts_elevenlabs import Voice
 from config.config import settings
 
-from .core import JarvisState, pick_ack, state
+from .core import AerithState, pick_ack, state
 
 current_playback_thread = None
 tts = TTS("tts_models/en/jenny/jenny")
@@ -142,7 +142,7 @@ def listen_for_wake_word():
     # if porcupine.process(pcm) >= 0:
     #     pa.stop()
     #     from .core import state as global_state
-    #     global_state = JarvisState.ACTIVE  # ⬅️ Immediately lock state to prevent parallel activation
+    #     global_state = AerithState.ACTIVE  # ⬅️ Immediately lock state to prevent parallel activation
     #     return
 
     # Check early for missing/empty key
@@ -158,7 +158,7 @@ def listen_for_wake_word():
         porcupine = create(
             access_key=access_key,
             # access_key=os.getenv("PICOVOICE_API_KEY"),
-            keywords=["jarvis"],
+            keywords=["aerith"],
         )
         print("[DEBUG] Porcupine initialized successfully.")
 
@@ -169,28 +169,28 @@ def listen_for_wake_word():
             dtype="int16",
         )
         pa.start()
-        print("[Idle... say 'Jarvis' to wake me up.]")
-        # while state == JarvisState.IDLE:
+        print("[Idle... say 'Aerith' to wake me up.]")
+        # while state == AerithState.IDLE:
         #     pcm = pa.read(porcupine.frame_length)[0]
         #     pcm = struct.unpack_from("h" * porcupine.frame_length, pcm)
         #     if porcupine.process(pcm) >= 0:
         #         pa.stop()
         #         return
-        # while state == JarvisState.IDLE:
+        # while state == AerithState.IDLE:
         #     pcm = pa.read(porcupine.frame_length)[0]
         #     pcm = struct.unpack_from("h" * porcupine.frame_length, pcm)
         #     if porcupine.process(pcm) >= 0:
-        #         from base.core.core import JarvisState
-        #         JarvisState = JarvisState.ACTIVE
+        #         from base.core.core import AerithState
+        #         AerithState = AerithState.ACTIVE
         #         pa.stop()
         #         return
         global state
-        while state == JarvisState.IDLE:
+        while state == AerithState.IDLE:
             pcm = pa.read(porcupine.frame_length)[0]
             pcm = struct.unpack_from("h" * porcupine.frame_length, pcm)
             if porcupine.process(pcm) >= 0:
                 pa.stop()
-                state = JarvisState.ACTIVE
+                state = AerithState.ACTIVE
                 return
 
         if porcupine.process(pcm) >= 0:
@@ -198,7 +198,7 @@ def listen_for_wake_word():
             from .core import state as global_state
 
             global_state = (
-                JarvisState.ACTIVE
+                AerithState.ACTIVE
             )  # ⬅️ Immediately lock state to prevent parallel activation
             return
 

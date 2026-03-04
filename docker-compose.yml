@@ -1,9 +1,9 @@
 version: "3.9"
 
 services:
-  jarvis:
+  aerith:
     build: .
-    container_name: jarvis_offline
+    container_name: aerith_offline
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}   # optional for GPT
       - OPENAI_API_KEY=env.OPENAI_API_KEY  # optional for GPT

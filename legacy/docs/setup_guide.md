@@ -17,7 +17,7 @@
    pip install -r requirements.txt
    ```
 
-4. **Run Jarvis for the First Time**
+4. **Run Aerith for the First Time**
 
    ```bash
    python main.py
@@ -28,14 +28,14 @@
    - A `token.pickle` file will be created locally to store your access/refresh token.
 
 5. **Test Commands**
-   - "Jarvis, what’s on my calendar?" → retrieves upcoming events.
-   - "Jarvis, add event Lunch tomorrow at 1pm" → creates a real event in Google Calendar.
+   - "Aerith, what’s on my calendar?" → retrieves upcoming events.
+   - "Aerith, add event Lunch tomorrow at 1pm" → creates a real event in Google Calendar.
 
 6. **Fallback Mode**
-   - If `credentials.json` or internet access is missing, Jarvis will fall back to the mock in-memory calendar.
+   - If `credentials.json` or internet access is missing, Aerith will fall back to the mock in-memory calendar.
 
 ---
-✅ You are now ready to use Google Calendar with Jarvis.
+✅ You are now ready to use Google Calendar with Aerith.
 
 
 # Gmail Integration Setup
@@ -67,18 +67,18 @@ SCOPES = [
 
 4. **Run and Authenticate**
 
-- The first time you call a Gmail function, Jarvis will open a browser window.
+- The first time you call a Gmail function, Aerith will open a browser window.
 - Log in and grant access to Gmail (and Calendar if both scopes are present).
 - A token file (e.g., `token_gmail.pickle`) will be created locally to store your credentials.
 
 5. **Test Commands**
 
-- "Jarvis, check my email" → retrieves your latest unread emails.
-- "Jarvis, send email to John subject Meeting body See you at 3" → sends an email.
+- "Aerith, check my email" → retrieves your latest unread emails.
+- "Aerith, send email to John subject Meeting body See you at 3" → sends an email.
 
 6. **Fallback Mode**
 
-- If Gmail credentials are not present, Jarvis will respond with a mock/fallback message.
+- If Gmail credentials are not present, Aerith will respond with a mock/fallback message.
 
 ---
-✅ You are now ready to use Gmail with Jarvis.
+✅ You are now ready to use Gmail with Aerith.

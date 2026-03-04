@@ -99,7 +99,7 @@ class Brain:
             return "Sorry, I couldn’t process that."
 
     # -------- streaming ask with TTS -----------
-    # def ask_jarvis_stream(self, user_text: str) -> str:
+    # def ask_aerith_stream(self, user_text: str) -> str:
     #     import time
     #     from loguru import logger
 
@@ -211,7 +211,7 @@ class Brain:
 
     #     return full_reply
 
-    def ask_jarvis_stream(self, user_text: str) -> str:
+    def ask_aerith_stream(self, user_text: str) -> str:
         from loguru import logger
 
         self.auto_set_personality(user_text)
@@ -258,7 +258,7 @@ class Brain:
             logger.error(f"[stream error] {e}")
             return "Something went wrong during streaming."
 
-    # def ask_jarvis_stream(self, user_text: str) -> str:
+    # def ask_aerith_stream(self, user_text: str) -> str:
     #     self.auto_set_personality(user_text)
 
     #     # quick plugin dispatch
@@ -304,5 +304,5 @@ def ask_brain(prompt: str, system_prompt: str | None = None, response_format: st
     return _brain.ask_brain(prompt, system_prompt=system_prompt, response_format=response_format)
 
 
-def ask_jarvis_stream(user_text: str) -> str:
-    return _brain.ask_jarvis_stream(user_text)
+def ask_aerith_stream(user_text: str) -> str:
+    return _brain.ask_aerith_stream(user_text)

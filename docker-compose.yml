@@ -6,7 +6,7 @@ services:
     container_name: aerith_offline
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}   # optional for GPT
-      - OPENAI_API_KEY=env.OPENAI_API_KEY  # optional for GPT
+      # - OPENAI_API_KEY=env.OPENAI_API_KEY  # optional for GPT
     volumes:
       - .:/app
     stdin_open: true

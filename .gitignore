@@ -23,6 +23,15 @@ aerith.db
 aerith.db-wal
 aerith.db-shm
 
+# Ignore self-improve artifacts, cache and log files
+*.log
+*.cache
+*.tmp
+*.bak
+*.backup
+*.swp
+.aerith_index_cache.json
+
 # SQLite runtime files
 *.db
 *.db-wal
@@ -30,6 +39,7 @@ aerith.db-shm
 
 # tests/
 reports/
+*reports/
 base/agents/orchestrator1.py
 orchestrator_feedback.patch
 apply_orchestrator_feedback.py

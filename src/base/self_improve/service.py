@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import inspect
+import json
 import re
 import subprocess
 import time
@@ -9,8 +11,11 @@ from typing import Any
 
 from loguru import logger
 
-# from base.agents.dream import DreamCycle
-from base.self_improve.iteration_controller import IterationBudget, LeashPolicy, RepoJanitorIterationController
+from base.self_improve.iteration_controller import (
+    IterationBudget,
+    LeashPolicy,
+    RepoJanitorIterationController,
+)
 from base.self_improve.models import Proposal, ProposedChange
 from base.self_improve.scoreboard import ScoreboardRunner
 from base.self_improve.self_improve_db import (
@@ -38,6 +43,8 @@ class SelfImproveService:
       - Continuity: capability_gaps
       - Execution: RepoJanitorIterationController
       - Promotion: PRManager (PRs only, no auto-merge)
+      - daily: scoreboard->gaps->iterations->PR
+      - manual: optionally includes dream notes as additional context
     """
 
     def __init__(
@@ -60,11 +67,24 @@ class SelfImproveService:
         self.proposal_engine = proposal_engine
         self.pr_manager = pr_manager
 
+        self.policy = LeashPolicy(
+            allowlist=(
+                "src/base/**",
+                "src/config/**",
+                "scripts/**",
+                "tests/**",
+                ".github/workflows/**",
+                "pyproject.toml",
+                "README.md",
+                "run.py",
+            )
+        )
+
         ensure_self_improve_schema(self.conn)
         self.scoreboard = ScoreboardRunner(self.repo)
 
     # -------------------------
-    # helpers
+    # git helpers
     # -------------------------
 
     def _git(self, args: list[str], *, check: bool = True) -> subprocess.CompletedProcess:
@@ -80,28 +100,147 @@ class SelfImproveService:
             )
         return p
 
+    def _git_dirty(self) -> bool:
+        out = self._git(["status", "--porcelain"], check=False).stdout or ""
+        return bool(out.strip())
+
+    def _current_branch(self) -> str:
+        return (self._git(["rev-parse", "--abbrev-ref", "HEAD"], check=False).stdout or "").strip()
+
+    def _current_sha(self) -> str:
+        return (self._git(["rev-parse", "HEAD"], check=False).stdout or "").strip()
+
+    def _push_branch_compat(self, branch: str) -> None:
+        """
+        Push branch without assuming PRManager has a specific method name.
+        """
+        # 1) preferred: pr_manager.push_branch
+        fn = getattr(self.pr_manager, "push_branch", None)
+        if callable(fn):
+            fn(branch)
+            return
+
+        # 2) PRManager has .client.push (GitClient)
+        client = getattr(self.pr_manager, "client", None)
+        if client is not None and hasattr(client, "push"):
+            client.push(branch)
+            return
+
+        # 3) last resort: raw git
+        self._git(["push", "-u", "origin", branch], check=False)
+
+    # -------------------------
+    # index helpers
+    # -------------------------
+
+    def _index_md(self) -> str:
+        """
+        Build index markdown robustly regardless of CodeIndexer return shape.
+        """
+        idx = self.code_indexer.scan(incremental=True)
+
+        # dict style: {"files": {"path": {...}, ...}}
+        if isinstance(idx, dict) and isinstance(idx.get("files"), dict):
+            lines = ["# Repository Index", ""]
+            for path in sorted(idx["files"].keys()):
+                lines.append(f"- `{path}`")
+            return "\n".join(lines)
+
+        # fallback: CodeIndexer.to_markdown if it can handle whatever idx is
+        to_md = getattr(self.code_indexer, "to_markdown", None)
+        if callable(to_md):
+            try:
+                return to_md(idx)
+            except Exception:
+                pass
+
+        # final fallback: list a sane subset of files
+        exts = {".py", ".md", ".toml", ".yml", ".yaml", ".json", ".txt", ".ini"}
+        ignore = {
+            ".git",
+            ".venv",
+            "__pycache__",
+            ".pytest_cache",
+            ".ruff_cache",
+            ".mypy_cache",
+            "dist",
+            "build",
+        }
+        lines = ["# Repository Index", ""]
+        for p in sorted(self.repo.rglob("*")):
+            if any(part in ignore for part in p.parts):
+                continue
+            if p.is_file() and p.suffix.lower() in exts:
+                lines.append(f"- `{p.relative_to(self.repo).as_posix()}`")
+        return "\n".join(lines)
+
+    # -------------------------
+    # db helper compatibility
+    # -------------------------
+
+    def _insert_score_run_compat(self, *, run_type: str, run: Any, git_branch: str, git_sha: str) -> None:
+        """
+        Call insert_score_run in a signature-tolerant way.
+        Supports multiple historical signatures.
+        """
+        fn = insert_score_run
+        try:
+            # Common signature in your current service.py usage
+            fn(self.conn, run_type=run_type, run=run, git_branch=git_branch, git_sha=git_sha)
+            return
+        except TypeError:
+            pass
+
+        # Alternative signature: explicit fields
+        try:
+            mode = getattr(run, "mode", "all")
+            fix_enabled = bool(getattr(run, "fix_enabled", False))
+            score = float(run.score()) if hasattr(run, "score") else 0.0
+            passed = bool(run.passed()) if hasattr(run, "passed") else False
+            metrics = run.to_dict() if hasattr(run, "to_dict") else {}
+            fn(
+                self.conn,
+                run_type=run_type,
+                mode=mode,
+                fix_enabled=fix_enabled,
+                git_branch=git_branch,
+                git_sha=git_sha,
+                score=score,
+                passed=passed,
+                metrics=metrics,
+            )
+            return
+        except TypeError:
+            pass
+
+        # Final: use introspection to build kwargs
+        sig = inspect.signature(fn)
+        kwargs: dict[str, Any] = {}
+        if "run_type" in sig.parameters:
+            kwargs["run_type"] = run_type
+        if "git_branch" in sig.parameters:
+            kwargs["git_branch"] = git_branch
+        if "git_sha" in sig.parameters:
+            kwargs["git_sha"] = git_sha
+        if "run" in sig.parameters:
+            kwargs["run"] = run
+        if "metrics" in sig.parameters and hasattr(run, "to_dict"):
+            kwargs["metrics"] = run.to_dict()
+        fn(self.conn, **kwargs)
+
+    # -------------------------
+    # misc helpers
+    # -------------------------
+
     def _sanitize_suffix(self, s: str) -> str:
         s = (s or "").lower().strip()
         s = re.sub(r"[^a-z0-9_\-]+", "-", s)
         return (s[:40] or f"run-{int(time.time())}").strip("-")
 
     def _default_policy(self) -> LeashPolicy:
-        # NOTE: we include .aerith/** in controller blocklist; it is internal only.
-        return LeashPolicy(
-            allowlist=(
-                "src/base/**",
-                "src/config/**",
-                "scripts/**",
-                "tests/**",
-                ".github/workflows/**",
-                "pyproject.toml",
-                "README.md",
-                "run.py",
-            )
-        )
+        return self.policy
 
     def _changed_files_since_base(self, base: str) -> list[str]:
-        # base is expected to exist locally (PRManager prepares from base)
         out = self._git(["diff", "--name-only", f"{base}..HEAD"], check=False).stdout or ""
         return [ln.strip() for ln in out.splitlines() if ln.strip()]
 
@@ -113,7 +252,9 @@ class SelfImproveService:
         for name, tr in run.tool_results.items():
             if tr.exit_code == 0:
                 continue
-            fingerprint = make_gap_fingerprint(source, name, str(tr.exit_code), tr.stderr_tail or tr.stdout_tail)
+            fingerprint = make_gap_fingerprint(
+                source, name, str(tr.exit_code), tr.stderr_tail or tr.stdout_tail
+            )
             upsert_gap(
                 self.conn,
                 source=source,
@@ -121,7 +262,7 @@ class SelfImproveService:
                 requested_capability=f"pass_{name}_gate",
                 observed_failure=(tr.stderr_tail or tr.stdout_tail),
                 classification="quality_gate",
-                repro_steps=f"python -m {name} (see scoreboard)",
+                repro_steps=f"Scoreboard tool '{name}' failed (exit={tr.exit_code}).",
                 priority=50 if name in ("pytest", "compile") else 25,
                 metadata={"tool": name, "exit_code": tr.exit_code},
             )
@@ -135,7 +276,9 @@ class SelfImproveService:
         ids: list[int] = []
         for g in gaps:
             ids.append(int(g["id"]))
-            lines.append(f"- [{g['classification']}] {g['requested_capability']} (priority={g['priority']})")
+            lines.append(
+                f"- [{g['classification']}] {g['requested_capability']} (priority={g['priority']})"
+            )
             if g.get("observed_failure"):
                 tail = (g["observed_failure"] or "").splitlines()[-10:]
                 lines.append("  - failure_tail: " + " | ".join(tail)[:400])
@@ -167,11 +310,15 @@ class SelfImproveService:
     def run_daily(self, *, cfg: SelfImproveRunConfig = SelfImproveRunConfig()) -> dict[str, Any]:
         return self._run_unified(branch_label="daily-self-improve", cfg=cfg, extra_context=None)
 
-    def run_manual(self, *, cfg: SelfImproveRunConfig = SelfImproveRunConfig(), include_dream: bool = True) -> dict[str, Any]:
+    def run_manual(
+        self, *, cfg: SelfImproveRunConfig = SelfImproveRunConfig(), include_dream: bool = True
+    ) -> dict[str, Any]:
         dream_context = ""
         if include_dream:
             try:
-                from base.agents.dream import DreamCycle  # lazy import (prevents pvporcupine import on normal runs)
+                # lazy import prevents pulling voice deps unless explicitly requested
+                from base.agents.dream import DreamCycle
+
                 dc = DreamCycle()
                 notes = dc.run()
                 if isinstance(notes, dict):
@@ -179,9 +326,12 @@ class SelfImproveService:
                     dream_context = Path(dream_path).read_text(encoding="utf-8")[:4000]
             except Exception as e:
                 logger.warning(f"[self-improve] dream cycle failed (non-fatal): {e}")
-        result = self._run_unified(branch_label="manual-self-improve", cfg=cfg, extra_context=dream_context)
+
+        result = self._run_unified(
+            branch_label="manual-self-improve", cfg=cfg, extra_context=dream_context
+        )
+
         if dream_context.strip():
-            # log dream context as a gap-like signal (doesn't spam duplicates)
             fp = make_gap_fingerprint("dream", dream_context[:500])
             upsert_gap(
                 self.conn,
@@ -204,10 +354,7 @@ class SelfImproveService:
           - open PR
           - run tests and update PR body
         """
-        repo_root = str(self.repo)
-        index = self.code_indexer.scan(incremental=True)
-        index_md = self.code_indexer.to_markdown(index)
-
+        index_md = self._index_md()
         proposal = self.proposal_engine.propose(instruction, index_md=index_md)
 
         suffix = self._sanitize_suffix(proposal.title)
@@ -216,14 +363,12 @@ class SelfImproveService:
         results = self.proposal_engine.apply_proposal(proposal)
         failed = [f"- {c.path}: {msg}" for (c, ok, msg) in results if not ok]
 
-        # scoreboard snapshot for PR context
         run = self.scoreboard.run(mode="all", fix=False)
-        insert_score_run(
-            self.conn,
+        self._insert_score_run_compat(
             run_type="interactive_propose",
             run=run,
             git_branch=branch,
-            git_sha=self._git(["rev-parse", "HEAD"]).stdout.strip(),
+            git_sha=self._current_sha(),
         )
         self.log_gaps_from_scoreboard(run, source="diagnostic")
 
@@ -234,7 +379,6 @@ class SelfImproveService:
                 pass
             return "Proposal aborted — no changes could be safely applied."
 
-        # commit + push + PR
         self.pr_manager.commit_and_push(branch, proposal.title)
         pr_url = self.pr_manager.open_pr(branch=branch, proposal=proposal)
 
@@ -254,71 +398,24 @@ class SelfImproveService:
         report_text = "\n\n".join(report) if report else "✅ All changes applied successfully."
         return f"Proposal opened: {pr_url}\n\n{report_text}"
 
-    def run_diagnostic_autofix_pr(
-        self,
-        *,
-        mode: str,
-        diag_output: str,
-        issues_preview: str,
-        benchmarks_preview: str,
-    ) -> str | None:
-        """
-        Called when run_diagnostic(fix=True) already modified the working tree.
-        Opens a PR using the same PRManager plumbing.
-        """
-        # If nothing changed, nothing to PR
-        dirty = self._git(["status", "--porcelain"], check=False).stdout.strip()
-        if not dirty:
-            return None
-
-        suffix = self._sanitize_suffix(f"diag-autofix-{int(time.time())}")
-        branch = self.pr_manager.prepare_branch(suffix, base=settings.github_default_branch)
-
-        self.pr_manager.commit_and_push(branch, "chore(diagnostics): auto-fix & hygiene")
-
-        body = (
-            "Automated diagnostics completed.\n\n"
-            f"**Mode:** {mode}\n\n"
-            f"### Benchmarks\n{benchmarks_preview or 'n/a'}\n\n"
-            f"### Issues (preview)\n{issues_preview or 'n/a'}\n\n"
-            "### Tool Output (tail)\n"
-            f"```\n{(diag_output or '')[-2000:]}\n```"
-        )
-
-        pr_url = self.open_pr_from_branch(
-            base=settings.github_default_branch,
-            title="chore(diagnostics): auto-fix & hygiene",
-            body=body,
-        )
-
-        try:
-            self.pr_manager.run_tests_and_update_pr(branch)
-        except Exception:
-            pass
-
-        try:
-            self.pr_manager.restore_original_branch()
-        except Exception:
-            pass
-
-        return pr_url
-
     # -------------------------
     # unified engine
     # -------------------------
 
-    def _run_unified(self, *, branch_label: str, cfg: SelfImproveRunConfig, extra_context: str | None = None) -> dict[str, Any]:
+    def _run_unified(
+        self, *, branch_label: str, cfg: SelfImproveRunConfig, extra_context: str | None = None
+    ) -> dict[str, Any]:
         base = settings.github_default_branch
         suffix = self._sanitize_suffix(f"{branch_label}-{int(time.time())}")
         branch = self.pr_manager.prepare_branch(suffix, base=base)
 
-        # baseline scoreboard => gaps
         baseline = self.scoreboard.run(mode="all", fix=False)
         self.log_gaps_from_scoreboard(baseline, source="scoreboard")
 
         goal, gap_ids = self.build_goal_from_gaps(limit=cfg.gap_limit)
         if extra_context and extra_context.strip():
             goal += "\n\nDream context:\n" + extra_context.strip()[:4000]
+
         for gid in gap_ids:
             mark_gap_status(self.conn, gid, "in_progress")
 
@@ -328,19 +425,34 @@ class SelfImproveService:
             code_indexer=self.code_indexer,
             proposal_engine=self.proposal_engine,
             policy=self._default_policy(),
+            pr_manager=self.pr_manager,  # controller can ignore if it doesn't accept this (see below)
         )
 
-        result = controller.run(goal=goal, budget=cfg.budget)
+        # If controller doesn't accept pr_manager param, retry without it
+        try:
+            result = controller.run(goal=goal, budget=cfg.budget)
+        except TypeError:
+            controller = RepoJanitorIterationController(
+                repo_root=str(self.repo),
+                db_conn=self.db,
+                code_indexer=self.code_indexer,
+                proposal_engine=self.proposal_engine,
+                policy=self._default_policy(),
+            )
+            result = controller.run(goal=goal, budget=cfg.budget)
 
-        # final scoreboard => gaps
         final = self.scoreboard.run(mode="all", fix=False)
         self.log_gaps_from_scoreboard(final, source="scoreboard")
 
-        pr_url = None
-        if cfg.open_pr and result.get("improved"):
+        pr_url = result.get("pr_url")  # respect controller-provided PR if it exists
+
+        if cfg.open_pr and result.get("improved") and not pr_url:
             try:
-                # controller already committed; just push
-                self.pr_manager.push_branch(branch)
+                # If controller left changes uncommitted, commit+push; else just push.
+                if self._git_dirty():
+                    self.pr_manager.commit_and_push(branch, f"Repo Janitor: {branch_label}")
+                else:
+                    self._push_branch_compat(branch)
 
                 body = (
                     "Repo Janitor unified self-improvement run\n\n"
@@ -363,12 +475,10 @@ class SelfImproveService:
             except Exception as e:
                 logger.exception(f"[self-improve] PR open failed: {e}")
 
-        # mark gaps fixed if we improved and now passed
-        if pr_url and final.passed():
+        if pr_url and hasattr(final, "passed") and final.passed():
             for gid in gap_ids:
                 mark_gap_status(self.conn, gid, "fixed")
         else:
-            # return them to queued so they remain visible
             for gid in gap_ids:
                 mark_gap_status(self.conn, gid, "queued")
 
@@ -376,19 +486,16 @@ class SelfImproveService:
             self.pr_manager.restore_original_branch()
         except Exception:
             pass
-          
-        # self._record_dream_summary_event(summary_text, meta={"dream_id": dream_id})
+
         self._record_dream_summary_event(result=result, goal=goal)
 
         result["pr_url"] = pr_url
         result["branch"] = branch
         return result
-      
-      
+
     def _record_dream_summary_event(self, *, result: dict[str, Any], goal: str) -> None:
         """
         Persist a human-readable summary of the self-improve run into MemoryStore/events.
-        Makes continuity visible and retrievable in normal conversation.
         """
         try:
             pr_url = result.get("pr_url") or ""
@@ -406,11 +513,10 @@ class SelfImproveService:
             )
 
             gaps = fetch_open_gaps(self.conn, limit=3)
-            gap_lines = []
-            for g in gaps:
-                gap_lines.append(
-                    f"- ({g['classification']}) {g['requested_capability']} [prio={g['priority']}]"
-                )
+            gap_lines = [
+                f"- ({g['classification']}) {g['requested_capability']} [prio={g['priority']}]"
+                for g in gaps
+            ]
             gap_block = "\n".join(gap_lines) if gap_lines else "- none"
 
             text = (

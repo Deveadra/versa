@@ -1,4 +1,4 @@
--- Self-improvement flywheel tables (canonical)
+-- Repo Janitor / Self-improve flywheel tables (authoritative)
 
 CREATE TABLE IF NOT EXISTS repo_score_runs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS capability_gaps (
   classification TEXT NOT NULL,
   repro_steps TEXT,
   priority INTEGER NOT NULL DEFAULT 0,
-  status TEXT NOT NULL DEFAULT 'new',
+  status TEXT NOT NULL DEFAULT 'queued',
   metadata_json TEXT
 );
 

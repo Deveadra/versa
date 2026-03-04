@@ -68,8 +68,31 @@ python -m pip install --upgrade "setuptools<82"
 # Install profile:
 #   default: dev (safe)
 #   set AERITH_EXTRAS=dev,voice to include voice deps
-AERITH_EXTRAS="${AERITH_EXTRAS:-dev}"
+AERITH_EXTRAS="${AERITH_EXTRAS:-dev,voice}"
 echo "Installing extras: ${AERITH_EXTRAS}"
+
+
+# If voice extras are requested, install required system deps (Ubuntu/Debian/WSL)
+# Can be disabled with: INSTALL_SYSTEM_DEPS=0 ./scripts/bootstrap.sh
+INSTALL_SYSTEM_DEPS="${INSTALL_SYSTEM_DEPS:-1}"
+
+if [[ "$INSTALL_SYSTEM_DEPS" == "1" ]]; then
+  if [[ ",${AERITH_EXTRAS}," == *",voice,"* ]]; then
+    if command -v apt-get >/dev/null 2>&1; then
+      echo "Installing system deps for voice (apt-get)..."
+      sudo apt-get update
+      sudo apt-get install -y \
+        build-essential \
+        python3-dev \
+        libasound2-dev \
+        portaudio19-dev \
+        libsndfile1 \
+        ffmpeg
+    fi
+  fi
+fi
+
+
 python -m pip install -e ".[${AERITH_EXTRAS}]"
 
 # Create .env if sample exists

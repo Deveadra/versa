@@ -62,16 +62,30 @@ class MemoryStore:
             self._embedder, self._embed_dim = None, None
 
         # 3) vector backend selection (AFTER embedder)
-        backend_choice = (os.getenv("AERITH_VECTOR_BACKEND", "auto") or "auto").lower()
+        backend_choice = (
+            getattr(settings, "aerith_vector_backend", "auto") or "auto"
+        ).strip().lower()
+        if backend_choice not in {"auto", "qdrant", "inmemory"}:
+            logger.warning(
+                f"MemoryStore: invalid AERITH_VECTOR_BACKEND={backend_choice!r}; using 'auto'"
+            )
+            backend_choice = "auto"
+
         self._vector_backend: VectorBackend | None = None
         try:
             if backend_choice in ("qdrant", "auto") and HAVE_QDRANT and self._embedder:
+                qdrant_url = getattr(settings, "qdrant_url", None)
+                qdrant_api_key = getattr(settings, "qdrant_api_key", None)
+                if isinstance(qdrant_api_key, str):
+                    qdrant_api_key = qdrant_api_key.strip() or None
+                qdrant_collection = getattr(settings, "qdrant_collection", None) or "events"
+
                 self._vector_backend = QdrantMemoryBackend(
                     embedder=self._embedder,
                     dim=int(self._embed_dim or 384),
-                    url=getattr(settings, "qdrant_url", None),
-                    api_key=getattr(settings, "qdrant_api_key", None),
-                    collection_name=(getattr(settings, "qdrant_collection", None) or "events"),
+                    url=qdrant_url,
+                    api_key=qdrant_api_key,
+                    collection_name=qdrant_collection,
                 )  # type: ignore
                 logger.info("MemoryStore: Vector backend = Qdrant")
             else:
@@ -79,15 +93,17 @@ class MemoryStore:
                 self._vector_backend = InMemoryBackend(embedder=self._embedder)
                 logger.info("MemoryStore: Vector backend = InMemory")
         except Exception as e:
-            # logger.error(f"MemoryStore: vector backend init failed; disabling semantic search: {e}")
-            # self._vector_backend = None
             # Backend init failed; fall back to in-memory backend (always available).
-            logger.warning(f"MemoryStore: vector backend init failed ({e}); falling back to InMemoryBackend.")
+            logger.warning(
+                f"MemoryStore: vector backend init failed ({e}); falling back to InMemoryBackend."
+            )
             try:
                 self._vector_backend = InMemoryBackend(embedder=self._embedder)
                 logger.info("MemoryStore: Vector backend = InMemory (fallback)")
             except Exception as e2:
-                logger.error(f"MemoryStore: InMemory backend init failed; disabling semantic search: {e2}")
+                logger.error(
+                    f"MemoryStore: InMemory backend init failed; disabling semantic search: {e2}"
+                )
                 self._vector_backend = None
         
         # 4) schema last (unchanged)

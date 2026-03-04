@@ -2,15 +2,18 @@
 # src/base/memory/vector_backend.py
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import Any, Protocol
 
+from loguru import logger
 
 # --- Generic interface --------------------------------------------------------
 class VectorBackend(Protocol):
     def index(self, texts: list[str]) -> None: ...
+
     def add_text(
         self, text: str, vector_id: int | str | None = None, metadata: dict | None = None
     ) -> None: ...
+
     def search(
         self,
         query: str,
@@ -23,6 +26,8 @@ class VectorBackend(Protocol):
 
 # --- Optional Qdrant backend --------------------------------------------------
 HAVE_QDRANT = False
+_QDRANT_IMPORT_ERROR: str | None = None
+
 try:
     from qdrant_client import QdrantClient
     from qdrant_client.http.models import (
@@ -36,10 +41,9 @@ try:
     )
 
     HAVE_QDRANT = True
-except Exception:
+except Exception as e:
     QdrantClient = None  # type: ignore
-
-from loguru import logger
+    _QDRANT_IMPORT_ERROR = repr(e)
 
 
 class _QdrantMemoryBackendImpl:
@@ -52,27 +56,36 @@ class _QdrantMemoryBackendImpl:
         api_key: str | None = None,
         collection_name: str = "events",
     ):
+        if not HAVE_QDRANT or QdrantClient is None:
+            raise ImportError(
+                f"qdrant-client not installed or failed to import ({_QDRANT_IMPORT_ERROR}). "
+                "Install it or choose a different backend."
+            )
+
         self.embedder = embedder
         self.dim = dim
         self.collection_name = collection_name
-        if QdrantClient is None:
-            raise ImportError(
-                "qdrant-client not installed. Install it or choose a different backend."
-            )
+
         if url:
-            logger.info(f"QdrantMemoryBackend: Connecting to remote Qdrant at {url}")
-            self.client = QdrantClient(url=url, api_key=api_key)
+            logger.info(f"QdrantMemoryBackend: Connecting to Qdrant at {url}")
+            if api_key:
+                self.client = QdrantClient(url=url, api_key=api_key)
+            else:
+                self.client = QdrantClient(url=url)
         else:
             logger.info("QdrantMemoryBackend: Connecting to local Qdrant (localhost:6333)")
-            self.client = QdrantClient(host="localhost", port=6333)
-
+            if api_key:
+                self.client = QdrantClient(host="localhost", port=6333, api_key=api_key)
+            else:
+                self.client = QdrantClient(host="localhost", port=6333)
+        # Ensure collection exists (DO NOT recreate: that can wipe data)
         try:
             self.client.get_collection(collection_name=self.collection_name)
         except Exception:
             logger.info(
-                f"Creating Qdrant collection '{self.collection_name}' (dim={dim}, metric=Cosine)"
+                f"Creating Qdrant collection '{self.collection_name}' (dim={self.dim}, metric=Cosine)"
             )
-            self.client.recreate_collection(
+            self.client.create_collection(
                 collection_name=self.collection_name,
                 vectors_config=VectorParams(size=self.dim, distance=Distance.COSINE),
             )
@@ -86,12 +99,13 @@ class _QdrantMemoryBackendImpl:
             logger.error(f"QdrantMemoryBackend.index: Embedding batch failed: {e}")
             return
 
-        points: list[PointStruct] = []
         import time
 
+        points: list[PointStruct] = []
         base_id = int(time.time() * 1000)
         for i, (t, vec) in enumerate(zip(texts, vectors)):
             points.append(PointStruct(id=base_id + i, vector=vec.tolist(), payload={"content": t}))
+
         try:
             self.client.upsert(collection_name=self.collection_name, points=points)
             logger.info(f"QdrantMemoryBackend: Indexed {len(points)} vectors.")
@@ -103,12 +117,18 @@ class _QdrantMemoryBackendImpl:
     ) -> None:
         payload = dict(metadata or {})
         payload.setdefault("content", text)
+
         try:
             vec = self.embedder.encode([text])[0]
         except Exception as e:
             logger.error(f"QdrantMemoryBackend.add_text: embed failed: {e}")
             return
-        point = PointStruct(id=vector_id or 0, vector=vec.tolist(), payload=payload)
+
+        import time
+
+        pid = vector_id if vector_id is not None else int(time.time() * 1000)
+        point = PointStruct(id=pid, vector=vec.tolist(), payload=payload)
+
         try:
             self.client.upsert(collection_name=self.collection_name, points=[point])
         except Exception as e:
@@ -127,8 +147,10 @@ class _QdrantMemoryBackendImpl:
         except Exception as e:
             logger.error(f"QdrantMemoryBackend.search: embed failed: {e}")
             return []
+
         q_filter: Filter | None = None
         conds = []
+
         if since:
             try:
                 import datetime as _dt
@@ -136,15 +158,16 @@ class _QdrantMemoryBackendImpl:
                 ts = int(_dt.datetime.fromisoformat(since.replace("Z", "+00:00")).timestamp())
                 conds.append(FieldCondition(key="timestamp", range=Range(gte=ts)))
             except Exception:
-                # conds.append(FieldCondition(key="ts_iso", range=Range(gte=since)))
-                # Qdrant range filters require numeric types; ignore invalid since filters
                 logger.warning(
                     "QdrantMemoryBackend.search: could not parse 'since' as ISO timestamp; ignoring filter."
                 )
+
         if min_importance and min_importance > 0:
             conds.append(FieldCondition(key="importance", range=Range(gte=min_importance)))
+
         if type_filter:
             conds.append(FieldCondition(key="type", match=MatchValue(value=type_filter)))
+
         if conds:
             q_filter = Filter(must=conds)
 
@@ -159,6 +182,7 @@ class _QdrantMemoryBackendImpl:
         except Exception as e:
             logger.error(f"QdrantMemoryBackend.search: failed: {e}")
             return []
+
         out: list[str] = []
         for r in results or []:
             if r.payload and "content" in r.payload:
@@ -166,24 +190,21 @@ class _QdrantMemoryBackendImpl:
         return out
 
 
-class QdrantMemoryBackendStub:  # stub so imports don’t crash
+class QdrantMemoryBackendStub:
     def __init__(self, *a: Any, **kw: Any):
-        raise ImportError("qdrant-client not installed. Install it or choose a different backend.")
+        raise ImportError(
+            f"qdrant-client not installed or failed to import ({_QDRANT_IMPORT_ERROR}). "
+            "Install it or choose a different backend."
+        )
 
 
-if TYPE_CHECKING:
-
-    class QdrantMemoryBackend(_QdrantMemoryBackendImpl): ...
-
+# Export the correct backend at runtime
+if HAVE_QDRANT:
+    class QdrantMemoryBackend(_QdrantMemoryBackendImpl):
+        pass
 else:
-
-    class QdrantMemoryBackend:
-        """Stub so imports don’t crash when qdrant-client isn’t installed."""
-
-        def __init__(self, *a, **kw):
-            raise ImportError(
-                "qdrant-client not installed. Install it or choose a different backend."
-            )
+    class QdrantMemoryBackend(QdrantMemoryBackendStub):
+        pass
 
 
 # --- No-deps, in-memory fallback ---------------------------------------------

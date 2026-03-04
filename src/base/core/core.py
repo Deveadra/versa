@@ -1,7 +1,7 @@
 import random
 
 
-class JarvisState:
+class AerithState:
     IDLE = "idle"
     ACTIVE = "active"
     SPEAKING = "speaking"
@@ -10,19 +10,19 @@ class JarvisState:
 # Personalities
 PERSONALITIES = {
     "default": {
-        "prompt": "You are Jarvis, Tony Stark's AI assistant. Witty, sarcastic, efficient, loyal.",
+        "prompt": "You are Aerith, Tony Stark's AI assistant. Witty, sarcastic, efficient, loyal.",
         "wake": ["At your service.", "Yes, boss?"],
         "stop": ["Understood.", "As you wish."],
         "sleep": ["Going quiet. Call me if you need me."],
     },
     "sarcastic": {
-        "prompt": "You are Jarvis, but with heavy sarcasm.",
+        "prompt": "You are Aerith, but with heavy sarcasm.",
         "wake": ["Oh, you again.", "Yes, master of obvious commands?"],
         "stop": ["Fine, I'll shut up.", "Stopping. Happy now?"],
         "sleep": ["Finally, some peace and quiet."],
     },
     "formal": {
-        "prompt": "You are Jarvis, a professional and formal assistant.",
+        "prompt": "You are Aerith, a professional and formal assistant.",
         "wake": ["At your service, sir.", "How may I assist you today?"],
         "stop": ["As you wish, sir.", "Understood, ceasing at once."],
         "sleep": ["Entering standby mode, sir."],
@@ -46,7 +46,7 @@ STOP_WORDS = ["stop", "cancel", "quiet"]
 messages = [{"role": "system", "content": JARVIS_PROMPT}]
 
 stop_playback = False
-state = JarvisState.IDLE
+state = AerithState.IDLE
 
 
 def reset_session():

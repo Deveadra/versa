@@ -147,7 +147,8 @@ class Settings(BaseModel):
     qdrant_url: str | None = Field(default_factory=lambda: os.getenv("QDRANT_URL"))
     qdrant_api_key: str | None = Field(default_factory=lambda: os.getenv("QDRANT_API_KEY"))
     qdrant_collection: str = Field(default_factory=lambda: os.getenv("QDRANT_COLLECTION", "events"))
-
+    aerith_vector_backend: str = Field(default_factory=lambda: os.getenv("AERITH_VECTOR_BACKEND", "qdrant")  # or "inmemory"
+    )
     # ------------------------------------------------------------
     # Self-improvement / dream-cycle settings (single source of truth)
     # ------------------------------------------------------------

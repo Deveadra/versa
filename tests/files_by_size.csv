@@ -23,7 +23,7 @@ base/plugins/email_flow.py,4836
 base/plugins/file_manager.py,4639
 base/__pycache__/audio.cpython-311.pyc,4635
 README.md,4390
-personalities/jarvis/sarcastic.json,3971
+personalities/aerith/sarcastic.json,3971
 base/memory/store.py,3876
 base/__pycache__/audio.cpython-313.pyc,3861
 base/calendar/calendar_flow.py,3765
@@ -46,12 +46,12 @@ base/devices/home_assistant.py,2664
 base/__pycache__/audio.cpython-310.pyc,2605
 base/plugins/__pycache__/gmail.cpython-310.pyc,2604
 .git/objects/b6/c65d0638212960a34afe55fcd2bd759377c39b,2588
-personalities/jarvis/formal.json,2543
+personalities/aerith/formal.json,2543
 base/apps/__pycache__/email_prompts.cpython-311.pyc,2516
 base/apps/email_prompts.py,2466
 base/plugins/gmail.py,2440
 base/plugins/__pycache__/email_flow.cpython-310.pyc,2400
-personalities/jarvis/default.json,2399
+personalities/aerith/default.json,2399
 .git/objects/fd/b3a244a69007704725a40d58432143a7b0fef5,2385
 .git/objects/f8/8fe84837decc2d89ec2bfc63af4336728dcca7,2339
 base/core/__pycache__/plugin_manager.cpython-311.pyc,2323
@@ -102,8 +102,8 @@ personalities/aerith/plugin_lines.json,1206
 base/core/mode_classifier.py,1198
 config/.env,1158
 base/plugins/__pycache__/__init__.cpython-311.pyc,1149
-personalities/jarvis/lines.py,1147
-personalities/jarvis/__pycache__/lines.cpython-311.pyc,1144
+personalities/aerith/lines.py,1147
+personalities/aerith/__pycache__/lines.cpython-311.pyc,1144
 personalities/aerith/__pycache__/lines.cpython-311.pyc,1144
 base/core/__pycache__/context.cpython-311.pyc,1135
 base/plugins/__pycache__/email_prompts.cpython-310.pyc,1135
@@ -111,7 +111,7 @@ base/core/profile_manager.py,1109
 personalities/aerith/lines.py,1091
 base/memory/consolidation.py,1091
 .git/objects/48/02119f1549783d86a07b9e96039fe7be3044d1,1073
-personalities/jarvis/loader.py,1055
+personalities/aerith/loader.py,1055
 personalities/aerith/loader.py,1055
 base/io/voice_loop.py,1047
 .git/objects/7d/7c180c339bf4fe9d5361c7a7dc092a18e820ca,1011
@@ -184,7 +184,7 @@ base/io/interface.py,442
 base/plugins/time_plugin.py,441
 .git/objects/4d/1683cd4ea0b525c7d8883fcebdbc38de5033df,438
 base/memory/weaviate_backend.py,435
-personalities/jarvis/plugin_lines.json,435
+personalities/aerith/plugin_lines.json,435
 .git/hooks/pre-applypatch.sample,424
 .git/hooks/pre-merge-commit.sample,416
 base/embeddings/provider.py,416
@@ -294,7 +294,7 @@ personalities/aerith/__init__.py,38
 .git/HEAD,21
 .git/objects/e6/9de29bb2d1d6434b8b29ae775ad8c2e48c5391,15
 config/settings.py,13
-personalities/jarvis/__inti__.py,0
+personalities/aerith/__inti__.py,0
 base/agents/__init__.py,0
 base/voice/__init__.py,0
 base/apps/formal.py,0

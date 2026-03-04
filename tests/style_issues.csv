@@ -16,4 +16,4 @@ base/plugins/email_flow_original.py,False,True,False
 base/plugins/media_smart_home.py,False,True,False
 base/repl/nl_commands.py,False,True,False
 main.py,False,True,False
-personalities/jarvis/sarcastic.json,False,True,False
+personalities/aerith/sarcastic.json,False,True,False

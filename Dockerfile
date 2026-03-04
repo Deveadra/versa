@@ -1,5 +1,5 @@
 # =========================
-# Jarvis Offline Assistant
+# Aerith Offline Assistant
 # =========================
 FROM python:3.11-slim
 

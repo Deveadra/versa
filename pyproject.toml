@@ -48,6 +48,13 @@ api = [
   "uvicorn",
 ]
 
+google = [
+  "google-api-python-client>=2.120.0",
+  "google-auth>=2.30.0",
+  "google-auth-httplib2",
+  "google-auth-oauthlib>=1.2.0",
+]
+
 dev = [
   "pytest>=7.4",
   "pytest-asyncio",
@@ -60,20 +67,13 @@ dev = [
   "black>=24.0",
 ]
 
-google = [
-  "google-api-python-client>=2.120.0",
-  "google-auth>=2.30.0",
-  "google-auth-httplib2",
-  "google-auth-oauthlib>=1.2.0",
-]
-
 voice = [
   "playsound==1.2.2",
   "sounddevice>=0.5",
   "soundfile>=0.13.1",
   "simpleaudio",
   "elevenlabs>=1.0.0",
-  'TTS; python_version < "3.12"',
+  "TTS; python_version < '3.12'",
   "openai-whisper==20231117; python_version < '3.12'",
   "faster-whisper>=1.1.0; python_version >= '3.12'",
   "imageio-ffmpeg",

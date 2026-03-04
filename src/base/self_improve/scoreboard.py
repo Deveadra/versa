@@ -128,8 +128,7 @@ def _parse_pytest_junit(junit_path: Path) -> dict[str, Any]:
         return {"failures": 0, "errors": 0, "tests": 0, "skipped": 0}
 
     suites = [root] if root.tag == "testsuite" else list(root.findall("testsuite"))
-    # suites = [root] if root.tag == "testsuite" else list(root.findall("testsuite"))
-
+    
     def _sum(attr: str) -> int:
         total = 0
         for s in suites:

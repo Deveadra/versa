@@ -49,7 +49,7 @@ from base.core.audio import interrupt, listen_for_wake_word, listen_until_silenc
 from base.core.commands import handle_policy_command
 
 # ---------- Aerith imports ----------
-from base.core.core import SLEEP_WORDS, STOP_WORDS, JarvisState, reset_session
+from base.core.core import SLEEP_WORDS, STOP_WORDS, AerithState, reset_session
 from base.core.decider import Decider
 from base.core.mode_classifier import classify_mode
 from base.core.plugin_manager import PluginManager
@@ -58,7 +58,7 @@ from base.core.profile_manager import ProfileManager
 from base.database.sqlite import SQLiteConn
 from base.learning.engagement_manager import EngagementManager
 from base.learning.habit_miner import HabitMiner
-from base.llm.brain import ask_jarvis_stream
+from base.llm.brain import ask_aerith_stream
 from base.memory.recall import format_memories, recall_relevant
 from base.memory.store import MemoryStore
 from base.plugins import email_flow_original, file_manager, media_smart_home, system
@@ -85,7 +85,7 @@ CURRENT_PERSONALITY = load_personality(BASE_PERSONALITY, MODE)
 
 listening = False
 profile = get_profile()
-state = JarvisState.IDLE
+state = AerithState.IDLE
 USER_NAME = profile.get("name")
 
 # Single DB handle (wrapper + raw)
@@ -227,7 +227,7 @@ def engagement_task():
                 "Constraints: No preamble; speak directly to the user; 1 sentence."
             )
 
-            reply = ask_jarvis_stream(prompt)
+            reply = ask_aerith_stream(prompt)
             if not reply:
                 continue
 
@@ -334,7 +334,7 @@ scheduler.add_task("habit_mining", interval=86400, func=habit_miner.mine)
 # ---------------------------------------------------------------------------
 #                               MAIN LOOP
 # ---------------------------------------------------------------------------
-state = JarvisState.IDLE
+state = AerithState.IDLE
 last_user_input: str | None = None
 
 try:
@@ -366,7 +366,7 @@ try:
         signal.signal(signal.SIGTERM, lambda sig, frame: sys.exit(0))
 
         while True:
-            if state == JarvisState.IDLE:
+            if state == AerithState.IDLE:
                 listen_for_wake_word()
                 stream_speak(
                     f"At your service, {USER_NAME}."
@@ -374,9 +374,9 @@ try:
                     else random.choice(CURRENT_PERSONALITY["wake"])
                 )
                 reset_session()
-                state = JarvisState.ACTIVE
+                state = AerithState.ACTIVE
 
-            while state == JarvisState.ACTIVE:
+            while state == AerithState.ACTIVE:
                 # text = listen_until_silence()
                 if not listening:
                     listening = True
@@ -390,7 +390,7 @@ try:
                 last_user_input = text
 
                 if not text:
-                    state = JarvisState.IDLE
+                    state = AerithState.IDLE
                     reset_session()
                     break
 
@@ -416,7 +416,7 @@ try:
                 low = text.lower()
                 if any(w in low for w in SLEEP_WORDS):
                     stream_speak(random.choice(CURRENT_PERSONALITY["sleep"]))
-                    state = JarvisState.IDLE
+                    state = AerithState.IDLE
                     reset_session()
                     break
 
@@ -432,7 +432,7 @@ try:
                         pass
 
                     listening = False
-                    state = JarvisState.IDLE
+                    state = AerithState.IDLE
                     reset_session()
 
                     ack = None
@@ -459,7 +459,7 @@ try:
                         if isinstance(reply, dict):
                             reply = reply.get("response") or reply.get("content") or str(reply)
 
-                            # reply = ask_jarvis_stream(revised_input)
+                            # reply = ask_aerith_stream(revised_input)
                             if reply:
                                 print(f"{BASE_PERSONALITY.capitalize()}: {reply}")
                                 stream_speak(reply)
@@ -528,7 +528,7 @@ try:
 
                 # Default fallback: LLM or graceful error
                 if settings.openai_api_key:
-                    reply = ask_jarvis_stream(text)
+                    reply = ask_aerith_stream(text)
                     if reply:
                         print(f"{BASE_PERSONALITY.capitalize()}: {reply}")
                         stream_speak(reply)
@@ -557,7 +557,7 @@ try:
                     print(f"[Memory] Failed to evaluate/save: {e}")
 
                 # if settings.openai_api_key:
-                #     reply = ask_jarvis_stream(text)
+                #     reply = ask_aerith_stream(text)
                 #     if reply:
                 #         print(f"{BASE_PERSONALITY.capitalize()}: {reply}")
                 #         stream_speak(reply)

@@ -298,7 +298,7 @@ class HabitMiner:
             "persona_summary", ""
         ):
             lines.append("Dislikes long answers")
-            
+
         # --- Default tone bias (keeps summary stable for new profiles) ---
         tone_bias = profile.get("tone_bias")
         if not isinstance(tone_bias, dict):
@@ -342,8 +342,7 @@ class HabitMiner:
 
     def update_from_usage(self) -> int:
         c = self.db.conn.cursor()
-        c.execute(
-            """
+        c.execute("""
             WITH recent AS (
             SELECT id, resolved_action, params_json, created_at
             FROM usage_log ORDER BY id DESC LIMIT 5000
@@ -351,8 +350,7 @@ class HabitMiner:
             SELECT id, resolved_action, params_json, strftime('%s', 'now') - strftime('%s', created_at) AS age_sec
             FROM recent
             WHERE resolved_action IS NOT NULL
-            """
-        )
+            """)
         updates = 0
         rows = c.fetchall()
         for r in rows:

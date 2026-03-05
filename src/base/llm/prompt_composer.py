@@ -32,11 +32,7 @@ def justify_memory(mem: dict[str, Any]) -> str:
         except Exception:
             parts.append(f"score={mem.get('score')}")
     # ts = mem.get("last_used") or mem.get("created_at") or mem.get("timestamp")
-    if (
-        ts := mem.get("last_used")
-        or mem.get("created_at")
-        or mem.get("timestamp")
-    ):
+    if ts := mem.get("last_used") or mem.get("created_at") or mem.get("timestamp"):
         parts.append(f"as of {_format_timestamp(ts)}")
     return ", ".join(parts) if parts else "relevant memory"
 

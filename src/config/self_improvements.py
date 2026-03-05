@@ -9,4 +9,3 @@ for self-improvement configuration is config.config.settings.
 
 from __future__ import annotations
 
-from config.config import settings as CFG  # legacy name used by older modules

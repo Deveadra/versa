@@ -13,7 +13,7 @@ def quick_polarity(text: str) -> float:
     """
     if TextBlob is None:
         return 0.0
-    
+
     if not text:
         return 0.0
     blob: Any = TextBlob(text)

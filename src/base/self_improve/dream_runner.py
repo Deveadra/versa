@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+
 
 @dataclass
 class DreamRunResult:
     ok: bool
     summary: str
     pr_url: str | None = None
+
 
 class DreamRunner:
     def __init__(self, *, gap_queue, janitor, test_runner, pr_manager, scoreboard) -> None:

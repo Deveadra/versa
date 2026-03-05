@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
 import json
 import os
 import subprocess
 import sys
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -32,6 +32,7 @@ def _tail(text: str, max_lines: int = 80, max_chars: int = 8000) -> str:
     out = "\n".join(lines)
     return out[-max_chars:]
 
+
 def _validate_internal_cmd(cmd: Sequence[str]) -> list[str]:
     """
     Validate an argv-style command that is constructed internally (not user-provided).
@@ -52,6 +53,7 @@ def _validate_internal_cmd(cmd: Sequence[str]) -> list[str]:
         out.append(part)
 
     return out
+
 
 def _run_tool(tool: str, cwd: Path, timeout_sec: int = 600) -> tuple[int, str, str, float]:
     """
@@ -128,7 +130,7 @@ def _parse_pytest_junit(junit_path: Path) -> dict[str, Any]:
         return {"failures": 0, "errors": 0, "tests": 0, "skipped": 0}
 
     suites = [root] if root.tag == "testsuite" else list(root.findall("testsuite"))
-    
+
     def _sum(attr: str) -> int:
         total = 0
         for s in suites:
@@ -181,7 +183,9 @@ class ScoreboardRunner:
         results["compile"] = ToolResult("compile", rc, ms, _tail(out), _tail(err), parsed)
 
         total_ms = (time.perf_counter() - t0) * 1000.0
-        run = ScoreboardRun(mode=mode, fix_enabled=fix, tool_results=results, total_duration_ms=total_ms)
+        run = ScoreboardRun(
+            mode=mode, fix_enabled=fix, tool_results=results, total_duration_ms=total_ms
+        )
         logger.info(f"[scoreboard] gates_failing={run.gates_failing} score={run.score():.2f}")
         return run
 

@@ -44,18 +44,13 @@ from base.memory.store import MemoryStore
 from base.personality.tone_adapter import ToneAdapter
 from base.self_improve.code_indexer import CodeIndexer
 from base.self_improve.diagnostic_engine import DiagnosticEngine
-from base.self_improve.iteration_controller import (
-    RepoJanitorIterationController,
-    IterationBudget,
-    LeashPolicy,
-)
 from base.self_improve.models import Proposal, ProposedChange
 from base.self_improve.pr_manager import PRManager
 from base.self_improve.proposal_engine import ProposalEngine
-from base.self_improve.service import SelfImproveService, SelfImproveRunConfig
+from base.self_improve.service import SelfImproveRunConfig, SelfImproveService
 from base.utils.embeddings import get_embedder
+from base.utils.status import AerithStatus, AerithStatusConfig, CognitiveStatus
 from base.utils.timeparse import extract_time_from_text
-from base.utils.status import CognitiveStatus, AerithStatus, AerithStatusConfig
 from base.voice.null_voice import NullVoice
 from base.voice.tts_elevenlabs import Voice
 from config.config import settings
@@ -284,7 +279,6 @@ class Orchestrator:
             )  # runs daily at 3:15am
 
         self.scheduler.start()
-        
 
         logger.info("Orchestrator initialized")
 
@@ -471,10 +465,8 @@ class Orchestrator:
 
         return issues
 
-
     def propose_code_change(self, instruction: str) -> str:
         return self.self_improve.run_interactive_proposal(instruction=instruction)
-
 
     # def propose_code_change(self, instruction: str) -> str:
     #     """
@@ -985,7 +977,9 @@ class Orchestrator:
                     benchmarks_preview=benchmarks_str,
                 )
                 if pr_url:
-                    return (diag_output + "\n" if diag_output else "") + f"Auto-fix PR opened: {pr_url}"
+                    return (
+                        diag_output + "\n" if diag_output else ""
+                    ) + f"Auto-fix PR opened: {pr_url}"
             except Exception as e:
                 logger.exception(f"Diagnostic autofix PR failed: {e}")
         # ===== End feedback loop =====
@@ -1266,7 +1260,7 @@ class Orchestrator:
     # ------------------------------------
     # High-level user flow with composer
     # ------------------------------------
-    
+
     def _job_self_improvement(self) -> None:
         cfg = SelfImproveRunConfig()
         try:
@@ -1274,6 +1268,7 @@ class Orchestrator:
             logger.info(f"[self-improve] daily result={result}")
         except Exception as e:
             logger.exception(f"[self-improve] daily run failed: {e}")
+
     # def _job_self_improvement(self):
     #     """
     #     Daily self-improvement pipeline:
@@ -1305,7 +1300,7 @@ class Orchestrator:
 
     #     result = ctl.run(goal="Daily self-improvement based on diagnostics", budget=IterationBudget())
     #     logger.info(f"[self-improve] result={result}")
-        
+
     #     # try:
     #     #     diag = DiagnosticEngine(repo_root=repo_root)
     #     #     report_path = diag.run()
@@ -1887,13 +1882,15 @@ class Orchestrator:
 
     def cmd_self_improve(self, *args):
         try:
-            from base.agents.dream import DreamCycle #lazy import to avoid circular
+            from base.agents.dream import DreamCycle  # lazy import to avoid circular
+
             dc = DreamCycle()
             result = self.self_improve.run_manual(include_dream=True)
             self.notify(f"Manual self-improve complete: {result.get('pr_url') or 'no PR opened'}")
         except Exception as e:
             self.notify(f"Dream cycle unavailable or failed: {e}")
             self.notify(f"Manual self-improve failed: {e}")
+
     # def cmd_self_improve(self, *args):
     #     repo_root = str(self.repo_root)
 

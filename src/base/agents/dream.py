@@ -14,6 +14,7 @@ from base.database.sqlite import SQLiteConn
 from base.llm.brain import ask_brain
 from base.memory.store import MemoryStore
 from config.config import settings
+
 # from config.self_improvements import CFG
 
 # @dataclass

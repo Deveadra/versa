@@ -164,12 +164,16 @@ class ProposalEngine:
                     rel = target.relative_to(self.root).as_posix().replace("/", "__")
                     backup_path = backups / f"{rel}.bak"
                     try:
-                        backup_path.write_text(target.read_text(encoding="utf-8", errors="ignore"), encoding="utf-8")
+                        backup_path.write_text(
+                            target.read_text(encoding="utf-8", errors="ignore"), encoding="utf-8"
+                        )
                     except Exception:
                         # best-effort backup only
                         pass
 
-                original = target.read_text(encoding="utf-8", errors="ignore") if target.exists() else ""
+                original = (
+                    target.read_text(encoding="utf-8", errors="ignore") if target.exists() else ""
+                )
                 if original == replacement:
                     return False, "no diff (full_file)"
 

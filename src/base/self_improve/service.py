@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import inspect
-import json
 import re
 import subprocess
 import time
@@ -178,7 +177,9 @@ class SelfImproveService:
     # db helper compatibility
     # -------------------------
 
-    def _insert_score_run_compat(self, *, run_type: str, run: Any, git_branch: str, git_sha: str) -> None:
+    def _insert_score_run_compat(
+        self, *, run_type: str, run: Any, git_branch: str, git_sha: str
+    ) -> None:
         """
         Call insert_score_run in a signature-tolerant way.
         Supports multiple historical signatures.

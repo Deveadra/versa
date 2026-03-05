@@ -488,10 +488,10 @@ class SelfImproveService:
         except Exception:
             pass
 
-        self._record_dream_summary_event(result=result, goal=goal)
-
         result["pr_url"] = pr_url
         result["branch"] = branch
+
+        self._record_dream_summary_event(result=result, goal=goal)
         return result
 
     def _record_dream_summary_event(self, *, result: dict[str, Any], goal: str) -> None:
@@ -537,5 +537,10 @@ class SelfImproveService:
 
             if hasattr(self.store, "add_event"):
                 self.store.add_event(content=text, importance=0.2, type_="dream_summary")
+            if hasattr(self.store, "wait_for_background_tasks"):
+                try:
+                    self.store.wait_for_background_tasks(timeout=2.0)
+                except Exception:
+                    pass
         except Exception as e:
             logger.debug(f"[self-improve] dream summary event skipped: {e}")

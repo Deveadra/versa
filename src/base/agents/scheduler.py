@@ -4,20 +4,19 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from collections.abc import Callable
 from loguru import logger
-from typing import TYPE_CHECKING, Any
 
 from base.learning.habit_miner import HabitMiner
 from base.memory.store import MemoryStore
 
-
 if TYPE_CHECKING:
     from base.learning.habit_miner import HabitMiner
     from base.memory.store import MemoryStore
-    
+
 
 class Scheduler:
     """
@@ -48,9 +47,9 @@ class Scheduler:
         self,
         db: Any,
         memory: Any,
-        store: "MemoryStore",
+        store: MemoryStore,
         *,
-        miner: "HabitMiner | None" = None,
+        miner: HabitMiner | None = None,
         apscheduler: BackgroundScheduler | None = None,
         clock: Callable[[], float] = time.time,
         sleeper: Callable[[float], None] = time.sleep,
@@ -76,7 +75,6 @@ class Scheduler:
         self.tasks: dict[str, dict[str, Any]] = {}
         self.running = False
         self._thread: threading.Thread | None = None
-        
 
     async def run_periodic(self, interval_sec: int = 86400):
         """Legacy async loop (kept)."""
@@ -85,7 +83,9 @@ class Scheduler:
             self.miner.mine()
             await asyncio.sleep(interval_sec)
 
-    def add_daily(self, func: Callable[[], None], hour: int = 3, minute: int = 0, *, job_id: str | None = None):
+    def add_daily(
+        self, func: Callable[[], None], hour: int = 3, minute: int = 0, *, job_id: str | None = None
+    ):
         """Run `func` once a day at given hour/minute. Idempotent via job_id."""
         jid = job_id or f"daily:{getattr(func, '__name__', 'job')}"
         self.scheduler.add_job(
@@ -125,7 +125,7 @@ class Scheduler:
                     logger.exception(f"[Scheduler] Task {name} failed: {e}")
                 finally:
                     task["last_run"] = current
-                    
+
     def start(self) -> None:
         if self.running:
             return

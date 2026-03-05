@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 Risk = Literal["low", "medium", "high"]
 Scope = Literal["read", "write", "network", "exec", "git", "pr"]
+
 
 @dataclass(frozen=True)
 class Capability:
@@ -18,6 +20,7 @@ class Capability:
     # Optional: JSON-schema-like descriptors for tool calling
     input_schema: dict[str, Any] | None = None
     output_schema: dict[str, Any] | None = None
+
 
 class CapabilityRegistry:
     def __init__(self) -> None:

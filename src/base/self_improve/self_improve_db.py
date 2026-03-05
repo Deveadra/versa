@@ -15,9 +15,7 @@ def make_gap_fingerprint(*parts: str) -> str:
 
 
 def _has_table(conn, name: str) -> bool:
-    cur = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1", (name,)
-    )
+    cur = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1", (name,))
     row = cur.fetchone()
     return bool(row)
 
@@ -49,6 +47,7 @@ def ensure_self_improve_schema(conn) -> None:
 
     conn.executescript(sql)
     conn.commit()
+
 
 def insert_score_run(
     conn,

@@ -1,6 +1,6 @@
 def read_file(step: str) -> str:
     try:
-        filename = step.split()[-1]
+        filename = step.rsplit(maxsplit=1)[-1]
         with open(filename) as f:
             return f.read()[:3000]  # Limit output
     except Exception as e:

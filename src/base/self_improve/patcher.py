@@ -3,11 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+
 @dataclass
 class PatchOutcome:
     ok: bool
     message: str
     changed_files: list[str]
+
 
 class Patcher:
     def __init__(self, repo_root: str, allowlist_prefixes: tuple[str, ...]) -> None:

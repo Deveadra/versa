@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
-from datetime import datetime, UTC
-from models import Gap, GapType, GapStatus
+from datetime import UTC, datetime
 from typing import Any, Literal
 
-import json
+from models import Gap, GapStatus, GapType
 
-GapType = Literal["unhandled_tool", "tool_error", "missing_capability", "test_failure", "lint_failure"]
+GapType = Literal[
+    "unhandled_tool", "tool_error", "missing_capability", "test_failure", "lint_failure"
+]
 GapStatus = Literal["open", "in_progress", "blocked", "resolved"]
+
 
 @dataclass
 class Gap:
@@ -21,12 +24,14 @@ class Gap:
     severity: int  # 1-10
     occurrences: int
 
+
 class GapQueue:
     def __init__(self, conn) -> None:
         self.conn = conn
 
-    def record(self, gap_type: GapType, title: str, detail_json: dict[str, Any],
-               severity: int = 5) -> int:
+    def record(
+        self, gap_type: GapType, title: str, detail_json: dict[str, Any], severity: int = 5
+    ) -> int:
         now = datetime.now(UTC).isoformat()
         cur = self.conn.execute(
             """
@@ -39,14 +44,12 @@ class GapQueue:
         return int(cur.lastrowid)
 
     def next_gap(self) -> Gap | None:
-        row = self.conn.execute(
-            """
+        row = self.conn.execute("""
             SELECT * FROM capability_gaps
             WHERE status='open'
             ORDER BY severity DESC, occurrences DESC, created_at ASC
             LIMIT 1
-            """
-        ).fetchone()
+            """).fetchone()
         return Gap(**dict(row)) if row else None
 
     def mark(self, gap_id: int, status: GapStatus) -> None:

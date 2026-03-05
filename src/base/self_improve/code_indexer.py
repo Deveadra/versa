@@ -77,15 +77,30 @@ class CodeIndexer:
             for node in tree.body:
                 if isinstance(node, ast.ClassDef):
                     symbols.append(
-                        {"kind": "class", "name": node.name, "lineno": node.lineno, "col": node.col_offset}
+                        {
+                            "kind": "class",
+                            "name": node.name,
+                            "lineno": node.lineno,
+                            "col": node.col_offset,
+                        }
                     )
                 elif isinstance(node, ast.FunctionDef):
                     symbols.append(
-                        {"kind": "def", "name": node.name, "lineno": node.lineno, "col": node.col_offset}
+                        {
+                            "kind": "def",
+                            "name": node.name,
+                            "lineno": node.lineno,
+                            "col": node.col_offset,
+                        }
                     )
                 elif isinstance(node, ast.AsyncFunctionDef):
                     symbols.append(
-                        {"kind": "async def", "name": node.name, "lineno": node.lineno, "col": node.col_offset}
+                        {
+                            "kind": "async def",
+                            "name": node.name,
+                            "lineno": node.lineno,
+                            "col": node.col_offset,
+                        }
                     )
         except Exception:
             symbols = []

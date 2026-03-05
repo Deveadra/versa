@@ -11,8 +11,11 @@ from openai.types.chat import ChatCompletionMessageParam
 try:
     from base.core.audio import stream_speak
 except Exception:
+
     def stream_speak(*args, **kwargs):
         return None
+
+
 from base.voice.tts_elevenlabs import Voice
 from config.config import settings
 

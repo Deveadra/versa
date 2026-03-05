@@ -33,14 +33,12 @@ def recall_relevant(query: str, limit=5):
     """
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    cur.execute(
-        """
+    cur.execute("""
         SELECT timestamp, type, content, response
         FROM memories
         ORDER BY id DESC
         LIMIT 200
-    """
-    )
+    """)
     rows = cur.fetchall()
     conn.close()
 

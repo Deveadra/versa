@@ -5,6 +5,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 
+
 @dataclass
 class TestResult:
     ok: bool
@@ -12,6 +13,7 @@ class TestResult:
     rc: int
     stdout: str
     stderr: str
+
 
 class TestRunner:
     def __init__(self, repo_root: str) -> None:
@@ -26,8 +28,13 @@ class TestRunner:
             timeout=timeout_sec,
             check=False,
         )
-        return TestResult(ok=(p.returncode == 0), cmd=cmd, rc=p.returncode,
-                          stdout=p.stdout[-20000:], stderr=p.stderr[-20000:])
+        return TestResult(
+            ok=(p.returncode == 0),
+            cmd=cmd,
+            rc=p.returncode,
+            stdout=p.stdout[-20000:],
+            stderr=p.stderr[-20000:],
+        )
 
     def ruff(self) -> TestResult:
         return self._run([sys.executable, "-m", "ruff", "check", "."])

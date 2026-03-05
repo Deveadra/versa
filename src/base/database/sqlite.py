@@ -46,8 +46,7 @@ class SQLiteConn:
         """
         cur = conn.cursor()
 
-        cur.execute(
-            """
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS facts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 key TEXT NOT NULL UNIQUE,
@@ -57,11 +56,9 @@ class SQLiteConn:
                 last_reinforced DATETIME,
                 embedding BLOB
             )
-            """
-        )
+            """)
 
-        cur.execute(
-            """
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 content TEXT NOT NULL,
@@ -69,11 +66,9 @@ class SQLiteConn:
                 importance REAL NOT NULL DEFAULT 0,
                 type TEXT NOT NULL DEFAULT 'event'
             )
-            """
-        )
+            """)
 
-        cur.execute(
-            """
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS usage_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_text TEXT,
@@ -84,11 +79,9 @@ class SQLiteConn:
                 latency_ms INTEGER,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
-            """
-        )
+            """)
 
-        cur.execute(
-            """
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS habits (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 key TEXT NOT NULL UNIQUE,
@@ -96,8 +89,7 @@ class SQLiteConn:
                 score REAL NOT NULL DEFAULT 0.0,
                 last_used DATETIME
             )
-            """
-        )
+            """)
 
         conn.commit()
 
@@ -116,15 +108,13 @@ class SQLiteConn:
         files = sorted(mig_dir.glob("*.sql"))
 
         # Track applied migrations
-        self.conn.execute(
-            """
+        self.conn.execute("""
             CREATE TABLE IF NOT EXISTS schema_migrations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 filename TEXT NOT NULL UNIQUE,
                 applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-            """
-        )
+            """)
         self.conn.commit()
 
         if not files:

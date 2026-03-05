@@ -1,0 +1,54 @@
+python - <<'PY'
+from pathlib import Path
+from pprint import pprint
+
+from config.config import settings
+from base.database.sqlite import SQLiteConn
+from base.memory.store import MemoryStore
+from base.llm.brain import Brain
+from base.self_improve.code_indexer import CodeIndexer
+from base.self_improve.proposal_engine import ProposalEngine
+from base.self_improve.pr_manager import PRManager
+from base.self_improve.service import SelfImproveService, SelfImproveRunConfig
+from base.self_improve.iteration_controller import IterationBudget
+
+repo_root = Path(".").resolve()
+
+db = SQLiteConn(settings.db_path)
+store = MemoryStore(db)
+brain = Brain()
+
+code_indexer = CodeIndexer(
+    root=str(repo_root),
+    allowlist=settings.proposer_allowlist,
+    blocklist=settings.proposer_blocklist,
+)
+proposal_engine = ProposalEngine(str(repo_root), brain=brain)
+pr_manager = PRManager(str(repo_root))
+
+svc = SelfImproveService(
+    repo_root=repo_root,
+    db=db,
+    store=store,
+    brain=brain,
+    code_indexer=code_indexer,
+    proposal_engine=proposal_engine,
+    pr_manager=pr_manager,
+)
+
+cfg = SelfImproveRunConfig(
+    budget=IterationBudget(
+        max_iterations=2,
+        max_seconds=10 * 60,
+        stop_on_first_improvement=True,
+        open_pr_on_improvement=False,   # <- dry run
+        gap_limit=5,
+    ),
+    gap_limit=5,
+    open_pr=False,                     # <- dry run (service-level)
+)
+
+result = svc.run_manual(cfg=cfg, include_dream=False)
+print("\n=== DRY RUN RESULT ===")
+pprint(result)
+PY

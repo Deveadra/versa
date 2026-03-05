@@ -3,13 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+
 @dataclass
 class JanitorFinding:
-    kind: str          # "lint" | "format" | "test" | "security" | "dead_code"
+    kind: str  # "lint" | "format" | "test" | "security" | "dead_code"
     path: str
     detail: str
     autofixable: bool
-    severity: int      # 1-10
+    severity: int  # 1-10
+
 
 class RepoJanitor:
     def __init__(self, repo_root: str, test_runner, patcher) -> None:

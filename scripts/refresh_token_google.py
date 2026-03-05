@@ -1,8 +1,7 @@
-
 # refresh_token_google.py
 
-import json
 import os
+
 from google_auth_oauthlib.flow import InstalledAppFlow
 
 # Replace these with your actual credentials:

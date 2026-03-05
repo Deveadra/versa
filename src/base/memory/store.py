@@ -37,7 +37,7 @@ class MemoryStore:
         # 0) normalize DB handle
         self.conn: sqlite3.Connection = db.conn if hasattr(db, "conn") else db  # type: ignore[attr-defined]
         self.conn.row_factory = sqlite3.Row
-        
+
         # Detect SQLite in-memory DBs (common in tests). When using ":memory:",
         # a shared persistent Qdrant collection can leak vectors across tests and
         # make semantic results nondeterministic. Prefer in-process backend there.
@@ -84,9 +84,9 @@ class MemoryStore:
 
         # 3) vector backend selection (AFTER embedder)
         backend_choice = (
-            getattr(settings, "aerith_vector_backend", "auto") or "auto"
-        ).strip().lower()
-        
+            (getattr(settings, "aerith_vector_backend", "auto") or "auto").strip().lower()
+        )
+
         if backend_choice not in {"auto", "qdrant", "inmemory"}:
             logger.warning(
                 f"MemoryStore: invalid AERITH_VECTOR_BACKEND={backend_choice!r}; using 'auto'"
@@ -101,7 +101,7 @@ class MemoryStore:
                 self._vector_backend = InMemoryBackend(embedder=self._embedder)
                 logger.info("MemoryStore: Vector backend = InMemory (sqlite :memory:)")
             elif backend_choice in ("qdrant", "auto") and HAVE_QDRANT and self._embedder:
-                
+
                 qdrant_url = getattr(settings, "qdrant_url", None)
                 qdrant_api_key = getattr(settings, "qdrant_api_key", None)
                 if isinstance(qdrant_api_key, str):
@@ -133,7 +133,7 @@ class MemoryStore:
                     f"MemoryStore: InMemory backend init failed; disabling semantic search: {e2}"
                 )
                 self._vector_backend = None
-        
+
         # 4) schema last (unchanged)
         self._ensure_schema()
         self.init_db()
@@ -150,19 +150,16 @@ class MemoryStore:
         cur = self.conn.cursor()
 
         # Simple key/value facts
-        cur.execute(
-            """
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS facts (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
                 last_updated TEXT NOT NULL
             )
-            """
-        )
+            """)
 
         # Legacy "memories" table for whole exchanges
-        cur.execute(
-            """
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS memories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT,
@@ -170,12 +167,10 @@ class MemoryStore:
                 content TEXT,
                 response TEXT
             )
-            """
-        )
+            """)
 
         # Events (atomic things worth recalling)
-        cur.execute(
-            """
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 content TEXT NOT NULL,
@@ -183,21 +178,17 @@ class MemoryStore:
                 importance REAL NOT NULL DEFAULT 0.0,
                 type TEXT NOT NULL DEFAULT 'event'
             )
-            """
-        )
+            """)
 
         # Full-text search index linked to events.content
         try:
-            cur.execute(
-                """
+            cur.execute("""
                 CREATE VIRTUAL TABLE IF NOT EXISTS events_fts
                 USING fts5(content, content='events', content_rowid='id')
-                """
-            )
+                """)
 
             # Keep FTS index in sync automatically
-            cur.executescript(
-                """
+            cur.executescript("""
                 CREATE TRIGGER IF NOT EXISTS events_ai AFTER INSERT ON events BEGIN
                   INSERT INTO events_fts(rowid, content) VALUES (new.id, new.content);
                 END;
@@ -210,8 +201,7 @@ class MemoryStore:
                   INSERT INTO events_fts(events_fts, rowid, content) VALUES('delete', old.id, old.content);
                   INSERT INTO events_fts(rowid, content) VALUES (new.id, new.content);
                 END;
-                """
-            )
+                """)
 
             self._fts_enabled = True
         except sqlite3.OperationalError as e:
@@ -405,7 +395,7 @@ class MemoryStore:
             per_thread = min(0.25, remaining)
             for t in threads:
                 t.join(timeout=per_thread)
-                
+
     def list_events(self, type_: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
         """
         Return recent events as dictionaries.
@@ -448,9 +438,7 @@ class MemoryStore:
         use_vector = self._vector_backend is not None
 
         has_structured_filters = (
-            since is not None
-            or type_ is not None
-            or float(min_importance or 0.0) > 0.0
+            since is not None or type_ is not None or float(min_importance or 0.0) > 0.0
         )
 
         if has_structured_filters:
@@ -526,8 +514,12 @@ class MemoryStore:
                                 ts_iso = meta.get("ts_iso") or meta.get("ts")
                                 if isinstance(ts_iso, str):
                                     try:
-                                        ev_time = datetime.fromisoformat(ts_iso.replace("Z", "+00:00"))
-                                        since_time = datetime.fromisoformat(since.replace("Z", "+00:00"))
+                                        ev_time = datetime.fromisoformat(
+                                            ts_iso.replace("Z", "+00:00")
+                                        )
+                                        since_time = datetime.fromisoformat(
+                                            since.replace("Z", "+00:00")
+                                        )
                                         if ev_time < since_time:
                                             continue
                                     except Exception:
@@ -616,7 +608,6 @@ class MemoryStore:
                 break
 
         return results
-    
 
     def add_diagnostic_event(
         self,

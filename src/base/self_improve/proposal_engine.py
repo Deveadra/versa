@@ -1,6 +1,7 @@
 # base/self_improve/proposal_engine.py
 from __future__ import annotations
 
+import ast
 import difflib
 import json
 import os
@@ -40,6 +41,54 @@ Rules:
 - Prefer 'replace_block' with a reliable 'search_anchor' snippet to find the place to change.
 - NEVER include secrets or tokens.
 """
+
+
+def _parse_llm_json(raw: str) -> dict:
+    """
+    Best-effort JSON parser for LLM responses.
+    Handles fenced blocks, leading/trailing commentary, and trailing commas.
+    Falls back to ast.literal_eval for python-dict-ish outputs.
+    """
+    if not raw:
+        return {}
+
+    s = raw.strip()
+
+    # Strip markdown fences if present
+    if s.startswith("```"):
+        s = re.sub(r"^```[a-zA-Z0-9_-]*\s*\n", "", s).strip()
+        s = re.sub(r"\n```$", "", s).strip()
+
+    # First attempt: strict JSON
+    try:
+        obj = json.loads(s)
+        return obj if isinstance(obj, dict) else {}
+    except Exception:
+        pass
+
+    # Second attempt: extract the largest {...} block
+    l = s.find("{")
+    r = s.rfind("}")
+    if 0 <= l < r:
+        blob = s[l : r + 1].strip()
+
+        # Remove common trailing commas (best-effort)
+        blob2 = re.sub(r",\s*([}\]])", r"\1", blob)
+
+        try:
+            obj = json.loads(blob2)
+            return obj if isinstance(obj, dict) else {}
+        except Exception:
+            pass
+
+        # Last resort: python literal dict (single quotes etc.)
+        try:
+            obj = ast.literal_eval(blob2)
+            return obj if isinstance(obj, dict) else {}
+        except Exception:
+            return {}
+
+    return {}
 
 
 class ProposalEngine:
@@ -170,13 +219,8 @@ Respond with strictly the JSON schema described.
         raw = self.brain.ask_brain(user_prompt, system_prompt=sys_prompt).strip()
         force_nonempty = getattr(settings, "proposer_force_nonempty", False)
 
-        # Strip markdown fencing if present
-        if raw.startswith("```"):
-            raw = re.sub(r"^```[a-zA-Z]*\n", "", raw).rstrip("`").strip()
-
-        try:
-            obj = json.loads(raw)
-        except Exception:
+        obj = _parse_llm_json(raw)
+        if not obj:
             logger.error("LLM returned invalid JSON; wrapping into no-op change.")
             obj = {
                 "title": f"Aerith Proposal: {instruction[:40]}",

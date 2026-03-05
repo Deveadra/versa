@@ -6,6 +6,7 @@ from typing import Any, Protocol
 
 from loguru import logger
 
+
 # --- Generic interface --------------------------------------------------------
 class VectorBackend(Protocol):
     def index(self, texts: list[str]) -> None: ...
@@ -134,7 +135,6 @@ class _QdrantMemoryBackendImpl:
         except Exception as e:
             logger.error(f"QdrantMemoryBackend.add_text: upsert failed: {e}")
 
-
     def search(
         self,
         query: str,
@@ -181,9 +181,7 @@ class _QdrantMemoryBackendImpl:
 
         if min_imp > 0.0:
             try:
-                must_conditions.append(
-                    FieldCondition(key="importance", range=Range(gte=min_imp))
-                )
+                must_conditions.append(FieldCondition(key="importance", range=Range(gte=min_imp)))
             except Exception:
                 # If model signatures vary, skip server-side importance filter and do client-side filtering
                 pass
@@ -361,6 +359,7 @@ class _QdrantMemoryBackendImpl:
             logger.error(f"QdrantMemoryBackend.search: failed: {e}")
             return []
 
+
 class QdrantMemoryBackendStub:
     def __init__(self, *a: Any, **kw: Any):
         raise ImportError(
@@ -371,9 +370,12 @@ class QdrantMemoryBackendStub:
 
 # Export the correct backend at runtime
 if HAVE_QDRANT:
+
     class QdrantMemoryBackend(_QdrantMemoryBackendImpl):
         pass
+
 else:
+
     class QdrantMemoryBackend(QdrantMemoryBackendStub):
         pass
 

@@ -1,6 +1,9 @@
 # tests/learning/test_habit_miner.py
 
+<<<<<<< Updated upstream
 
+=======
+>>>>>>> Stashed changes
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 

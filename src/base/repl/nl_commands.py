@@ -1,8 +1,13 @@
 # base/repl/nl_commands.py
 import re
+<<<<<<< Updated upstream
 from datetime import datetime, timezone
+=======
+>>>>>>> Stashed changes
 
 from dateutil import parser as dateparser
+
+from base.utils.time import utc_iso
 
 from ..agents.orchestrator import Orchestrator
 
@@ -196,7 +201,11 @@ def handle_nl_command(cmd: str) -> str:
             except Exception:
                 return "Sorry, I couldn’t understand the start date."
         else:
+<<<<<<< Updated upstream
             start_iso = datetime.now(timezone.utc).isoformat()
+=======
+            start_iso = utc_iso()
+>>>>>>> Stashed changes
 
         if phrase:
             event_id = orch.create_recurring_event_from_phrase(title, phrase, start_iso)

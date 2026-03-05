@@ -1,5 +1,8 @@
 import sqlite3
+<<<<<<< Updated upstream
 from datetime import datetime, timezone
+=======
+>>>>>>> Stashed changes
 from typing import Any
 
 from base.database.sqlite import SQLiteConn
@@ -45,7 +48,11 @@ class ContextSignals:
               description=excluded.description,
               last_updated=excluded.last_updated
             """,
+<<<<<<< Updated upstream
             (name, str(value), type_, description, datetime.now(timezone.utc).isoformat()),
+=======
+            (name, str(value), type_, description, utc_iso()),
+>>>>>>> Stashed changes
         )
         self.conn.commit()
 

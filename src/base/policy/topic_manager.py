@@ -1,7 +1,12 @@
 import sqlite3
+<<<<<<< Updated upstream
 from datetime import datetime, timedelta, timezone
+=======
+from datetime import timedelta
+>>>>>>> Stashed changes
 
 from base.database.sqlite import SQLiteConn
+from base.utils.time import utc_now
 
 
 def get_known_topics(conn: SQLiteConn | sqlite3.Connection) -> list[str]:
@@ -33,7 +38,11 @@ def prune_stale_topics(
     """
     cur = conn.cursor()
 
+<<<<<<< Updated upstream
     cutoff = (datetime.now(timezone.utc) - timedelta(days=stale_days)).isoformat()
+=======
+    cutoff = (utc_now() - timedelta(days=stale_days)).isoformat()
+>>>>>>> Stashed changes
 
     # Find candidate topics
     rows = cur.execute("SELECT id, created_at FROM topics").fetchall()

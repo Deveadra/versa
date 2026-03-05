@@ -7,10 +7,15 @@ import subprocess
 import sys
 import time
 import tracemalloc
+<<<<<<< Updated upstream
 from datetime import datetime, timezone
+=======
+>>>>>>> Stashed changes
 from pathlib import Path
 
 from loguru import logger
+
+from base.utils.time import utc_compact_stamp, utc_iso
 
 
 class DiagnosticEngine:
@@ -110,7 +115,11 @@ class DiagnosticEngine:
         Orchestrate diagnostics and write JSON report to memory/reports/.
         Returns the path to the report file.
         """
+<<<<<<< Updated upstream
         started_at_iso = datetime.now(timezone.utc).isoformat()
+=======
+        started_at_iso = utc_iso()
+>>>>>>> Stashed changes
 
         results = []
         results.append(self._run_tool([sys.executable, "-m", "black", "--check", "."], "black"))
@@ -122,14 +131,22 @@ class DiagnosticEngine:
         any_fail = any(r["exit_code"] != 0 for r in results)
         report = {
             "started_at": started_at_iso,
+<<<<<<< Updated upstream
             "finished_at": datetime.now(timezone.utc).isoformat(),
+=======
+            "finished_at": utc_iso(),
+>>>>>>> Stashed changes
             "tool_results": results,
             "any_failures": any_fail,
         }
 
         out_dir = self.root / "memory" / "reports"
         out_dir.mkdir(parents=True, exist_ok=True)
+<<<<<<< Updated upstream
         out_path = out_dir / f"diagnostic_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.json"
+=======
+        out_path = out_dir / f"diagnostic_{utc_compact_stamp()}.json"
+>>>>>>> Stashed changes
         out_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
         from loguru import logger
 

@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 
 from dateutil import parser as dateparser
 
+from base.utils.time import ensure_utc, utc_now, utc_now_naive
+
 
 def extract_time_from_text(text: str):
     """
@@ -21,9 +23,19 @@ def extract_time_from_text(text: str):
 
     # Look for full dates or months
     try:
+<<<<<<< Updated upstream
         dt = dateparser.parse(text, fuzzy=True, default=datetime.now(timezone.utc))
         # If only month/year given
         if dt.day == datetime.now(timezone.utc).day:  # fallback default day inserted
+=======
+        dt = dateparser.parse(text, fuzzy=True, default=utc_now_naive())
+        if dt is None:
+            return None  # or your existing fallback behavior
+        dt = ensure_utc(dt)
+
+        # If only month/year given
+        if dt.day == utc_now().day:  # fallback default day inserted (UTC)
+>>>>>>> Stashed changes
             start = datetime(dt.year, dt.month, 1)
             if dt.month == 12:
                 end = datetime(dt.year, 12, 31, 23, 59, 59)

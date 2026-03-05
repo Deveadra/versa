@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from base.policy.context_manager import ContextManager
+from base.utils.time import parse_iso_utc
+from base.utils.time import utc_now
 
 POLICIES = ("principled", "advocate", "adaptive")
 OVERRIDE_TYPES = ("hard", "soft", "preference")
@@ -137,7 +139,11 @@ class PolicyStore:
             self.upsert_topic(topic_id, topic.policy, topic.conviction)
 
         override = self.latest_override(topic_id)
+<<<<<<< Updated upstream
         now = datetime.now(timezone.utc)
+=======
+        now = utc_now()
+>>>>>>> Stashed changes
 
         # hard override blocks completely
         if override and override["type"] == "hard":
@@ -148,7 +154,7 @@ class PolicyStore:
             exp = override.get("expires_at")
             if exp:
                 try:
-                    if now < datetime.fromisoformat(exp):
+                    if now < parse_iso_utc(exp):
                         if not context_signals.get("trigger", False):
                             return False, {"reason": "soft_override_active"}
                 except Exception:

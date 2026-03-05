@@ -1,9 +1,9 @@
 import json
-from datetime import datetime  # <-- add this
 from pathlib import Path
 
 from base.llm.brain import ask_brain  # <-- wherever ask_brain is actually implemented
 from base.policy.topic_manager import prune_stale_topics
+from base.utils.time import utc_compact_stamp, utc_iso
 
 # class DreamCycle:
 #     def __init__(self, conn):
@@ -201,7 +201,11 @@ def cluster_complaints(conn):
                     c["cluster"],
                     c["topic_id"],
                     json.dumps(c["examples"]),
+<<<<<<< Updated upstream
                     datetime.now(timezone.utc).isoformat(),
+=======
+                    utc_iso(),
+>>>>>>> Stashed changes
                     c["examples"][-1] if c["examples"] else None,
                 ),
             )
@@ -211,6 +215,7 @@ def cluster_complaints(conn):
 
 
 def write_summary(self, notes: dict) -> str:
+<<<<<<< Updated upstream
     from datetime import datetime, timezone
 
     out_dir = Path("memory/learning")
@@ -220,6 +225,16 @@ def write_summary(self, notes: dict) -> str:
         json.dumps(
             {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
+=======
+
+    out_dir = Path("memory/learning")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"dream_summary_{utc_compact_stamp()}.json"
+    path.write_text(
+        json.dumps(
+            {
+                "timestamp": utc_iso(),
+>>>>>>> Stashed changes
                 "notes": notes,
             },
             indent=2,

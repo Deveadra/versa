@@ -15,7 +15,6 @@ from base.database.sqlite import SQLiteConn
 from base.memory.store import MemoryStore
 from base.utils.time import ensure_utc, parse_iso_utc, utc_now
 
-
 PROFILE_PATH = Path("config/user_profile.json")
 
 
@@ -60,21 +59,13 @@ class HabitMiner:
 
     def learn(self, event: str, ts: str | None = None) -> None:
         """Record an event and try to identify recurring patterns."""
-<<<<<<< Updated upstream
-        timestamp = datetime.fromisoformat(ts) if ts else datetime.now(timezone.utc)
-=======
         timestamp = parse_iso_utc(ts) if ts else utc_now()
->>>>>>> Stashed changes
         self.habits.append({"action": event, "time": timestamp.time()})
         logger.debug(f"HabitMiner.learn: Added habit candidate {event} at {timestamp}")
 
     def extract_candidates(self, days: int = 30) -> list[tuple[str, str]]:
         """Pull recent events from memory with timestamps."""
-<<<<<<< Updated upstream
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-=======
         cutoff = (utc_now() - timedelta(days=days)).isoformat()
->>>>>>> Stashed changes
         cur = self.store.conn.execute("SELECT content, ts FROM events WHERE ts >= ?", (cutoff,))
         return [(r["content"], r["ts"]) for r in cur.fetchall()]
 
@@ -111,11 +102,7 @@ class HabitMiner:
         if not times:
             return None
         last_time = times[-1]
-<<<<<<< Updated upstream
-        now = datetime.now(timezone.utc)
-=======
         now = utc_now()
->>>>>>> Stashed changes
         return datetime.combine(now.date(), last_time)
 
     def check_upcoming(self, minutes: int = 30) -> list[dict[str, Any]]:
@@ -123,11 +110,7 @@ class HabitMiner:
         Return habits likely to occur within the next `minutes`.
         Right now this is naive: looks at last seen time and compares to current time.
         """
-<<<<<<< Updated upstream
-        now = datetime.now(timezone.utc)
-=======
         now = utc_now()
->>>>>>> Stashed changes
         upcoming = []
         for h in self.habits:
             scheduled = ensure_utc(datetime.combine(now.date(), h["time"]))

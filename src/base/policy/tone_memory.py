@@ -1,8 +1,5 @@
 import sqlite3
-<<<<<<< Updated upstream
 from datetime import datetime, timezone
-=======
->>>>>>> Stashed changes
 
 from base.database.sqlite import SQLiteConn
 from base.utils.time import utc_iso
@@ -61,11 +58,7 @@ def update_tone_memory(
                 ignored,
                 acted,
                 consequence or row.get("consequence_note"),
-<<<<<<< Updated upstream
-                datetime.now(timezone.utc).isoformat(),
-=======
                 utc_iso(),
->>>>>>> Stashed changes
                 row["id"],
             ),
         )
@@ -81,11 +74,7 @@ def update_tone_memory(
                 1 if outcome == "ignored" else 0,
                 1 if outcome == "acted" else 0,
                 consequence,
-<<<<<<< Updated upstream
-                datetime.now(timezone.utc).isoformat(),
-=======
                 utc_iso(),
->>>>>>> Stashed changes
             ),
         )
     conn.commit()

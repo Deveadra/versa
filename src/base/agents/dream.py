@@ -33,11 +33,7 @@ class DreamCycle:
     """
 
     def __init__(self, now: datetime | None = None, store: MemoryStore | None = None):
-<<<<<<< Updated upstream
-        self.now = now or datetime.now(timezone.utc)
-=======
         self.now = ensure_utc(now) if now else utc_now()
->>>>>>> Stashed changes
         # Ensure summaries directory exists
         Path("data/summaries").mkdir(parents=True, exist_ok=True)
         # Use provided MemoryStore or initialize a new one if needed

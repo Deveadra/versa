@@ -1,10 +1,6 @@
 # base/core/decider.py
 import hashlib
 import re
-<<<<<<< Updated upstream
-from datetime import datetime, timezone
-=======
->>>>>>> Stashed changes
 from typing import Any, Protocol
 
 from base.core.nlu import parse_diagnostic_intent
@@ -193,11 +189,7 @@ class Decider:
 
         if any(kw in user_text.lower() for kw in important_keywords):
             return {
-<<<<<<< Updated upstream
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-=======
                 "timestamp": utc_iso(),
->>>>>>> Stashed changes
                 "type": "fact",
                 "content": user_text,
                 "response": reply,
@@ -205,11 +197,7 @@ class Decider:
 
         if "I will remember" in reply or "Noted" in reply:
             return {
-<<<<<<< Updated upstream
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-=======
                 "timestamp": utc_iso(),
->>>>>>> Stashed changes
                 "type": "acknowledgement",
                 "content": user_text,
                 "response": reply,

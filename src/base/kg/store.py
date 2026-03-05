@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-<<<<<<< Updated upstream
-from datetime import datetime, timezone
-=======
 from base.utils.time import utc_iso
->>>>>>> Stashed changes
 
 from ..database.sqlite import SQLiteConn
 from .entities import DEFAULT_TYPE, ENTITY_TYPES
@@ -100,17 +96,10 @@ class KGStore:
         if row and row["target_id"] != target_id:
             self.db.conn.execute(
                 "UPDATE relations SET valid_to=? WHERE id=?",
-<<<<<<< Updated upstream
-                (datetime.now(timezone.utc).isoformat(), row["id"]),
-            )
-
-        vfrom = valid_from or datetime.now(timezone.utc).isoformat()
-=======
                 (utc_iso(), row["id"]),
             )
 
         vfrom = valid_from or utc_iso()
->>>>>>> Stashed changes
         cur = self.db.conn.execute(
             """INSERT INTO relations(source_id, target_id, relation, confidence, valid_from, valid_to)
             VALUES(?, ?, ?, ?, ?, ?)""",
@@ -206,11 +195,7 @@ class KGStore:
         return [(row[0], row[1], row[2], float(row[3]), row[4], row[5]) for row in rows]
 
     def query_future_relations(self, entity_name: str) -> list[RelationRow]:
-<<<<<<< Updated upstream
-        now = datetime.now(timezone.utc).isoformat()
-=======
         now = utc_iso()
->>>>>>> Stashed changes
         sql = """
         SELECT e1.name, r.relation, e2.name, r.confidence, r.valid_from, r.valid_to
         FROM relations r

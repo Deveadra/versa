@@ -89,7 +89,9 @@ class Settings(BaseModel):
     ha_token: str | None = Field(default_factory=lambda: os.getenv("HA_TOKEN"))
 
     # Consolidation cron
-    consolidation_hour: int = Field(default_factory=lambda: _get_int("AERITH_CONSOLIDATION_HOUR", 3))
+    consolidation_hour: int = Field(
+        default_factory=lambda: _get_int("AERITH_CONSOLIDATION_HOUR", 3)
+    )
     consolidation_minute: int = Field(
         default_factory=lambda: _get_int("AERITH_CONSOLIDATION_MINUTE", 0)
     )
@@ -105,10 +107,16 @@ class Settings(BaseModel):
     # --- GitHub / PR settings ---
     github_token: str | None = Field(default_factory=lambda: os.getenv("GITHUB_TOKEN"))
     github_repo: str | None = Field(default_factory=lambda: os.getenv("GITHUB_REPO"))
-    github_default_branch: str = Field(default_factory=lambda: os.getenv("GITHUB_DEFAULT_BRANCH", "main"))
+    github_default_branch: str = Field(
+        default_factory=lambda: os.getenv("GITHUB_DEFAULT_BRANCH", "main")
+    )
     github_bot_name: str = Field(default_factory=lambda: os.getenv("GITHUB_BOT_NAME", "aerith-bot"))
-    github_bot_email: str = Field(default_factory=lambda: os.getenv("GITHUB_BOT_EMAIL", "aerith-bot@local"))
-    github_remote_name: str = Field(default_factory=lambda: os.getenv("GITHUB_REMOTE_NAME", "origin"))
+    github_bot_email: str = Field(
+        default_factory=lambda: os.getenv("GITHUB_BOT_EMAIL", "aerith-bot@local")
+    )
+    github_remote_name: str = Field(
+        default_factory=lambda: os.getenv("GITHUB_REMOTE_NAME", "origin")
+    )
 
     # Optional: key material from files (handy for git signing / SSH operations)
     github_ssh_key: str | None = Field(default_factory=lambda: _read_secret("GITHUB_SSH_KEY_FILE"))
@@ -147,7 +155,8 @@ class Settings(BaseModel):
     qdrant_url: str | None = Field(default_factory=lambda: os.getenv("QDRANT_URL"))
     qdrant_api_key: str | None = Field(default_factory=lambda: os.getenv("QDRANT_API_KEY"))
     qdrant_collection: str = Field(default_factory=lambda: os.getenv("QDRANT_COLLECTION", "events"))
-    aerith_vector_backend: str = Field(default_factory=lambda: os.getenv("AERITH_VECTOR_BACKEND", "qdrant")  # or "inmemory"
+    aerith_vector_backend: str = Field(
+        default_factory=lambda: os.getenv("AERITH_VECTOR_BACKEND", "qdrant")  # or "inmemory"
     )
     # ------------------------------------------------------------
     # Self-improvement / dream-cycle settings (single source of truth)
@@ -181,9 +190,7 @@ class Settings(BaseModel):
         )
     )
     pytest_collect_args: str = Field(
-        default_factory=lambda: os.getenv(
-            "AERITH_PYTEST_COLLECT_ARGS", "pytest -q --collect-only"
-        )
+        default_factory=lambda: os.getenv("AERITH_PYTEST_COLLECT_ARGS", "pytest -q --collect-only")
     )
     perf_sample_seconds: int = Field(
         default_factory=lambda: _get_int("AERITH_PERF_SAMPLE_SECONDS", 5)
@@ -191,8 +198,7 @@ class Settings(BaseModel):
     open_mr_on_any_fix: bool = Field(
         default_factory=lambda: _get_bool("AERITH_OPEN_MR_ON_ANY_FIX", True)
     )
-    
-    
+
     @property
     def use_llm(self) -> bool:
         # computed AFTER dotenv load

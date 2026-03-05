@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sqlite3
 import threading
 import time
@@ -37,24 +36,6 @@ class MemoryStore:
         # 0) normalize DB handle
         self.conn: sqlite3.Connection = db.conn if hasattr(db, "conn") else db  # type: ignore[attr-defined]
         self.conn.row_factory = sqlite3.Row
-        
-        # Detect SQLite in-memory DBs (common in tests). When using ":memory:",
-        # a shared persistent Qdrant collection can leak vectors across tests and
-        # make semantic results nondeterministic. Prefer in-process backend there.
-        self._is_in_memory_sqlite = False
-        try:
-            cur = self.conn.execute("PRAGMA database_list")
-            rows = cur.fetchall()
-            for r in rows:
-                name = r["name"] if isinstance(r, sqlite3.Row) else r[1]
-                file_ = r["file"] if isinstance(r, sqlite3.Row) else r[2]
-                if name == "main":
-                    # SQLite reports empty file path for :memory:
-                    self._is_in_memory_sqlite = not bool(file_)
-                    break
-        except Exception:
-            # Best effort only; default to False
-            self._is_in_memory_sqlite = False
 
         # a) transient in-memory caches
         self._add_history: list[str] = []
@@ -64,8 +45,6 @@ class MemoryStore:
         # 1) state shelves
         self._fts_enabled: bool = False
         self._subscribers: list[Any] = []
-        self._bg_threads: list[threading.Thread] = []
-        self._bg_threads_lock = threading.Lock()
 
         # 2) embeddings FIRST (so vector backend can use it)
         self._embedder: Any | None = None
@@ -86,7 +65,6 @@ class MemoryStore:
         backend_choice = (
             getattr(settings, "aerith_vector_backend", "auto") or "auto"
         ).strip().lower()
-        
         if backend_choice not in {"auto", "qdrant", "inmemory"}:
             logger.warning(
                 f"MemoryStore: invalid AERITH_VECTOR_BACKEND={backend_choice!r}; using 'auto'"
@@ -95,13 +73,7 @@ class MemoryStore:
 
         self._vector_backend: VectorBackend | None = None
         try:
-            # For SQLite ":memory:" DBs (tests), use the in-process backend so vectors
-            # do not leak across test cases via a shared Qdrant collection.
-            if self._is_in_memory_sqlite:
-                self._vector_backend = InMemoryBackend(embedder=self._embedder)
-                logger.info("MemoryStore: Vector backend = InMemory (sqlite :memory:)")
-            elif backend_choice in ("qdrant", "auto") and HAVE_QDRANT and self._embedder:
-                
+            if backend_choice in ("qdrant", "auto") and HAVE_QDRANT and self._embedder:
                 qdrant_url = getattr(settings, "qdrant_url", None)
                 qdrant_api_key = getattr(settings, "qdrant_api_key", None)
                 if isinstance(qdrant_api_key, str):
@@ -221,17 +193,6 @@ class MemoryStore:
             self._fts_enabled = False
 
         self.conn.commit()
-
-    def _to_safe_fts_query(self, text: str) -> str:
-        """
-        Convert natural-language text into a safe FTS5 MATCH query.
-        Strips punctuation like '?' that can break MATCH parsing.
-        """
-        tokens = re.findall(r"[A-Za-z0-9_]+", text or "")
-        if not tokens:
-            return ""
-        # Use OR to improve recall for natural language prompts
-        return " OR ".join(tokens[:12])
 
     # ---------- facts ----------
     def upsert_fact(self, key: str, value: str) -> None:
@@ -371,41 +332,14 @@ class MemoryStore:
                     )
 
             # Launch the embedding thread (daemon so it won't block program exit)
-            t = threading.Thread(
+            threading.Thread(
                 target=_embed_and_store_vector,
                 args=(int(rowid), content, ts, importance, type_),
                 daemon=True,
-            )
-            with self._bg_threads_lock:
-                self._bg_threads.append(t)
-            t.start()
+            ).start()
 
         return int(rowid)
 
-    def wait_for_background_tasks(self, timeout: float = 5.0) -> None:
-        """
-        Best-effort join of in-flight background embedding threads.
-        Useful for short-lived scripts/tests so Python doesn't exit mid-embed.
-        """
-        deadline = time.time() + max(0.0, float(timeout))
-        while True:
-            with self._bg_threads_lock:
-                alive = [t for t in self._bg_threads if t.is_alive()]
-                self._bg_threads = alive
-                threads = list(alive)
-
-            if not threads:
-                return
-
-            remaining = deadline - time.time()
-            if remaining <= 0:
-                return
-
-            # Join each thread briefly, then re-check the list
-            per_thread = min(0.25, remaining)
-            for t in threads:
-                t.join(timeout=per_thread)
-                
     def list_events(self, type_: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
         """
         Return recent events as dictionaries.
@@ -431,52 +365,43 @@ class MemoryStore:
     ) -> list[str]:
         """
         Search the memory store for events relevant to the query.
-
         Supports semantic similarity search via the vector backend (if available), with optional filtering:
-        - since: only events on or after this ISO timestamp are considered
-        - min_importance: only events with importance >= this value are considered
-        - type_: only events of this type are considered
-
-        Falls back to SQLite FTS/LIKE keyword search if semantic search is unavailable or returns no hits.
+          - since: an ISO timestamp string; if provided, only events on or after this time are considered.
+          - min_importance: if > 0, only events with importance >= this value are considered.
+          - type_: if provided, only events of this type are considered (e.g. "dream_summary", "agent_step", "event").
+        Results are sorted by semantic relevance combined with importance.
+        Falls back to keyword search if semantic search is unavailable.
         """
         results: list[str] = []
-        rows: list[sqlite3.Row] | list[Any] = []
 
-        # Search policy:
-        # - Open-ended / question-style queries with NO structured filters may use semantic search.
-        # - Filtered queries should prefer SQLite keyword search for deterministic behavior.
+        # Use vector search only when the backend can properly honor filters,
+        # OR when no filters are requested (semantic "question" style query).
         use_vector = self._vector_backend is not None
+        if use_vector and not isinstance(self._vector_backend, QdrantMemoryBackend):
+            # Non-Qdrant backends often don't support metadata filtering.
+            # If filters are requested, prefer SQLite keyword search so results stay correct/deterministic.
+            if since is not None or type_ is not None or float(min_importance or 0.0) > 0.0:
+                use_vector = False
 
-        has_structured_filters = (
-            since is not None
-            or type_ is not None
-            or float(min_importance or 0.0) > 0.0
-        )
-
-        if has_structured_filters:
-            use_vector = False
-
-        # -----------------------------
-        # 1) Semantic / vector search
-        # -----------------------------
-        if use_vector and self._vector_backend is not None:
+        # If semantic vector search is available, use it
+        if use_vector:
             try:
                 if isinstance(self._vector_backend, QdrantMemoryBackend):
-                    # Qdrant backend handles metadata filtering internally
-                    vector_hits = self._vector_backend.search(
+                    # Use vector search with filters in Qdrant
+                    results = self._vector_backend.search(
                         query,
                         k=limit,
                         since=since,
                         min_importance=min_importance,
                         type_filter=type_,
                     )
-                    if vector_hits:
-                        return vector_hits[:limit]
-
                 else:
-                    # InMemory / FAISS-like backends usually return plain strings and may not support filtering.
-                    # Grab extra hits, then apply best-effort post filtering when metadata exists.
-                    raw_hits = self._vector_backend.search(query, k=limit * 5)
+                    # Other backend (e.g., FAISS) - no built-in filtering support
+                    # Other backend (Fake/InMemory/FAISS/etc.) – try to get richer hits, then post-filter
+                    try:
+                        raw_hits = self._vector_backend.search(query, k=limit * 5)  # grab more for filtering
+                    except TypeError:
+                        raw_hits = self._vector_backend.search(query, k=limit * 5)  # same call, just safe
 
                     filtered: list[str] = []
 
@@ -484,54 +409,54 @@ class MemoryStore:
                         text = ""
                         meta: dict[str, Any] = {}
 
-                        # Dict hit: {"text": "...", "metadata": {...}} or {"content": "...", ...}
+                        # Support dict hits: {"text": "...", "metadata": {...}}
                         if isinstance(hit, dict):
                             text = str(hit.get("text") or hit.get("content") or "")
                             meta = hit.get("metadata") or hit.get("meta") or {}
                             if not isinstance(meta, dict):
                                 meta = {}
 
-                        # Tuple hit: (text, metadata) or (id, text, metadata)
+                        # Support tuple hits: (text, metadata) or (id, text, metadata)
                         elif isinstance(hit, tuple):
                             if len(hit) >= 2 and isinstance(hit[1], str):
                                 text = hit[1]
                             elif len(hit) >= 1 and isinstance(hit[0], str):
                                 text = hit[0]
-
                             if len(hit) >= 3 and isinstance(hit[2], dict):
                                 meta = hit[2]
                             elif len(hit) >= 2 and isinstance(hit[1], dict):
                                 meta = hit[1]
 
-                        # Plain string hit
+                        # Fallback: plain strings
                         else:
                             text = str(hit)
 
-                        # Best-effort metadata filtering if metadata is available
-                        if meta:
-                            imp = meta.get("importance", 0.0)
-                            try:
-                                imp_f = float(imp)
-                            except Exception:
-                                imp_f = 0.0
-                            if min_importance and imp_f < float(min_importance):
+                        # Apply min_importance filter when metadata provides it
+                        imp = meta.get("importance", 0.0)
+                        try:
+                            imp_f = float(imp)
+                        except Exception:
+                            imp_f = 0.0
+                        if min_importance and imp_f < float(min_importance):
+                            continue
+
+                        # Apply type filter if metadata provides it
+                        if type_:
+                            typ = meta.get("type") or meta.get("type_")
+                            if typ is not None and typ != type_:
                                 continue
 
-                            if type_:
-                                typ = meta.get("type") or meta.get("type_")
-                                if typ is not None and typ != type_:
-                                    continue
-
-                            if since:
-                                ts_iso = meta.get("ts_iso") or meta.get("ts")
-                                if isinstance(ts_iso, str):
-                                    try:
-                                        ev_time = datetime.fromisoformat(ts_iso.replace("Z", "+00:00"))
-                                        since_time = datetime.fromisoformat(since.replace("Z", "+00:00"))
-                                        if ev_time < since_time:
-                                            continue
-                                    except Exception:
-                                        pass
+                        # Apply since filter if metadata provides ts_iso (best effort)
+                        if since:
+                            ts_iso = meta.get("ts_iso")
+                            if isinstance(ts_iso, str):
+                                try:
+                                    ev_time = datetime.fromisoformat(ts_iso.replace("Z", "+00:00"))
+                                    since_time = datetime.fromisoformat(since.replace("Z", "+00:00"))
+                                    if ev_time < since_time:
+                                        continue
+                                except Exception:
+                                    pass
 
                         if text:
                             filtered.append(text)
@@ -539,84 +464,67 @@ class MemoryStore:
                             break
 
                     if filtered:
-                        return filtered[:limit]
-
+                        return filtered
             except Exception as e:
                 logger.error(
                     f"MemoryStore.search: Vector search failed (falling back to keyword search): {e}"
                 )
-
-        # -----------------------------
-        # 2) Keyword fallback (SQLite)
-        # -----------------------------
+                results = []
+        # Fallback to keyword-based search in SQLite if no vector results or vector backend is unavailable
         try:
-            rows = []
-
             if self._fts_enabled:
-                # Sanitize natural-language queries and convert to OR tokens for better recall.
-                # Example: "Who did the user meet?" -> "Who OR did OR the OR user OR meet"
-                query_str = self._to_safe_fts_query(query)
-
-                if query_str:
-                    sql = (
-                        "SELECT e.content, e.ts, e.importance, e.type "
-                        "FROM events_fts "
-                        "JOIN events e ON events_fts.rowid = e.id "
-                        "WHERE events_fts MATCH ? "
-                        "ORDER BY e.id DESC LIMIT ?"
-                    )
-                    cur = self.conn.execute(sql, (query_str, limit * 3))
-                    rows = cur.fetchall()
-
-            # If FTS is disabled or returned nothing, use LIKE fallback
-            if not rows:
+                # Use full-text search (FTS5) on events content
+                # Join with events table to retrieve metadata for filtering
+                query_str = query.replace(",", " ")
+                sql = (
+                    "SELECT e.content, e.ts, e.importance, e.type "
+                    "FROM events_fts JOIN events e ON events_fts.rowid = e.id "
+                    "WHERE events_fts MATCH ? ORDER BY e.id DESC LIMIT ?"
+                )
+                cur = self.conn.execute(
+                    sql, (query_str, limit * 3)
+                )  # fetch more than needed for filtering
+            else:
+                # FTS not available, use LIKE query
                 sql = (
                     "SELECT content, ts, importance, type FROM events "
                     "WHERE content LIKE ? ESCAPE '\\' "
                     "ORDER BY id DESC LIMIT ?"
                 )
                 cur = self.conn.execute(sql, (f"%{query}%", limit * 3))
-                rows = cur.fetchall()
-
+            rows = cur.fetchall()
         except Exception as e:
             logger.error(f"MemoryStore.search: Database keyword search query failed: {e}")
-            return results  # possibly empty
-
-        # -----------------------------
-        # 3) Post-filter SQLite rows
-        # -----------------------------
+            return results  # return any results we might have from vector search (possibly empty)
+        # Apply filtering conditions to the fetched rows
         for r in rows:
             content = r["content"]
             ts = r["ts"]
             imp = float(r["importance"] or 0.0)
             typ = r["type"]
-
             if since is not None:
+                # Only include events on or after the 'since' timestamp
+                # Compare using datetime for accuracy
                 try:
                     ev_time = datetime.fromisoformat(ts.replace("Z", "+00:00"))
                     since_time = datetime.fromisoformat(since.replace("Z", "+00:00"))
                 except Exception:
                     ev_time = None
                     since_time = None
-
                 if ev_time and since_time:
                     if ev_time < since_time:
-                        continue
+                        continue  # event is older than the since cutoff
+                # Fallback to simple string comparison if parsing fails
                 elif ts < since:
                     continue
-
             if min_importance and imp < min_importance:
                 continue
-
             if type_ and typ != type_:
                 continue
-
             results.append(content)
             if len(results) >= limit:
                 break
-
         return results
-    
 
     def add_diagnostic_event(
         self,

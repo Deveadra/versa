@@ -35,6 +35,7 @@ class LeashPolicy:
     allowlist: if non-empty, ONLY these patterns are permitted
     blocklist: if a path matches any blocklist pattern, it is denied
     """
+
     allowlist: list[str] = field(default_factory=list)
     blocklist: list[str] = field(default_factory=list)
 
@@ -56,6 +57,7 @@ class LeashPolicy:
 
         # No allowlist means allow by default (except blocklist)
         return True
+
 
 class RepoJanitorIterationController:
     """
@@ -104,7 +106,9 @@ class RepoJanitorIterationController:
         return p
 
     def _current_branch(self) -> str:
-        return self._git(["rev-parse", "--abbrev-ref", "HEAD"], check=False).stdout.strip() or "HEAD"
+        return (
+            self._git(["rev-parse", "--abbrev-ref", "HEAD"], check=False).stdout.strip() or "HEAD"
+        )
 
     def _current_sha(self) -> str:
         return self._git(["rev-parse", "HEAD"], check=False).stdout.strip()
@@ -277,10 +281,12 @@ class RepoJanitorIterationController:
         base_for_branches = (settings.github_default_branch or base_branch or "main").strip()
 
         if user_branch != base_for_branches:
-            logger.info(f"[self-improve] switching from {user_branch} -> {base_for_branches} for run base")
+            logger.info(
+                f"[self-improve] switching from {user_branch} -> {base_for_branches} for run base"
+            )
             self._git(["checkout", base_for_branches], check=False)
             base_branch = base_for_branches
-            
+
         # Hard safety: do not run if user already has a dirty working tree
         if self._worktree_dirty():
             msg = "Working tree is not clean; commit/stash changes before self-improve."
@@ -308,9 +314,10 @@ class RepoJanitorIterationController:
             passed=bool(baseline.passed()),
             metrics=baseline.to_dict(),
         )
-        computed_goal = (goal or "").strip() or "Reduce failing gates and improve repository hygiene."
+        computed_goal = (
+            goal or ""
+        ).strip() or "Reduce failing gates and improve repository hygiene."
         gap_ids: list[int] = []  # Gap lifecycle is managed by SelfImproveService (Design A)
-
 
         # self._log_gaps_from_scoreboard(baseline, source="scoreboard")
 
@@ -424,7 +431,10 @@ class RepoJanitorIterationController:
                     after_run_id=None,
                     branch=branch,
                     proposal_title=getattr(proposal, "title", None),
-                    proposal_json={"title": getattr(proposal, "title", ""), "blocked_worktree": True},
+                    proposal_json={
+                        "title": getattr(proposal, "title", ""),
+                        "blocked_worktree": True,
+                    },
                     pr_url=None,
                     improved=False,
                     error_text=msg2,
@@ -528,7 +538,7 @@ class RepoJanitorIterationController:
             self._rollback_to_base(base_branch)
         except Exception:
             pass
-        
+
         # Restore the user's original branch best-effort (so running self-improve doesn't yank your context)
         try:
             if user_branch != base_branch:
@@ -545,4 +555,3 @@ class RepoJanitorIterationController:
             "pr_url": pr_url,
             "branch": best_branch or base_branch,
         }
-        

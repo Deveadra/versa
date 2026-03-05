@@ -37,6 +37,7 @@ Return a JSON object with:
 
 Rules:
 - Only modify files within the allowlist.
+- Use "full_file" ONLY for new files. For existing files, use "replace_block".
 - Keep changes small; do not exceed {max_files} files or {max_bytes} bytes total replacement.
 - Prefer 'replace_block' with a reliable 'search_anchor' snippet to find the place to change.
 - NEVER include secrets or tokens.
@@ -157,6 +158,10 @@ class ProposalEngine:
 
             # ---- full_file (safe overwrite) ----
             if mode == "full_file":
+                # Refuse full-file overwrites of existing files unless explicitly allowed.
+                if target.exists() and not getattr(settings, "proposer_allow_full_file_overwrite", False):
+                    return False, "full_file refused: overwrite of existing file is disabled"
+
                 backups = self.root / ".aerith" / "backups"
                 backups.mkdir(parents=True, exist_ok=True)
 

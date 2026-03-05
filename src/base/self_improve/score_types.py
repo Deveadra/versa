@@ -14,6 +14,16 @@ class ToolResult:
     stdout_tail: str
     stderr_tail: str
     parsed: dict[str, Any]
+    
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "exit_code": int(self.exit_code),
+            "duration_ms": float(self.duration_ms),
+            "stdout_tail": self.stdout_tail,
+            "stderr_tail": self.stderr_tail,
+            "parsed": self.parsed if isinstance(self.parsed, dict) else {},
+        }
 
 
 @dataclass(frozen=True)
@@ -23,6 +33,34 @@ class ScoreboardRun:
     tool_results: dict[str, ToolResult]
     total_duration_ms: float
 
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "mode": self.mode,
+            "fix_enabled": bool(self.fix_enabled),
+            "total_duration_ms": float(self.total_duration_ms),
+            "tool_results": {
+                name: tr.to_dict() if hasattr(tr, "to_dict") else {
+                    "name": getattr(tr, "name", name),
+                    "exit_code": int(getattr(tr, "exit_code", 1)),
+                    "duration_ms": float(getattr(tr, "duration_ms", 0.0)),
+                    "stdout_tail": getattr(tr, "stdout_tail", ""),
+                    "stderr_tail": getattr(tr, "stderr_tail", ""),
+                    "parsed": getattr(tr, "parsed", {}) or {},
+                }
+                for name, tr in self.tool_results.items()
+            },
+            # gates_failing is a COUNT (int), not an iterable
+            "gates_failing": int(self.gates_failing),
+            # Optional but very useful for debugging/reporting
+            "failing_tools": [
+                name
+                for name, tr in self.tool_results.items()
+                if int(getattr(tr, "exit_code", 1)) != 0
+            ],
+            "score": float(self.score()),
+            "passed": bool(self.passed()),
+        }
+        
     @property
     def gates_failing(self) -> int:
         return sum(1 for tr in self.tool_results.values() if tr.exit_code != 0)

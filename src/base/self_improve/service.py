@@ -437,6 +437,7 @@ class SelfImproveService:
                 db_conn=self.db,
                 code_indexer=self.code_indexer,
                 proposal_engine=self.proposal_engine,
+                pr_manager=None,  # not all controllers will support this; it's optional
                 policy=self._default_policy(),
             )
             result = controller.run(goal=goal, budget=cfg.budget)
@@ -525,6 +526,8 @@ class SelfImproveService:
                 f"Result: {'IMPROVED' if improved else 'NO CHANGE'}\n"
                 f"Branch: {branch}\n"
                 f"PR: {pr_url or '(none)'}\n\n"
+                # f"Baseline: score={int(baseline.get('score', 0.0)):.2f} gates={baseline.get('gates')}\n"
+                # f"Best: score={int(best.get('score', 0.0)):.2f} gates={best.get('gates')}\n"
                 f"Baseline: score={float(baseline.get('score', 0.0)):.2f} gates={baseline.get('gates')}\n"
                 f"Best: score={float(best.get('score', 0.0)):.2f} gates={best.get('gates')}\n"
                 f"Attempts: {len(attempts)} | Rollbacks: {rollbacks} | Errors: {errors}\n\n"

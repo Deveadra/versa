@@ -451,8 +451,8 @@ class RepoJanitorIterationController:
                 "branch": branch,
                 "before_score": float(before.score()),
                 "after_score": float(after.score()),
-                "before_gates": list(before.gates_failing),
-                "after_gates": list(after.gates_failing),
+                "before_gates": int(before.gates_failing),
+                "after_gates": int(after.gates_failing),
                 "improved": bool(is_improved),
             }
             attempts.append(attempt_row)
@@ -538,8 +538,8 @@ class RepoJanitorIterationController:
 
         return {
             "goal": computed_goal,
-            "baseline": {"score": float(baseline.score()), "gates": list(baseline.gates_failing)},
-            "best": {"score": float(best.score()), "gates": list(best.gates_failing)},
+            "baseline": {"score": float(baseline.score()), "gates": int(baseline.gates_failing)},
+            "best": {"score": float(best.score()), "gates": int(best.gates_failing)},
             "attempts": attempts,
             "improved": bool(improved_any),
             "pr_url": pr_url,

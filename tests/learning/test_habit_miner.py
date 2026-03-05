@@ -1,9 +1,5 @@
 # tests/learning/test_habit_miner.py
 
-<<<<<<< Updated upstream
-
-=======
->>>>>>> Stashed changes
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
@@ -16,9 +12,18 @@ from base.learning.habit_miner import HabitMiner
 def dummy_store():
     store = MagicMock()
     store.conn.execute.return_value.fetchall.return_value = [
-        {"content": "play jazz", "ts": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()},
-        {"content": "play jazz", "ts": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()},
-        {"content": "turn on light", "ts": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()},
+        {
+            "content": "play jazz",
+            "ts": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
+        },
+        {
+            "content": "play jazz",
+            "ts": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
+        },
+        {
+            "content": "turn on light",
+            "ts": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
+        },
     ]
     return store
 

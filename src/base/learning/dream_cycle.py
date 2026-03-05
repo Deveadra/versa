@@ -201,11 +201,7 @@ def cluster_complaints(conn):
                     c["cluster"],
                     c["topic_id"],
                     json.dumps(c["examples"]),
-<<<<<<< Updated upstream
-                    datetime.now(timezone.utc).isoformat(),
-=======
                     utc_iso(),
->>>>>>> Stashed changes
                     c["examples"][-1] if c["examples"] else None,
                 ),
             )
@@ -215,17 +211,6 @@ def cluster_complaints(conn):
 
 
 def write_summary(self, notes: dict) -> str:
-<<<<<<< Updated upstream
-    from datetime import datetime, timezone
-
-    out_dir = Path("memory/learning")
-    out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / f"dream_summary_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.json"
-    path.write_text(
-        json.dumps(
-            {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-=======
 
     out_dir = Path("memory/learning")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -234,7 +219,6 @@ def write_summary(self, notes: dict) -> str:
         json.dumps(
             {
                 "timestamp": utc_iso(),
->>>>>>> Stashed changes
                 "notes": notes,
             },
             indent=2,

@@ -23,11 +23,7 @@ class DbRetriever:
                 dt = parse_utc_ts(ts)
             except Exception:
                 return 0.0
-<<<<<<< Updated upstream
-        delta = (datetime.datetime.now(datetime.timezone.utc) - dt).total_seconds() / 86400.0
-=======
         delta = (utc_now() - dt).total_seconds() / 86400.0
->>>>>>> Stashed changes
         return math.exp(-math.log(2) * (delta / HALF_LIFE_DAYS))
 
     def _score_fact_row(self, row, query_terms: list[str]) -> float:

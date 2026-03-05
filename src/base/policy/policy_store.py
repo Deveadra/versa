@@ -139,11 +139,7 @@ class PolicyStore:
             self.upsert_topic(topic_id, topic.policy, topic.conviction)
 
         override = self.latest_override(topic_id)
-<<<<<<< Updated upstream
-        now = datetime.now(timezone.utc)
-=======
         now = utc_now()
->>>>>>> Stashed changes
 
         # hard override blocks completely
         if override and override["type"] == "hard":

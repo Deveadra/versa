@@ -150,6 +150,7 @@ class Settings(BaseModel):
         default_factory=lambda: _get_int("PROPOSER_MAX_PATCH_BYTES", 256_000)
     )
     proposal_notify_stdout: bool = True
+    proposer_allow_full_file_overwrite: bool = False
 
     # Qdrant vector database settings
     qdrant_url: str | None = Field(default_factory=lambda: os.getenv("QDRANT_URL"))

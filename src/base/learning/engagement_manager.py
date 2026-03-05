@@ -184,13 +184,8 @@ class EngagementManager:
             return True
         last = rs["last_fired"]
         if last:
-<<<<<<< Updated upstream
-            dt = datetime.strptime(last, "%Y-%m-%d %H:%M:%S")
-            if datetime.now(timezone.utc) < dt + timedelta(seconds=rule["cooldown_seconds"]):
-=======
             dt = parse_utc_ts(last)
             if utc_now() < dt + timedelta(seconds=rule["cooldown_seconds"]):
->>>>>>> Stashed changes
                 return False
         fires = rs["fires_today"] or 0
         return fires < (rule["max_per_day"] or 9999)
@@ -212,11 +207,7 @@ class EngagementManager:
 
     # ---------------- light “maybe engage” API ----------------
     def should_engage(self) -> bool:
-<<<<<<< Updated upstream
-        now = datetime.now(timezone.utc)
-=======
         now = utc_now()
->>>>>>> Stashed changes
         if self.last_engagement and now - self.last_engagement < self.min_gap:
             return False
 
@@ -259,11 +250,7 @@ class EngagementManager:
         return False
 
     def generate_engagement(self) -> str:
-<<<<<<< Updated upstream
-        self.last_engagement = datetime.now(timezone.utc)
-=======
         self.last_engagement = self.last_engagement = utc_now()
->>>>>>> Stashed changes
 
         curiosities = [
             "It’s been a while since we chatted. How’s your day going?",

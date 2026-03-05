@@ -225,11 +225,7 @@ class MemoryStore:
 
     # ---------- facts ----------
     def upsert_fact(self, key: str, value: str) -> None:
-<<<<<<< Updated upstream
-        ts = datetime.now(timezone.utc).isoformat()
-=======
         ts = utc_iso()
->>>>>>> Stashed changes
         self.conn.execute(
             """
             INSERT INTO facts(key, value, last_updated)
@@ -288,11 +284,7 @@ class MemoryStore:
         to store the vector in the vector database (if configured).
         Returns the new event's ID.
         """
-<<<<<<< Updated upstream
-        ts = datetime.now(timezone.utc).isoformat()
-=======
         ts = utc_iso()
->>>>>>> Stashed changes
         cur = self.conn.execute(
             "INSERT INTO events(content, ts, importance, type) VALUES(?, ?, ?, ?)",
             (content, ts, importance, type_),
@@ -726,11 +718,7 @@ class MemoryStore:
     def prune_events(self) -> int:
         """Prune old, low-importance events according to TTL."""
         ttl = timedelta(days=settings.memory_ttl_days)
-<<<<<<< Updated upstream
-        cutoff = (datetime.now(timezone.utc) - ttl).isoformat()
-=======
         cutoff = (utc_now() - ttl).isoformat()
->>>>>>> Stashed changes
         cur = self.conn.execute(
             "DELETE FROM events WHERE ts < ? AND importance < ?",
             (cutoff, float(settings.importance_threshold)),
@@ -798,11 +786,7 @@ class MemoryStore:
             conn.commit()
 
     def save_memory(self, memory: dict) -> None:
-<<<<<<< Updated upstream
-        ts = memory.get("timestamp") or datetime.now(timezone.utc).isoformat()
-=======
         ts = memory.get("timestamp") or utc_iso()
->>>>>>> Stashed changes
         typ = memory.get("type", "event")
         content = memory.get("content", "")
         response = memory.get("response", "")

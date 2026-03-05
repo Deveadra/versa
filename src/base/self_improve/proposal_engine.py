@@ -159,8 +159,17 @@ class ProposalEngine:
             # ---- full_file (safe overwrite) ----
             if mode == "full_file":
                 # Refuse full-file overwrites of existing files unless explicitly allowed.
-                if target.exists() and not getattr(settings, "proposer_allow_full_file_overwrite", False):
-                    return False, "full_file refused: overwrite of existing file is disabled"
+                allow_overwrite = bool(
+                    getattr(settings, "proposer_allow_full_file_overwrite", False)
+                )
+                if target.exists() and not allow_overwrite:
+                    msg = (
+                        f"full_file refused for existing file '{target}': overwrites are disabled. "
+                        "To allow this, set settings.proposer_allow_full_file_overwrite=True "
+                        "(or configure it via your environment settings)."
+                    )
+                    logger.warning(f"[proposal_engine] {msg}")
+                    return False, msg
 
                 backups = self.root / ".aerith" / "backups"
                 backups.mkdir(parents=True, exist_ok=True)

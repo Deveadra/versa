@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 
 from base.database.sqlite import SQLiteConn
 
@@ -57,7 +57,7 @@ def update_tone_memory(
                 ignored,
                 acted,
                 consequence or row.get("consequence_note"),
-                datetime.utcnow().isoformat(),
+                datetime.now(timezone.utc).isoformat(),
                 row["id"],
             ),
         )
@@ -73,7 +73,7 @@ def update_tone_memory(
                 1 if outcome == "ignored" else 0,
                 1 if outcome == "acted" else 0,
                 consequence,
-                datetime.utcnow().isoformat(),
+                datetime.now(timezone.utc).isoformat(),
             ),
         )
     conn.commit()

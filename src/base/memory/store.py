@@ -6,7 +6,7 @@ import re
 import sqlite3
 import threading
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -224,7 +224,7 @@ class MemoryStore:
 
     # ---------- facts ----------
     def upsert_fact(self, key: str, value: str) -> None:
-        ts = datetime.utcnow().isoformat()
+        ts = datetime.now(timezone.utc).isoformat()
         self.conn.execute(
             """
             INSERT INTO facts(key, value, last_updated)
@@ -283,7 +283,7 @@ class MemoryStore:
         to store the vector in the vector database (if configured).
         Returns the new event's ID.
         """
-        ts = datetime.utcnow().isoformat()
+        ts = datetime.now(timezone.utc).isoformat()
         cur = self.conn.execute(
             "INSERT INTO events(content, ts, importance, type) VALUES(?, ?, ?, ?)",
             (content, ts, importance, type_),
@@ -721,7 +721,7 @@ class MemoryStore:
     def prune_events(self) -> int:
         """Prune old, low-importance events according to TTL."""
         ttl = timedelta(days=settings.memory_ttl_days)
-        cutoff = (datetime.utcnow() - ttl).isoformat()
+        cutoff = (datetime.now(timezone.utc) - ttl).isoformat()
         cur = self.conn.execute(
             "DELETE FROM events WHERE ts < ? AND importance < ?",
             (cutoff, float(settings.importance_threshold)),
@@ -789,7 +789,7 @@ class MemoryStore:
             conn.commit()
 
     def save_memory(self, memory: dict) -> None:
-        ts = memory.get("timestamp") or datetime.utcnow().isoformat()
+        ts = memory.get("timestamp") or datetime.now(timezone.utc).isoformat()
         typ = memory.get("type", "event")
         content = memory.get("content", "")
         response = memory.get("response", "")

@@ -21,7 +21,7 @@ class DbRetriever:
                 dt = datetime.datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
             except Exception:
                 return 0.0
-        delta = (datetime.datetime.utcnow() - dt).total_seconds() / 86400.0
+        delta = (datetime.datetime.now(datetime.timezone.utc) - dt).total_seconds() / 86400.0
         return math.exp(-math.log(2) * (delta / HALF_LIFE_DAYS))
 
     def _score_fact_row(self, row, query_terms: list[str]) -> float:

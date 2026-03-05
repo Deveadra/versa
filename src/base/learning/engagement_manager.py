@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from loguru import logger
@@ -184,7 +184,7 @@ class EngagementManager:
         last = rs["last_fired"]
         if last:
             dt = datetime.strptime(last, "%Y-%m-%d %H:%M:%S")
-            if datetime.utcnow() < dt + timedelta(seconds=rule["cooldown_seconds"]):
+            if datetime.now(timezone.utc) < dt + timedelta(seconds=rule["cooldown_seconds"]):
                 return False
         fires = rs["fires_today"] or 0
         return fires < (rule["max_per_day"] or 9999)
@@ -206,7 +206,7 @@ class EngagementManager:
 
     # ---------------- light “maybe engage” API ----------------
     def should_engage(self) -> bool:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         if self.last_engagement and now - self.last_engagement < self.min_gap:
             return False
 
@@ -249,7 +249,7 @@ class EngagementManager:
         return False
 
     def generate_engagement(self) -> str:
-        self.last_engagement = datetime.utcnow()
+        self.last_engagement = datetime.now(timezone.utc)
 
         curiosities = [
             "It’s been a while since we chatted. How’s your day going?",

@@ -1,7 +1,7 @@
 # base/utils/timeparse.py
 
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 from dateutil import parser as dateparser
 
@@ -21,9 +21,9 @@ def extract_time_from_text(text: str):
 
     # Look for full dates or months
     try:
-        dt = dateparser.parse(text, fuzzy=True, default=datetime.utcnow())
+        dt = dateparser.parse(text, fuzzy=True, default=datetime.now(timezone.utc))
         # If only month/year given
-        if dt.day == datetime.utcnow().day:  # fallback default day inserted
+        if dt.day == datetime.now(timezone.utc).day:  # fallback default day inserted
             start = datetime(dt.year, dt.month, 1)
             if dt.month == 12:
                 end = datetime(dt.year, 12, 31, 23, 59, 59)

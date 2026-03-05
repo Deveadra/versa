@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 import tracemalloc
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from loguru import logger
@@ -110,7 +110,7 @@ class DiagnosticEngine:
         Orchestrate diagnostics and write JSON report to memory/reports/.
         Returns the path to the report file.
         """
-        started_at_iso = datetime.utcnow().isoformat()
+        started_at_iso = datetime.now(timezone.utc).isoformat()
 
         results = []
         results.append(self._run_tool([sys.executable, "-m", "black", "--check", "."], "black"))
@@ -122,14 +122,14 @@ class DiagnosticEngine:
         any_fail = any(r["exit_code"] != 0 for r in results)
         report = {
             "started_at": started_at_iso,
-            "finished_at": datetime.utcnow().isoformat(),
+            "finished_at": datetime.now(timezone.utc).isoformat(),
             "tool_results": results,
             "any_failures": any_fail,
         }
 
         out_dir = self.root / "memory" / "reports"
         out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / f"diagnostic_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json"
+        out_path = out_dir / f"diagnostic_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.json"
         out_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
         from loguru import logger
 

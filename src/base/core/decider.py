@@ -1,7 +1,7 @@
 # base/core/decider.py
 import hashlib
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Protocol
 
 from base.core.nlu import parse_diagnostic_intent
@@ -189,7 +189,7 @@ class Decider:
 
         if any(kw in user_text.lower() for kw in important_keywords):
             return {
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "type": "fact",
                 "content": user_text,
                 "response": reply,
@@ -197,7 +197,7 @@ class Decider:
 
         if "I will remember" in reply or "Noted" in reply:
             return {
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "type": "acknowledgement",
                 "content": user_text,
                 "response": reply,

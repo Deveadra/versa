@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from loguru import logger
 
@@ -15,7 +15,7 @@ class Consolidator:
         self.brain = brain
 
     def summarize_old_events(self):
-        cutoff = (datetime.utcnow() - timedelta(days=settings.memory_ttl_days)).isoformat()
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=settings.memory_ttl_days)).isoformat()
         cur = self.store.db.conn.execute(
             "SELECT id, content FROM events WHERE ts < ? ORDER BY id LIMIT 200", (cutoff,)
         )

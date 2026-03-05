@@ -4,7 +4,7 @@ from __future__ import annotations
 import glob
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +32,7 @@ class DreamCycle:
     """
 
     def __init__(self, now: datetime | None = None, store: MemoryStore | None = None):
-        self.now = now or datetime.utcnow()
+        self.now = now or datetime.now(timezone.utc)
         # Ensure summaries directory exists
         Path("data/summaries").mkdir(parents=True, exist_ok=True)
         # Use provided MemoryStore or initialize a new one if needed

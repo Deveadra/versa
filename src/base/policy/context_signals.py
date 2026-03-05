@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from base.database.sqlite import SQLiteConn
@@ -45,7 +45,7 @@ class ContextSignals:
               description=excluded.description,
               last_updated=excluded.last_updated
             """,
-            (name, str(value), type_, description, datetime.utcnow().isoformat()),
+            (name, str(value), type_, description, datetime.now(timezone.utc).isoformat()),
         )
         self.conn.commit()
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from base.policy.context_manager import ContextManager
@@ -137,7 +137,7 @@ class PolicyStore:
             self.upsert_topic(topic_id, topic.policy, topic.conviction)
 
         override = self.latest_override(topic_id)
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # hard override blocks completely
         if override and override["type"] == "hard":

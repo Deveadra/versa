@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from base.database.sqlite import SQLiteConn
 
@@ -33,7 +33,7 @@ def prune_stale_topics(
     """
     cur = conn.cursor()
 
-    cutoff = (datetime.utcnow() - timedelta(days=stale_days)).isoformat()
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=stale_days)).isoformat()
 
     # Find candidate topics
     rows = cur.execute("SELECT id, created_at FROM topics").fetchall()

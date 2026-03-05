@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from ..database.sqlite import SQLiteConn
 from .entities import DEFAULT_TYPE, ENTITY_TYPES
@@ -96,10 +96,10 @@ class KGStore:
         if row and row["target_id"] != target_id:
             self.db.conn.execute(
                 "UPDATE relations SET valid_to=? WHERE id=?",
-                (datetime.utcnow().isoformat(), row["id"]),
+                (datetime.now(timezone.utc).isoformat(), row["id"]),
             )
 
-        vfrom = valid_from or datetime.utcnow().isoformat()
+        vfrom = valid_from or datetime.now(timezone.utc).isoformat()
         cur = self.db.conn.execute(
             """INSERT INTO relations(source_id, target_id, relation, confidence, valid_from, valid_to)
             VALUES(?, ?, ?, ?, ?, ?)""",
@@ -195,7 +195,7 @@ class KGStore:
         return [(row[0], row[1], row[2], float(row[3]), row[4], row[5]) for row in rows]
 
     def query_future_relations(self, entity_name: str) -> list[RelationRow]:
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         sql = """
         SELECT e1.name, r.relation, e2.name, r.confidence, r.valid_from, r.valid_to
         FROM relations r

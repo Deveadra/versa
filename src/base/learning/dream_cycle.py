@@ -201,7 +201,7 @@ def cluster_complaints(conn):
                     c["cluster"],
                     c["topic_id"],
                     json.dumps(c["examples"]),
-                    datetime.utcnow().isoformat(),
+                    datetime.now(timezone.utc).isoformat(),
                     c["examples"][-1] if c["examples"] else None,
                 ),
             )
@@ -211,15 +211,15 @@ def cluster_complaints(conn):
 
 
 def write_summary(self, notes: dict) -> str:
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     out_dir = Path("memory/learning")
     out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / f"dream_summary_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json"
+    path = out_dir / f"dream_summary_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.json"
     path.write_text(
         json.dumps(
             {
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "notes": notes,
             },
             indent=2,

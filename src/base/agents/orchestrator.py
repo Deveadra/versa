@@ -8,7 +8,7 @@ import re
 import subprocess
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, cast
 
@@ -1132,14 +1132,14 @@ class Orchestrator:
                 if score >= threshold:
                     self.db.conn.execute(
                         "UPDATE facts SET key=?, value=?, last_updated=?, embedding=? WHERE id=?",
-                        (key, value, datetime.utcnow().isoformat(), new_vec.tobytes(), r["id"]),
+                        (key, value, datetime.now(timezone.utc).isoformat(), new_vec.tobytes(), r["id"]),
                     )
                     self.db.conn.commit()
                     return f"Updated memory: {key} → {value} (replaced similar fact)."
 
             self.db.conn.execute(
                 "INSERT INTO facts (key, value, last_updated, embedding) VALUES (?, ?, ?, ?)",
-                (key, value, datetime.utcnow().isoformat(), new_vec.tobytes()),
+                (key, value, datetime.now(timezone.utc).isoformat(), new_vec.tobytes()),
             )
             self.db.conn.commit()
             return f"Remembered: {key} → {value}"
@@ -1183,7 +1183,7 @@ class Orchestrator:
 
     def query_upcoming_events(self, window_days: int = 14) -> list[dict]:
         try:
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             start = now.isoformat()
             end = (now + timedelta(days=window_days)).isoformat()
             return self.calendar.expand(start, end)
@@ -1492,7 +1492,7 @@ class Orchestrator:
                 except Exception:
                     return "I couldn’t understand the start date."
             else:
-                start_iso = datetime.utcnow().isoformat()
+                start_iso = datetime.now(timezone.utc).isoformat()
 
             if phrase:
                 event_id = self.create_recurring_event_from_phrase(title, phrase, start_iso)
@@ -1522,7 +1522,7 @@ class Orchestrator:
         """
         try:
             tokens = user_text.lower().split()
-            now_iso = datetime.utcnow().isoformat()
+            now_iso = datetime.now(timezone.utc).isoformat()
 
             ask_past = any(
                 p in user_text.lower()
@@ -1595,7 +1595,7 @@ class Orchestrator:
                             expired = vt is not None and vt < ts
                             if too_new or expired:
                                 continue
-                        now_dt = datetime.utcnow()
+                        now_dt = datetime.now(timezone.utc)
                         is_active = (vt is None) or (vt >= now_dt)
                         tense = "is" if is_active else "was"
                         facts.append(
@@ -1611,7 +1611,7 @@ class Orchestrator:
                     or []
                 )
                 formatted: list[str] = []
-                now_dt = datetime.utcnow()
+                now_dt = datetime.now(timezone.utc)
                 for path in paths:
                     pieces = []
                     for src, rel, tgt, conf, vfrom, vto in path:

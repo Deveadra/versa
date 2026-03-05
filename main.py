@@ -41,7 +41,7 @@ dotenv_path = Path(__file__).parent / "config" / ".env"
 load_dotenv(dotenv_path=dotenv_path)
 
 # ---------- Std / 3p ----------
-from datetime import datetime
+from datetime import datetime, timezone
 
 from base.agents.scheduler import Scheduler
 from base.calendar import calendar_flow
@@ -197,7 +197,7 @@ def engagement_task():
     try:
         # Update a couple of core context signals that rules might rely on
         try:
-            policy.ctx_mgr.set_signal("hour_of_day", datetime.utcnow().hour, source="system")
+            policy.ctx_mgr.set_signal("hour_of_day", datetime.now(timezone.utc).hour, source="system")
         except Exception:
             pass
 

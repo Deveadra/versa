@@ -134,6 +134,7 @@ class _QdrantMemoryBackendImpl:
         except Exception as e:
             logger.error(f"QdrantMemoryBackend.add_text: upsert failed: {e}")
 
+
     def search(
         self,
         query: str,
@@ -142,132 +143,223 @@ class _QdrantMemoryBackendImpl:
         min_importance: float = 0.0,
         type_filter: str | None = None,
     ) -> list[str]:
+        """
+        Semantic search against Qdrant with compatibility across qdrant-client versions.
+
+        Expected return shape for MemoryStore integration: list[str] (event contents)
+        """
+        if not query or self.embedder is None:
+            return []
+
         try:
-            query_vec = self.embedder.encode([query])[0]
+            qv = self.embedder.encode([query])[0]
+            if hasattr(qv, "tolist"):
+                qv = qv.tolist()
+            else:
+                qv = list(qv)
         except Exception as e:
             logger.error(f"QdrantMemoryBackend.search: embed failed: {e}")
             return []
 
-        q_filter: Filter | None = None
-        conds = []
-
-        if since:
-            try:
-                import datetime as _dt
-
-                ts = int(_dt.datetime.fromisoformat(since.replace("Z", "+00:00")).timestamp())
-                conds.append(FieldCondition(key="timestamp", range=Range(gte=ts)))
-            except Exception:
-                logger.warning(
-                    "QdrantMemoryBackend.search: could not parse 'since' as ISO timestamp; ignoring filter."
-                )
-
-        if min_importance and min_importance > 0:
-            conds.append(FieldCondition(key="importance", range=Range(gte=min_importance)))
+        # Build server-side filter (when supported) for stable, cheap filtering.
+        # We intentionally apply `since` client-side because API / payload typing varies across versions.
+        must_conditions = []
 
         if type_filter:
-            conds.append(FieldCondition(key="type", match=MatchValue(value=type_filter)))
-
-        if conds:
-            q_filter = Filter(must=conds)
-
-        def _call_search() -> Any:
-            # Build common kwargs (only include filter arg if we actually have one)
-            base_kwargs: dict[str, Any] = {
-                "collection_name": self.collection_name,
-                "limit": k,
-                "with_payload": True,
-            }
-
-            # Vector arg name varies across versions
-            vec_list = query_vec.tolist() if hasattr(query_vec, "tolist") else list(query_vec)
-
-            # 1) Try modern/expected client.search(...)
-            if hasattr(self.client, "search"):
-                # Some clients want query_vector=..., some accept filter=..., some query_filter=...
-                # Try a couple safe permutations.
-                attempts: list[dict[str, Any]] = []
-
-                kw = dict(base_kwargs)
-                kw["query_vector"] = vec_list
-                if q_filter is not None:
-                    kw["query_filter"] = q_filter
-                attempts.append(kw)
-
-                kw = dict(base_kwargs)
-                kw["query_vector"] = vec_list
-                if q_filter is not None:
-                    kw["filter"] = q_filter
-                attempts.append(kw)
-
-                last_err: Exception | None = None
-                for kw in attempts:
-                    try:
-                        return self.client.search(**kw)
-                    except TypeError as e:
-                        last_err = e
-                        continue
-                if last_err is not None:
-                    raise last_err
-
-            # 2) Fallback: client.query_points(...)
-            if hasattr(self.client, "query_points"):
-                attempts = []
-
-                # variant A
-                kw = dict(base_kwargs)
-                kw["query_vector"] = vec_list
-                if q_filter is not None:
-                    kw["query_filter"] = q_filter
-                attempts.append(kw)
-
-                # variant B (some versions call it `query`)
-                kw = dict(base_kwargs)
-                kw["query"] = vec_list
-                if q_filter is not None:
-                    kw["query_filter"] = q_filter
-                attempts.append(kw)
-
-                # filter param name variant
-                kw = dict(base_kwargs)
-                kw["query_vector"] = vec_list
-                if q_filter is not None:
-                    kw["filter"] = q_filter
-                attempts.append(kw)
-
-                last_err = None
-                for kw in attempts:
-                    try:
-                        return self.client.query_points(**kw)
-                    except TypeError as e:
-                        last_err = e
-                        continue
-                if last_err is not None:
-                    raise last_err
-
-            raise AttributeError(
-                "Qdrant client has neither search() nor query_points(); incompatible qdrant-client."
-            )
+            try:
+                must_conditions.append(
+                    FieldCondition(key="type", match=MatchValue(value=type_filter))
+                )
+            except Exception:
+                # If model signatures vary, skip server-side type filter and do client-side filtering
+                pass
 
         try:
-            raw = _call_search()
+            min_imp = float(min_importance or 0.0)
+        except Exception:
+            min_imp = 0.0
+
+        if min_imp > 0.0:
+            try:
+                must_conditions.append(
+                    FieldCondition(key="importance", range=Range(gte=min_imp))
+                )
+            except Exception:
+                # If model signatures vary, skip server-side importance filter and do client-side filtering
+                pass
+
+        qfilter = Filter(must=must_conditions) if must_conditions else None
+
+        # If we need client-side `since` filtering, fetch extra candidates.
+        fetch_k = max(int(k), 1)
+        if since:
+            fetch_k = max(fetch_k * 3, 10)
+
+        def _clean_kwargs(d: dict[str, Any]) -> dict[str, Any]:
+            return {kk: vv for kk, vv in d.items() if vv is not None}
+
+        def _try_call_variants(fn, variants: list[dict[str, Any]]):
+            last_err: Exception | None = None
+            for kwargs in variants:
+                try:
+                    return fn(**_clean_kwargs(kwargs))
+                except TypeError as e:
+                    last_err = e
+                    continue
+                except Exception as e:
+                    msg = str(e)
+                    # qdrant-client often raises custom exceptions for unknown kwargs
+                    if (
+                        "Unknown arguments" in msg
+                        or "unexpected keyword" in msg
+                        or "got an unexpected keyword" in msg
+                    ):
+                        last_err = e
+                        continue
+                    raise
+            if last_err:
+                raise last_err
+            return None
+
+        try:
+            points = None
+
+            # --- Preferred path: newer qdrant-client API (`query_points`) ---
+            if hasattr(self.client, "query_points"):
+                query_points_variants = [
+                    {
+                        "collection_name": self.collection_name,
+                        "query": qv,
+                        "query_filter": qfilter,
+                        "limit": fetch_k,
+                        "with_payload": True,
+                        "with_vectors": False,
+                    },
+                    {
+                        "collection_name": self.collection_name,
+                        "query": qv,
+                        "filter": qfilter,  # some versions use `filter`
+                        "limit": fetch_k,
+                        "with_payload": True,
+                        "with_vectors": False,
+                    },
+                    {
+                        "collection_name": self.collection_name,
+                        "query": qv,
+                        "query_filter": qfilter,
+                        "limit": fetch_k,
+                        "with_payload": True,
+                    },
+                    {
+                        "collection_name": self.collection_name,
+                        "query": qv,
+                        "filter": qfilter,
+                        "limit": fetch_k,
+                        "with_payload": True,
+                    },
+                    {
+                        "collection_name": self.collection_name,
+                        "query": qv,
+                        "limit": fetch_k,
+                    },
+                ]
+
+                resp = _try_call_variants(self.client.query_points, query_points_variants)
+                raw_points = getattr(resp, "points", resp)
+                points = list(raw_points or [])
+
+            # --- Fallback path: older / alternate `search(...)` API ---
+            if points is None and hasattr(self.client, "search"):
+                search_variants = [
+                    {
+                        "collection_name": self.collection_name,
+                        "query_vector": qv,
+                        "query_filter": qfilter,
+                        "limit": fetch_k,
+                        "with_payload": True,
+                    },
+                    {
+                        "collection_name": self.collection_name,
+                        "query_vector": qv,
+                        "filter": qfilter,
+                        "limit": fetch_k,
+                        "with_payload": True,
+                    },
+                    {
+                        "collection_name": self.collection_name,
+                        "query": qv,  # some versions use `query` instead of `query_vector`
+                        "query_filter": qfilter,
+                        "limit": fetch_k,
+                        "with_payload": True,
+                    },
+                    {
+                        "collection_name": self.collection_name,
+                        "query": qv,
+                        "filter": qfilter,
+                        "limit": fetch_k,
+                        "with_payload": True,
+                    },
+                    {
+                        "collection_name": self.collection_name,
+                        "query": qv,
+                        "limit": fetch_k,
+                    },
+                ]
+
+                resp = _try_call_variants(self.client.search, search_variants)
+                points = list(resp or [])
+
+            if points is None:
+                return []
+
+            out: list[str] = []
+
+            for p in points:
+                # Support object-style scored points and dict-like points
+                payload = getattr(p, "payload", None)
+                if payload is None and isinstance(p, dict):
+                    payload = p.get("payload")
+                if not isinstance(payload, dict):
+                    payload = {}
+
+                content = payload.get("content")
+                if not isinstance(content, str) or not content:
+                    continue
+
+                # Client-side fallback filters (in case server-side filter was unsupported)
+                if type_filter:
+                    typ = payload.get("type") or payload.get("type_")
+                    if typ is not None and typ != type_filter:
+                        continue
+
+                if min_imp > 0.0:
+                    try:
+                        imp = float(payload.get("importance", 0.0) or 0.0)
+                    except Exception:
+                        imp = 0.0
+                    if imp < min_imp:
+                        continue
+
+                if since:
+                    ts_iso = payload.get("ts_iso") or payload.get("ts")
+                    if isinstance(ts_iso, str):
+                        # ISO strings generally compare lexicographically if normalized.
+                        # If formatting differs, we skip strict rejection rather than false-negative.
+                        try:
+                            if ts_iso < since:
+                                continue
+                        except Exception:
+                            pass
+
+                out.append(content)
+                if len(out) >= k:
+                    break
+
+            return out
+
         except Exception as e:
             logger.error(f"QdrantMemoryBackend.search: failed: {e}")
             return []
-
-        # Normalize response shape
-        scored = raw
-        if hasattr(scored, "points"):
-            scored = getattr(scored, "points")
-        elif hasattr(scored, "result"):
-            scored = getattr(scored, "result")
-
-        out: list[str] = []
-        for r in scored or []:
-            payload = getattr(r, "payload", None)
-            if payload and isinstance(payload, dict) and "content" in payload:
-                out.append(payload["content"])
-        return out
 
 class QdrantMemoryBackendStub:
     def __init__(self, *a: Any, **kw: Any):

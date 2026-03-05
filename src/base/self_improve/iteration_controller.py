@@ -12,12 +12,8 @@ from loguru import logger
 
 from base.self_improve.scoreboard import ScoreboardRunner
 from base.self_improve.self_improve_db import (
-    fetch_open_gaps,
     insert_improvement_attempt,
     insert_score_run,
-    make_gap_fingerprint,
-    mark_gap_status,
-    upsert_gap,
 )
 from config.config import settings
 
@@ -209,40 +205,40 @@ class RepoJanitorIterationController:
 
     # ---------------- gaps ----------------
 
-    def _log_gaps_from_scoreboard(self, run, source: str = "scoreboard") -> None:
-        for name, tr in run.tool_results.items():
-            if tr.exit_code == 0:
-                continue
-            tail = (tr.stderr_tail or tr.stdout_tail or "")[:4000]
-            fp = make_gap_fingerprint(source, name, str(tr.exit_code), tail)
-            upsert_gap(
-                self.conn,
-                source=source,
-                fingerprint=fp,
-                requested_capability=f"pass_{name}_gate",
-                observed_failure=tail,
-                classification="quality_gate",
-                repro_steps=f"Scoreboard tool '{name}' failed (exit={tr.exit_code}).",
-                priority=50 if name in ("pytest", "compile") else 25,
-                metadata={"tool": name, "exit_code": tr.exit_code},
-            )
+    # def _log_gaps_from_scoreboard(self, run, source: str = "scoreboard") -> None:
+    #     for name, tr in run.tool_results.items():
+    #         if tr.exit_code == 0:
+    #             continue
+    #         tail = (tr.stderr_tail or tr.stdout_tail or "")[:4000]
+    #         fp = make_gap_fingerprint(source, name, str(tr.exit_code), tail)
+    #         upsert_gap(
+    #             self.conn,
+    #             source=source,
+    #             fingerprint=fp,
+    #             requested_capability=f"pass_{name}_gate",
+    #             observed_failure=tail,
+    #             classification="quality_gate",
+    #             repro_steps=f"Scoreboard tool '{name}' failed (exit={tr.exit_code}).",
+    #             priority=50 if name in ("pytest", "compile") else 25,
+    #             metadata={"tool": name, "exit_code": tr.exit_code},
+    #         )
 
-    def _goal_from_gaps(self, limit: int) -> tuple[str, list[int]]:
-        gaps = fetch_open_gaps(self.conn, limit=limit)
-        if not gaps:
-            return "Reduce failing gates and improve repository hygiene.", []
+    # def _goal_from_gaps(self, limit: int) -> tuple[str, list[int]]:
+    #     gaps = fetch_open_gaps(self.conn, limit=limit)
+    #     if not gaps:
+    #         return "Reduce failing gates and improve repository hygiene.", []
 
-        lines = ["Fix the highest priority open capability gaps:"]
-        ids: list[int] = []
-        for g in gaps:
-            ids.append(int(g["id"]))
-            lines.append(
-                f"- [{g['classification']}] {g['requested_capability']} (priority={g['priority']})"
-            )
-            if g.get("observed_failure"):
-                tail = (g["observed_failure"] or "").splitlines()[-10:]
-                lines.append("  - failure_tail: " + " | ".join(tail)[:400])
-        return "\n".join(lines), ids
+    #     lines = ["Fix the highest priority open capability gaps:"]
+    #     ids: list[int] = []
+    #     for g in gaps:
+    #         ids.append(int(g["id"]))
+    #         lines.append(
+    #             f"- [{g['classification']}] {g['requested_capability']} (priority={g['priority']})"
+    #         )
+    #         if g.get("observed_failure"):
+    #             tail = (g["observed_failure"] or "").splitlines()[-10:]
+    #             lines.append("  - failure_tail: " + " | ".join(tail)[:400])
+    #     return "\n".join(lines), ids
 
     # ---------------- leash ----------------
 
@@ -312,14 +308,18 @@ class RepoJanitorIterationController:
             passed=bool(baseline.passed()),
             metrics=baseline.to_dict(),
         )
-        self._log_gaps_from_scoreboard(baseline, source="scoreboard")
+        computed_goal = (goal or "").strip() or "Reduce failing gates and improve repository hygiene."
+        gap_ids: list[int] = []  # Gap lifecycle is managed by SelfImproveService (Design A)
 
-        computed_goal, gap_ids = self._goal_from_gaps(limit=budget.gap_limit)
-        if goal.strip():
-            computed_goal = goal.strip() + "\n\n" + computed_goal
 
-        for gid in gap_ids:
-            mark_gap_status(self.conn, gid, "in_progress")
+        # self._log_gaps_from_scoreboard(baseline, source="scoreboard")
+
+        # computed_goal, gap_ids = self._goal_from_gaps(limit=budget.gap_limit)
+        # if goal.strip():
+        #     computed_goal = goal.strip() + "\n\n" + computed_goal
+
+        # for gid in gap_ids:
+        #     mark_gap_status(self.conn, gid, "in_progress")
 
         best = baseline
         best_id = baseline_id
@@ -443,7 +443,7 @@ class RepoJanitorIterationController:
                 passed=bool(after.passed()),
                 metrics=after.to_dict(),
             )
-            self._log_gaps_from_scoreboard(after, source="scoreboard")
+            # self._log_gaps_from_scoreboard(after, source="scoreboard")
 
             is_improved = after.score() > best.score()
             attempt_row = {
@@ -516,12 +516,12 @@ class RepoJanitorIterationController:
         # Final scoreboard on current state (best branch if improved + stopped; base branch otherwise)
         final = self.scoreboard.run(mode="all", fix=False)
 
-        if improved_any and final.passed():
-            for gid in gap_ids:
-                mark_gap_status(self.conn, gid, "fixed")
-        else:
-            for gid in gap_ids:
-                mark_gap_status(self.conn, gid, "queued")
+        # if improved_any and final.passed():
+        #     for gid in gap_ids:
+        #         mark_gap_status(self.conn, gid, "fixed")
+        # else:
+        #     for gid in gap_ids:
+        #         mark_gap_status(self.conn, gid, "queued")
 
         # Always restore to base branch explicitly (do NOT rely on PRManager.original_branch)
         try:

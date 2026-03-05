@@ -6,7 +6,7 @@ import re
 import sqlite3
 import threading
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +21,7 @@ from base.memory.vector_backend import (
     VectorBackend,
 )
 from base.utils.embeddings import get_embedder
+from base.utils.time import utc_iso, utc_now, parse_iso_utc
 from config.config import settings  # OK where your settings live
 
 DB_PATH = Path("memory.db")
@@ -224,7 +225,11 @@ class MemoryStore:
 
     # ---------- facts ----------
     def upsert_fact(self, key: str, value: str) -> None:
-        ts = datetime.utcnow().isoformat()
+<<<<<<< Updated upstream
+        ts = datetime.now(timezone.utc).isoformat()
+=======
+        ts = utc_iso()
+>>>>>>> Stashed changes
         self.conn.execute(
             """
             INSERT INTO facts(key, value, last_updated)
@@ -283,7 +288,11 @@ class MemoryStore:
         to store the vector in the vector database (if configured).
         Returns the new event's ID.
         """
-        ts = datetime.utcnow().isoformat()
+<<<<<<< Updated upstream
+        ts = datetime.now(timezone.utc).isoformat()
+=======
+        ts = utc_iso()
+>>>>>>> Stashed changes
         cur = self.conn.execute(
             "INSERT INTO events(content, ts, importance, type) VALUES(?, ?, ?, ?)",
             (content, ts, importance, type_),
@@ -513,12 +522,8 @@ class MemoryStore:
                                 ts_iso = meta.get("ts_iso") or meta.get("ts")
                                 if isinstance(ts_iso, str):
                                     try:
-                                        ev_time = datetime.fromisoformat(
-                                            ts_iso.replace("Z", "+00:00")
-                                        )
-                                        since_time = datetime.fromisoformat(
-                                            since.replace("Z", "+00:00")
-                                        )
+                                        ev_time = parse_iso_utc(ts_iso)
+                                        since_time = parse_iso_utc(since)
                                         if ev_time < since_time:
                                             continue
                                     except Exception:
@@ -584,8 +589,8 @@ class MemoryStore:
 
             if since is not None:
                 try:
-                    ev_time = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                    since_time = datetime.fromisoformat(since.replace("Z", "+00:00"))
+                    ev_time = parse_iso_utc(ts)
+                    since_time = parse_iso_utc(since)
                 except Exception:
                     ev_time = None
                     since_time = None
@@ -721,7 +726,11 @@ class MemoryStore:
     def prune_events(self) -> int:
         """Prune old, low-importance events according to TTL."""
         ttl = timedelta(days=settings.memory_ttl_days)
-        cutoff = (datetime.utcnow() - ttl).isoformat()
+<<<<<<< Updated upstream
+        cutoff = (datetime.now(timezone.utc) - ttl).isoformat()
+=======
+        cutoff = (utc_now() - ttl).isoformat()
+>>>>>>> Stashed changes
         cur = self.conn.execute(
             "DELETE FROM events WHERE ts < ? AND importance < ?",
             (cutoff, float(settings.importance_threshold)),
@@ -789,7 +798,11 @@ class MemoryStore:
             conn.commit()
 
     def save_memory(self, memory: dict) -> None:
-        ts = memory.get("timestamp") or datetime.utcnow().isoformat()
+<<<<<<< Updated upstream
+        ts = memory.get("timestamp") or datetime.now(timezone.utc).isoformat()
+=======
+        ts = memory.get("timestamp") or utc_iso()
+>>>>>>> Stashed changes
         typ = memory.get("type", "event")
         content = memory.get("content", "")
         response = memory.get("response", "")

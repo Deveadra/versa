@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+<<<<<<< Updated upstream
+from datetime import datetime, timedelta, timezone
+=======
+from datetime import timedelta
+>>>>>>> Stashed changes
 
 from loguru import logger
 
+from base.utils.time import utc_now
 from config.config import settings
 
 
@@ -15,7 +20,11 @@ class Consolidator:
         self.brain = brain
 
     def summarize_old_events(self):
-        cutoff = (datetime.utcnow() - timedelta(days=settings.memory_ttl_days)).isoformat()
+<<<<<<< Updated upstream
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=settings.memory_ttl_days)).isoformat()
+=======
+        cutoff = (utc_now() - timedelta(days=settings.memory_ttl_days)).isoformat()
+>>>>>>> Stashed changes
         cur = self.store.db.conn.execute(
             "SELECT id, content FROM events WHERE ts < ? ORDER BY id LIMIT 200", (cutoff,)
         )

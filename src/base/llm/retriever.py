@@ -4,6 +4,8 @@ import datetime
 import math
 from typing import Any
 
+from base.utils.time import parse_iso_utc, parse_utc_ts, utc_now
+
 HALF_LIFE_DAYS = 90.0
 
 
@@ -15,13 +17,17 @@ class DbRetriever:
         if not ts:
             return 0.0
         try:
-            dt = datetime.datetime.fromisoformat(ts)
+            dt = parse_iso_utc(ts)
         except Exception:
             try:
-                dt = datetime.datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+                dt = parse_utc_ts(ts)
             except Exception:
                 return 0.0
-        delta = (datetime.datetime.utcnow() - dt).total_seconds() / 86400.0
+<<<<<<< Updated upstream
+        delta = (datetime.datetime.now(datetime.timezone.utc) - dt).total_seconds() / 86400.0
+=======
+        delta = (utc_now() - dt).total_seconds() / 86400.0
+>>>>>>> Stashed changes
         return math.exp(-math.log(2) * (delta / HALF_LIFE_DAYS))
 
     def _score_fact_row(self, row, query_terms: list[str]) -> float:

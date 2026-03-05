@@ -119,3 +119,6 @@ markers = [
   "integration: tests touching multiple subsystems",
   "slow: intentionally slower tests"
 ]
+filterwarnings = [
+  "ignore:Api key is used with an insecure connection\\.:UserWarning:base\\.memory\\.vector_backend",
+]

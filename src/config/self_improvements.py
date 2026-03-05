@@ -8,4 +8,3 @@ for self-improvement configuration is config.config.settings.
 """
 
 from __future__ import annotations
-

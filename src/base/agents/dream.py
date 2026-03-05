@@ -4,7 +4,7 @@ from __future__ import annotations
 import glob
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +13,7 @@ from loguru import logger
 from base.database.sqlite import SQLiteConn
 from base.llm.brain import ask_brain
 from base.memory.store import MemoryStore
+from base.utils.time import ensure_utc, utc_now
 from config.config import settings
 
 # from config.self_improvements import CFG
@@ -32,7 +33,11 @@ class DreamCycle:
     """
 
     def __init__(self, now: datetime | None = None, store: MemoryStore | None = None):
-        self.now = now or datetime.utcnow()
+<<<<<<< Updated upstream
+        self.now = now or datetime.now(timezone.utc)
+=======
+        self.now = ensure_utc(now) if now else utc_now()
+>>>>>>> Stashed changes
         # Ensure summaries directory exists
         Path("data/summaries").mkdir(parents=True, exist_ok=True)
         # Use provided MemoryStore or initialize a new one if needed

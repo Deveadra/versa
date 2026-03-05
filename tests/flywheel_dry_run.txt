@@ -1,6 +1,7 @@
 python - <<'PY'
 from pathlib import Path
 from pprint import pprint
+import time
 
 from config.config import settings
 from base.database.sqlite import SQLiteConn
@@ -17,17 +18,16 @@ repo_root = Path(".").resolve()
 db = SQLiteConn(settings.db_path)
 store = MemoryStore(db)
 brain = Brain()
-
 code_indexer = CodeIndexer(
-    root=str(repo_root),
-    allowlist=settings.proposer_allowlist,
-    blocklist=settings.proposer_blocklist,
+    root=str(repo_root / "src"),
+    allowlist=["base", "config"],
+    blocklist=["__pycache__"],
 )
-proposal_engine = ProposalEngine(str(repo_root), brain=brain)
-pr_manager = PRManager(str(repo_root))
+proposal_engine = ProposalEngine(repo_root=str(repo_root), brain=brain)
+pr_manager = PRManager(repo_root=str(repo_root))
 
-svc = SelfImproveService(
-    repo_root=repo_root,
+service = SelfImproveService(
+    repo_root=str(repo_root),
     db=db,
     store=store,
     brain=brain,
@@ -38,17 +38,21 @@ svc = SelfImproveService(
 
 cfg = SelfImproveRunConfig(
     budget=IterationBudget(
-        max_iterations=2,
-        max_seconds=10 * 60,
+        max_iterations=1,
+        max_seconds=300,
         stop_on_first_improvement=True,
-        open_pr_on_improvement=False,   # <- dry run
-        gap_limit=5,
+        open_pr_on_improvement=False,
+        gap_limit=3,
     ),
-    gap_limit=5,
-    open_pr=False,                     # <- dry run (service-level)
+    gap_limit=3,
+    open_pr=False,
 )
 
-result = svc.run_manual(cfg=cfg, include_dream=False)
-print("\n=== DRY RUN RESULT ===")
+result = service.run_manual(cfg=cfg, include_dream=False)
+print("=== DRY RUN RESULT ===")
 pprint(result)
+
+# short-lived script: give background threads a moment to flush
+store.wait_for_background_tasks(timeout=2.0)
+time.sleep(0.25)
 PY

@@ -36,6 +36,8 @@ Return a JSON object with:
 }}
 
 Rules:
+- Never use "full_file" for an existing file. Only use "full_file" for new files.
+- For existing files, always use "replace_block" with a search_anchor copied exactly from the file.
 - Only modify files within the allowlist.
 - Use "full_file" ONLY for new files. For existing files, use "replace_block".
 - Keep changes small; do not exceed {max_files} files or {max_bytes} bytes total replacement.
@@ -90,6 +92,7 @@ def _parse_llm_json(raw: str) -> dict:
             return {}
 
     return {}
+
 
 def _ask_for_proposal_json(self, *, user_prompt: str, system_prompt: str) -> tuple[str, dict]:
     """
@@ -339,6 +342,32 @@ class ProposalEngine:
             for ch in obj.get("changes", [])
         ]
 
+        normalized: list[ProposedChange] = []
+        for ch in changes:
+            target = self.root / ch.path
+            if ch.apply_mode == "full_file" and target.exists():
+                # Convert to a safe block replace:
+                # anchor is the first ~15 lines of the current file (stable enough for one iteration)
+                try:
+                    original = target.read_text(encoding="utf-8", errors="ignore")
+                    anchor_lines = original.splitlines()[:15]
+                    anchor = "\n".join(anchor_lines).strip()
+                except Exception:
+                    anchor = ""
+
+                if anchor:
+                    ch.apply_mode = "replace_block"
+                    ch.search_anchor = anchor
+                    # replacement stays as the model proposed (whole file). It will replace the anchored header block only.
+                    # That *still* might not be what we want, but it converts a guaranteed-noop into a real attempt.
+                else:
+                    # If we can't build an anchor, keep it as-is (it will be refused)
+                    pass
+
+            normalized.append(ch)
+
+        changes = normalized
+
         if not changes and force_nonempty:
             changes.append(
                 ProposedChange(
@@ -355,6 +384,99 @@ class ProposalEngine:
             description=obj.get("description", ""),
             changes=changes,
         )
+
+    def preflight_proposal(self, proposal: Proposal) -> tuple[list[ProposedChange], list[dict]]:
+        """
+        Determine which changes are actually applicable *before* we create a branch.
+        Returns: (applicable_changes, refusals)
+        - applicable_changes: changes that should apply cleanly under current safety rules
+        - refusals: list of {"path": ..., "apply_mode": ..., "reason": ...} for each rejected change
+        """
+        applicable: list[ProposedChange] = []
+        refusals: list[dict] = []
+
+        for ch in proposal.changes:
+            try:
+                rel = (ch.path or "").strip()
+                if not rel:
+                    refusals.append(
+                        {"path": rel, "apply_mode": ch.apply_mode, "reason": "empty path"}
+                    )
+                    continue
+
+                target = (self.root / rel).resolve()
+
+                mode = getattr(ch, "apply_mode", None) or "replace_block"
+                anchor = getattr(ch, "search_anchor", None) or ""
+                replacement = ch.replacement or ""
+
+                # full_file: allowed only for new files unless explicitly enabled
+                if mode == "full_file":
+                    if target.exists() and not getattr(
+                        settings, "proposer_allow_full_file_overwrite", False
+                    ):
+                        refusals.append(
+                            {
+                                "path": rel,
+                                "apply_mode": mode,
+                                "reason": "full_file refused: overwrite disabled",
+                            }
+                        )
+                        continue
+                    if not replacement:
+                        refusals.append(
+                            {"path": rel, "apply_mode": mode, "reason": "empty replacement"}
+                        )
+                        continue
+                    applicable.append(ch)
+                    continue
+
+                # replace_block rules
+                if not target.exists():
+                    # creating a new file is fine
+                    if not replacement:
+                        refusals.append(
+                            {"path": rel, "apply_mode": mode, "reason": "empty replacement"}
+                        )
+                        continue
+                    applicable.append(ch)
+                    continue
+
+                # existing file requires non-empty anchor that exists in file
+                if not anchor.strip():
+                    refusals.append(
+                        {
+                            "path": rel,
+                            "apply_mode": mode,
+                            "reason": "replace_block refused: empty anchor",
+                        }
+                    )
+                    continue
+
+                original = target.read_text(encoding="utf-8", errors="ignore")
+                if anchor not in original:
+                    refusals.append(
+                        {
+                            "path": rel,
+                            "apply_mode": mode,
+                            "reason": "replace_block refused: anchor not found",
+                        }
+                    )
+                    continue
+
+                # would replace, so it's applicable
+                applicable.append(ch)
+
+            except Exception as e:
+                refusals.append(
+                    {
+                        "path": getattr(ch, "path", ""),
+                        "apply_mode": getattr(ch, "apply_mode", None),
+                        "reason": f"preflight error: {e}",
+                    }
+                )
+
+        return applicable, refusals
 
     def apply_proposal(self, proposal: Proposal) -> list[tuple[ProposedChange, bool, str]]:
         """

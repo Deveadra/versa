@@ -379,7 +379,7 @@ class RepoJanitorIterationController:
                     error_text=msg,
                 )
                 continue
-            
+
             if not getattr(proposal, "changes", None):
                 attempts.append({"iteration": i, "error": "empty proposal (no changes)"})
                 insert_improvement_attempt(
@@ -396,6 +396,33 @@ class RepoJanitorIterationController:
                     error_text="empty proposal (no changes)",
                 )
                 continue
+
+            applicable, refusals = self.proposal_engine.preflight_proposal(proposal)
+
+            if not applicable:
+                msg = "proposal has no applicable changes under current safety policy"
+                attempts.append({"iteration": i, "error": msg, "refusals": refusals[:5]})
+                insert_improvement_attempt(
+                    self.conn,
+                    iteration=i,
+                    baseline_run_id=baseline_id,
+                    before_run_id=best_id,
+                    after_run_id=None,
+                    branch=base_branch,
+                    proposal_title=getattr(proposal, "title", None),
+                    proposal_json={
+                        "title": getattr(proposal, "title", ""),
+                        "description": getattr(proposal, "description", ""),
+                        "preflight_refusals": refusals,
+                    },
+                    pr_url=None,
+                    improved=False,
+                    error_text=msg,
+                )
+                continue
+
+            # Narrow proposal to only changes that can actually apply
+            proposal.changes = applicable
 
             # Prepare branch (include iteration so you can read history easily)
             branch_name = f"repo-janitor-{int(time.time())}-it{i}"

@@ -75,7 +75,7 @@ class Brain:
                 messages=messages,
                 temperature=0.6,
             )
-            
+
             response_format: dict | None = None
 
             reply = (completion.choices[0].message.content or "").strip()
@@ -98,7 +98,7 @@ class Brain:
                 messages=...,
                 **kwargs,
             )
-            
+
             # auto-speak if enabled
             if settings.auto_speak:
                 self.voice.speak_async(reply)

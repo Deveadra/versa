@@ -4,7 +4,6 @@ from __future__ import annotations
 import os
 from typing import cast
 
-from blackd import client
 from loguru import logger
 from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
@@ -19,12 +18,13 @@ except Exception:
 
 from base.voice.tts_elevenlabs import Voice
 from config.config import settings
-
 from ..core.core import PERSONALITIES, messages
 
 # ---------- OpenAI client / model ----------
+# _openai_client = OpenAI()
 _CLIENT = OpenAI(api_key=settings.openai_api_key)  # new SDK
 _MODEL = settings.openai_model or os.getenv("BRAIN_MODEL", "gpt-4o-mini")
+
 # complete = cast(OpenAI, _CLIENT).chat.completions.create
 
 
@@ -42,6 +42,8 @@ class Brain:
         self.client = client or _CLIENT
         self.model = model or _MODEL
         self.voice = Voice.get_instance()
+
+    _openai_client = OpenAI()
 
     # -------- persona -----------
     def auto_set_personality(self, user_text: str) -> None:
@@ -62,6 +64,9 @@ class Brain:
         """
         Send a prompt to OpenAI. Supports text or JSON output.
         """
+
+        _openai_client = OpenAI()
+
         try:
             messages = []
             if system_prompt:
@@ -93,11 +98,13 @@ class Brain:
             if response_format is not None:
                 kwargs["response_format"] = response_format
 
-            completion = client.chat.completions.create(
-                model=...,
-                messages=...,
+            completion = _openai_client.chat.completions.create(
+                model=getattr(settings, "openai_model", "gpt-4o-mini"),
+                messages=messages,
+                temperature=getattr(settings, "openai_temperature", 0.2),
                 **kwargs,
             )
+            return completion.choices[0].message.content or ""
 
             # auto-speak if enabled
             if settings.auto_speak:

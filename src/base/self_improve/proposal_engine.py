@@ -171,6 +171,46 @@ class ProposalEngine:
 
         return False, rp, "outside allowed prefixes"
 
+    def _ask_for_proposal_json(self, *, user_prompt: str, system_prompt: str) -> tuple[str, dict]:
+        """
+        Ask the LLM for proposal JSON, retrying once if the first response isn't valid JSON.
+        Returns (raw_text, parsed_obj_dict).
+        """
+        raw1 = self.brain.ask_brain(user_prompt, system_prompt=system_prompt).strip()
+        obj1 = _parse_llm_json(raw1)
+        if obj1:
+            return raw1, obj1
+
+        # Retry with an explicit "repair" prompt (smaller, more forceful)
+        repair_prompt = f"""Your previous response was NOT valid JSON.
+
+    Return ONLY a valid JSON object that matches the required schema. No commentary, no markdown fences.
+
+    Schema reminder:
+    {{
+    "title": "...",
+    "description": "...",
+    "changes": [
+        {{
+        "path": "relative/path.py",
+        "apply_mode": "replace_block" | "full_file",
+        "search_anchor": "...",
+        "replacement": "..."
+        }}
+    ]
+    }}
+
+    Previous response:
+    {raw1}
+    """
+        raw2 = self.brain.ask_brain(repair_prompt, system_prompt=system_prompt).strip()
+        obj2 = _parse_llm_json(raw2)
+        if obj2:
+            return raw2, obj2
+
+        # Give back the original for logging/debugging
+        return raw1, {}
+
     def safe_write(self, path: str, new_content: str) -> bool:
         """
         Safely write new content to file.

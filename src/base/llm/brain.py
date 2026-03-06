@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 from typing import cast
 
+from blackd import client
 from loguru import logger
 from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
@@ -75,6 +76,8 @@ class Brain:
                 temperature=0.6,
             )
 
+            response_format: dict | None = None
+
             reply = (completion.choices[0].message.content or "").strip()
 
             # vocal cue handling
@@ -85,6 +88,16 @@ class Brain:
             elif command == "enable_speak":
                 settings.auto_speak = True
                 return "Voice enabled again."
+
+            kwargs = {}
+            if response_format is not None:
+                kwargs["response_format"] = response_format
+
+            completion = client.chat.completions.create(
+                model=...,
+                messages=...,
+                **kwargs,
+            )
 
             # auto-speak if enabled
             if settings.auto_speak:

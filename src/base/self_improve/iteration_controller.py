@@ -455,7 +455,23 @@ class RepoJanitorIterationController:
             )
             # self._log_gaps_from_scoreboard(after, source="scoreboard")
 
-            is_improved = after.score() > best.score()
+            best_gates = int(getattr(best, "gates_failing", 0))
+            after_gates = int(getattr(after, "gates_failing", 0))
+
+            best_score = float(best.score())
+            after_score = float(after.score())
+
+            EPS = 1e-6
+
+            # Gates are the primary objective: never accept worse gate count.
+            if after_gates < best_gates:
+                is_improved = True
+            elif after_gates > best_gates:
+                is_improved = False
+            else:
+                # Same failing gates → require a score improvement
+                is_improved = after_score > (best_score + EPS)
+
             attempt_row = {
                 "iteration": i,
                 "branch": branch,

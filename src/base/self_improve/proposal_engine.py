@@ -171,46 +171,6 @@ class ProposalEngine:
 
         return False, rp, "outside allowed prefixes"
 
-    def _ask_for_proposal_json(self, *, user_prompt: str, system_prompt: str) -> tuple[str, dict]:
-        """
-        Ask the LLM for proposal JSON, retrying once if the first response isn't valid JSON.
-        Returns (raw_text, parsed_obj_dict).
-        """
-        raw1 = self.brain.ask_brain(user_prompt, system_prompt=system_prompt).strip()
-        obj1 = _parse_llm_json(raw1)
-        if obj1:
-            return raw1, obj1
-
-        # Retry with an explicit "repair" prompt (smaller, more forceful)
-        repair_prompt = f"""Your previous response was NOT valid JSON.
-
-    Return ONLY a valid JSON object that matches the required schema. No commentary, no markdown fences.
-
-    Schema reminder:
-    {{
-    "title": "...",
-    "description": "...",
-    "changes": [
-        {{
-        "path": "relative/path.py",
-        "apply_mode": "replace_block" | "full_file",
-        "search_anchor": "...",
-        "replacement": "..."
-        }}
-    ]
-    }}
-
-    Previous response:
-    {raw1}
-    """
-        raw2 = self.brain.ask_brain(repair_prompt, system_prompt=system_prompt).strip()
-        obj2 = _parse_llm_json(raw2)
-        if obj2:
-            return raw2, obj2
-
-        # Give back the original for logging/debugging
-        return raw1, {}
-
     def safe_write(self, path: str, new_content: str) -> bool:
         """
         Safely write new content to file.
@@ -309,12 +269,24 @@ class ProposalEngine:
             # ---- replace_block ----
             if not target.exists():
                 if change.path.endswith(".py") and not change.path.startswith("tests/"):
+<<<<<<< HEAD
                     return False, "refused: new .py files must be under tests/"
                 target.write_text(replacement, encoding="utf-8")
                 logger.info(f"[apply_change] created new file {target}")
                 return True, "created new file"
             # Deny arbitrary new source files (prevents junk like some_file.py)
 
+=======
+                    return (
+                        False,
+                        f"refused: new .py files must be under tests/ (got '{change.path}')",
+                    )
+
+                target.write_text(replacement, encoding="utf-8")
+                logger.info(f"[apply_change] created new file {target}")
+                return True, "created new file"
+                return True, "created new file"
+>>>>>>> a686f44 (Fixed early returns before speech)
             if not anchor.strip():
                 # Safety: do not allow empty-anchor rewrite of existing files
                 return False, "replace_block refused: empty anchor for existing file"
@@ -335,6 +307,46 @@ class ProposalEngine:
             logger.exception(f"[apply_change] error for {change.path}: {e}")
             return False, f"error: {e}"
 
+    def _ask_for_proposal_json(self, *, user_prompt: str, system_prompt: str) -> tuple[str, dict]:
+        """
+        Ask the LLM for proposal JSON, retrying once if the first response isn't valid JSON.
+        Returns (raw_text, parsed_obj_dict).
+        """
+        raw1 = self.brain.ask_brain(user_prompt, system_prompt=system_prompt).strip()
+        obj1 = _parse_llm_json(raw1)
+        if obj1:
+            return raw1, obj1
+
+        # Retry with an explicit "repair" prompt (smaller, more forceful)
+        repair_prompt = f"""Your previous response was NOT valid JSON.
+
+    Return ONLY a valid JSON object that matches the required schema. No commentary, no markdown fences.
+
+    Schema reminder:
+    {{
+    "title": "...",
+    "description": "...",
+    "changes": [
+        {{
+        "path": "relative/path.py",
+        "apply_mode": "replace_block" | "full_file",
+        "search_anchor": "...",
+        "replacement": "..."
+        }}
+    ]
+    }}
+
+    Previous response:
+    {raw1}
+    """
+        raw2 = self.brain.ask_brain(repair_prompt, system_prompt=system_prompt).strip()
+        obj2 = _parse_llm_json(raw2)
+        if obj2:
+            return raw2, obj2
+
+        # Give back the original for logging/debugging
+        return raw1, {}
+
     def propose(self, instruction: str, index_md: str) -> Proposal:
         sys_prompt = PROPOSAL_SYS_PROMPT.format(
             max_files=settings.proposer_max_files_per_pr,
@@ -346,12 +358,22 @@ class ProposalEngine:
                         Repository index:
                         {index_md}
 
+<<<<<<< HEAD
                         Respond with strictly the JSON schema described.
                         """
         # raw = self.brain.ask_brain(user_prompt, system_prompt=sys_prompt).strip()
         force_nonempty = getattr(settings, "proposer_force_nonempty", False)
 
         raw, obj = self._ask_for_proposal_json(user_prompt=user_prompt, system_prompt=sys_prompt)
+=======
+Respond with strictly the JSON schema described.
+"""
+        raw, obj = self._ask_for_proposal_json(user_prompt=user_prompt, system_prompt=sys_prompt)
+        raw = (raw or "").strip()
+        force_nonempty = getattr(settings, "proposer_force_nonempty", False)
+
+        # obj = _parse_llm_json(raw)
+>>>>>>> a686f44 (Fixed early returns before speech)
         if not obj:
             logger.error("LLM returned invalid JSON twice; wrapping into no-op change.")
             obj = {

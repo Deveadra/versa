@@ -59,6 +59,7 @@ class Brain:
 
     # -------- ask (text or json) -----------
     def ask_brain(
+<<<<<<< HEAD
         self, prompt: str, system_prompt: str | None = None, response_format: str = "text"
     ) -> str:
         """
@@ -74,17 +75,39 @@ class Brain:
             if response_format == "json":
                 messages.append({"role": "system", "content": "Respond ONLY in strict JSON."})
             messages.append({"role": "user", "content": prompt})
+=======
+    self, prompt: str, system_prompt: str | None = None, response_format: str = "text"
+) -> str:
+    """
+    Send a prompt to OpenAI. Supports text or JSON output.
+    """
+    try:
+        msg_list: list[dict[str, str]] = []
+        if system_prompt:
+            msg_list.append({"role": "system", "content": system_prompt})
+        if response_format == "json":
+            msg_list.append({"role": "system", "content": "Respond ONLY in strict JSON."})
+        msg_list.append({"role": "user", "content": prompt})
+>>>>>>> a686f44 (Fixed early returns before speech)
 
-            completion = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=0.6,
-            )
+        # vocal cue handling (before speaking)
+        command = _check_vocal_cue(prompt)
+        if command == "disable_speak":
+            settings.auto_speak = False
+            return "Understood. I’ll stop speaking and switch to text."
+        if command == "enable_speak":
+            settings.auto_speak = True
+            return "Voice enabled again."
 
-            response_format: dict | None = None
+        completion = self.client.chat.completions.create(
+            model=self.model,
+            messages=cast(list[ChatCompletionMessageParam], msg_list),
+            temperature=0.6,
+        )
 
-            reply = (completion.choices[0].message.content or "").strip()
+        reply = (completion.choices[0].message.content or "").strip()
 
+<<<<<<< HEAD
             # vocal cue handling
             command = _check_vocal_cue(prompt)
             if command == "disable_speak":
@@ -112,14 +135,22 @@ class Brain:
 
             # brain.py
             if getattr(settings, "auto_speak", False) and hasattr(self, "voice"):
+=======
+        # auto-speak if enabled
+        if getattr(settings, "auto_speak", False) and reply:
+            try:
+>>>>>>> a686f44 (Fixed early returns before speech)
                 speak_async = getattr(self.voice, "speak_async", None)
                 if callable(speak_async):
                     speak_async(reply)
+            except Exception:
+                logger.exception("auto_speak failed")
 
-            return reply
-        except Exception as e:
-            logger.exception(f"[ask_brain error] {e}")
-            return "Sorry, I couldn’t process that."
+        return reply
+
+    except Exception as e:
+        logger.exception(f"[ask_brain error] {e}")
+        return "Sorry, I couldn’t process that."
 
     # -------- streaming ask with TTS -----------
     # def ask_aerith_stream(self, user_text: str) -> str:

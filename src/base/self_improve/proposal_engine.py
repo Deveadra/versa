@@ -308,9 +308,12 @@ class ProposalEngine:
 
             # ---- replace_block ----
             if not target.exists():
+                if change.path.endswith(".py") and not change.path.startswith("tests/"):
+                    return False, "refused: new .py files must be under tests/"
                 target.write_text(replacement, encoding="utf-8")
                 logger.info(f"[apply_change] created new file {target}")
                 return True, "created new file"
+            # Deny arbitrary new source files (prevents junk like some_file.py)
 
             if not anchor.strip():
                 # Safety: do not allow empty-anchor rewrite of existing files

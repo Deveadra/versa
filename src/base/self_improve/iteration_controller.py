@@ -444,9 +444,17 @@ class RepoJanitorIterationController:
             # Apply proposal
             applied = self.proposal_engine.apply_proposal(proposal)
             applied_ok = any(ok for (_c, ok, _m) in applied)
+
             if not applied_ok:
+                # Capture why each change failed (anchor not found, overwrite disabled, etc.)
+                details = "; ".join(
+                    f"{getattr(c, 'path', '?')}: {msg}" for (c, ok, msg) in applied if not ok
+                )[:800]
+
                 self._rollback_to_base(base_branch)
-                attempts.append({"iteration": i, "error": "proposal applied no changes"})
+                attempts.append(
+                    {"iteration": i, "error": f"proposal applied no changes ({details})"}
+                )
                 insert_improvement_attempt(
                     self.conn,
                     iteration=i,
@@ -455,10 +463,14 @@ class RepoJanitorIterationController:
                     after_run_id=None,
                     branch=branch,
                     proposal_title=getattr(proposal, "title", None),
-                    proposal_json={"title": getattr(proposal, "title", ""), "applied": False},
+                    proposal_json={
+                        "title": getattr(proposal, "title", ""),
+                        "applied": False,
+                        "details": details,
+                    },
                     pr_url=None,
                     improved=False,
-                    error_text="proposal applied no changes",
+                    error_text=f"proposal applied no changes ({details})",
                 )
                 continue
 

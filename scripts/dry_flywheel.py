@@ -2,6 +2,10 @@ from pathlib import Path
 from pprint import pprint
 import time
 
+import os
+
+os.environ["GITHUB_DEFAULT_BRANCH"] = "feature/flywheel"
+
 from config.config import settings
 from base.database.sqlite import SQLiteConn
 from base.memory.store import MemoryStore

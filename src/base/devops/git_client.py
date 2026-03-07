@@ -148,18 +148,46 @@ class GitClient:
     def has_uncommitted_changes(self) -> bool:
         return bool(self._run(["status", "--porcelain"], check=False).strip())
 
-    def stash_push(self, message: str = "aerith-autosave") -> None:
-        try:
-            self._run(["stash", "push", "-u", "-m", message])
-        except GitError as e:
-            logger.warning(f"Stash failed (continuing): {e}")
+    # def stash_push(self, message: str = "aerith-autosave") -> None:
+    #     try:
+    #         self._run(["stash", "push", "-u", "-m", message])
+    #     except GitError as e:
+    #         logger.warning(f"Stash failed (continuing): {e}")
 
-    def stash_pop(self) -> None:
+    def stash_push(self, message: str = "aerith-autosave") -> tuple[str | None, str | None]:
+        """
+        Stash working tree changes and return (stash_ref, stash_sha).
+        Always logs an exact copy/paste restore command if a stash is created.
+        Never raises.
+        """
         try:
-            self._run(["stash", "pop"])
+            if not self.has_uncommitted_changes():
+                return None, None
+
+            self._run(["stash", "push", "-u", "-m", message])
+
+            # Deterministically identify the stash we just created
+            stash_ref = (
+                self._run(["stash", "list", "-n", "1", "--pretty=format:%gd"], check=False) or ""
+            ).strip() or None
+            stash_sha = None
+            if stash_ref:
+                stash_sha = (self._run(["rev-parse", stash_ref], check=False) or "").strip() or None
+
+                # EXACT restore commands (copy/paste)
+                self.logger.info(f"Worktree changes were stashed as {stash_ref}.")
+                self.logger.info(f"Restore with: git stash pop {stash_ref}")
+                if stash_sha:
+                    self.logger.info(f"Or (stable): git stash apply {stash_sha}")
+
+            return stash_ref, stash_sha
+
         except GitError as e:
-            # Not fatal — conflicts could occur; caller decides next steps.
-            logger.warning(f"Stash pop failed (continuing): {e}")
+            self.logger.warning(f"Stash failed (continuing): {e}")
+            return None, None
+        except Exception as e:
+            self.logger.warning(f"Stash failed (continuing): {e}")
+            return None, None
 
     def fetch(self) -> None:
         self._run(["fetch", self.remote, "--prune"])
@@ -168,7 +196,12 @@ class GitClient:
         try:
             if create:
                 if start_point:
-                    self._run(["checkout", "-b", branch, f"{self.remote}/{start_point}"])
+                    # Prefer local start_point (PRManager checks out + pulls it first)
+                    try:
+                        self._run(["checkout", "-b", branch, start_point])
+                    except GitError:
+                        # Deterministic fallback if local branch doesn't exist yet
+                        self._run(["checkout", "-b", branch, f"{self.remote}/{start_point}"])
                 else:
                     self._run(["checkout", "-b", branch])
             else:
@@ -180,6 +213,61 @@ class GitClient:
                 self._run(["checkout", branch], check=False)
             else:
                 raise
+
+    def stash_pop(self, ref: str | None = None) -> None:
+        """
+        Pop a stash (optionally specific ref). Never raises.
+        If it fails, logs the exact command to retry manually.
+        """
+        try:
+            args = ["stash", "pop"]
+            if ref:
+                args.append(ref)
+            self._run(args)
+        except GitError as e:
+            hint = f"git stash pop {ref}" if ref else "git stash pop stash@{0}"
+            self.logger.warning(
+                f"Stash pop failed (stash left intact). Retry with: {hint}. Error: {e}"
+            )
+        except Exception as e:
+            hint = f"git stash pop {ref}" if ref else "git stash pop stash@{{0}}"
+            self.logger.warning(
+                f"Stash pop failed (stash left intact). Retry with: {hint}. Error: {e}"
+            )
+
+    def stash_apply(self, ref_or_sha: str) -> None:
+        """
+        Apply a stash by stable identifier (prefer SHA).
+        Never raises; logs exact retry command.
+        """
+        try:
+            self._run(["stash", "apply", ref_or_sha])
+        except GitError as e:
+            self.logger.warning(
+                f"Stash apply failed (stash left intact). Retry with: git stash apply {ref_or_sha}. Error: {e}"
+            )
+
+    def find_stash_ref_by_sha(self, sha: str) -> str | None:
+        """
+        Find the stash@{N} ref that currently points to this SHA (if still present).
+        """
+        out = self._run(["stash", "list", "--pretty=format:%gd %H"], check=False) or ""
+        for ln in out.splitlines():
+            parts = ln.strip().split()
+            if len(parts) >= 2 and parts[1] == sha:
+                return parts[0]
+        return None
+
+    def stash_drop(self, ref: str) -> None:
+        """
+        Drop a stash entry by ref (stash@{N}). Never raises.
+        """
+        try:
+            self._run(["stash", "drop", ref])
+        except GitError as e:
+            self.logger.warning(
+                f"Stash drop failed (stash still present). Retry with: git stash drop {ref}. Error: {e}"
+            )
 
     def safe_switch(
         self,
@@ -198,10 +286,18 @@ class GitClient:
             getattr(settings, "github_bot_email", "aerith-bot@local"),
         )
 
+        # dirty = self.has_uncommitted_changes()
+        # if dirty:
+        #     self.logger.info("Uncommitted changes detected — stashing")
+        #     self.stash_push()
+
         dirty = self.has_uncommitted_changes()
+        stash_ref = None
+        stash_sha = None
+
         if dirty:
             self.logger.info("Uncommitted changes detected — stashing")
-            self.stash_push()
+            stash_ref, stash_sha = self.stash_push()
 
         # choose base/start point when creating
         base = start_point or base_branch or getattr(settings, "default_branch", "main")
@@ -225,10 +321,28 @@ class GitClient:
                     self.checkout(target_branch)
             else:
                 self.checkout(target_branch)
+
         finally:
             if dirty:
                 self.logger.info("Restoring stashed changes")
-                self.stash_pop()
+                if stash_sha:
+                    self.logger.info(f"Copy/paste restore: git stash apply {stash_sha}")
+                    self.stash_apply(stash_sha)
+
+                    ref = self.find_stash_ref_by_sha(stash_sha)
+                    if ref:
+                        self.stash_drop(ref)
+                elif stash_ref:
+                    self.logger.info(f"Copy/paste restore: git stash pop {stash_ref}")
+                    self.stash_pop(stash_ref)
+                else:
+                    self.logger.warning(
+                        "Expected a stash to restore, but stash_push returned no ref/sha; nothing restored."
+                    )
+        # finally:
+        #     if dirty:
+        #         self.logger.info("Restoring stashed changes")
+        #         self.stash_pop()
 
         # stashed = False
         # if self.has_uncommitted_changes():

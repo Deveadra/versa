@@ -409,7 +409,7 @@ class SelfImproveService:
     ) -> dict[str, Any]:
         base = (settings.github_default_branch or "main").strip()
         suffix = self._sanitize_suffix(f"{branch_label}-{int(time.time())}")
-        branch = self.pr_manager.prepare_branch(suffix, base=base)
+        branch = self.pr_manager.prepare_branch(suffix, base=base, restore_stash=False)
 
         baseline = self.scoreboard.run(mode="all", fix=False)
         self.log_gaps_from_scoreboard(baseline, source="scoreboard")

@@ -36,6 +36,8 @@ Return a JSON object with:
 }}
 
 Rules:
+- Never use "full_file" for an existing file. Only use "full_file" for new files.
+- For existing files, always use "replace_block" with a search_anchor copied exactly from the file.
 - Only modify files within the allowlist.
 - Use "full_file" ONLY for new files. For existing files, use "replace_block".
 - Keep changes small; do not exceed {max_files} files or {max_bytes} bytes total replacement.
@@ -92,6 +94,47 @@ def _parse_llm_json(raw: str) -> dict:
     return {}
 
 
+def _ask_for_proposal_json(self, *, user_prompt: str, system_prompt: str) -> tuple[str, dict]:
+    """
+    Ask the LLM for proposal JSON, retrying once if the first response isn't valid JSON.
+    Returns (raw_text, parsed_obj_dict).
+    """
+    raw1 = self.brain.ask_brain(user_prompt, system_prompt=system_prompt).strip()
+    obj1 = _parse_llm_json(raw1)
+    if obj1:
+        return raw1, obj1
+
+    # Retry with an explicit "repair" prompt (smaller, more forceful)
+    repair_prompt = f"""Your previous response was NOT valid JSON.
+
+Return ONLY a valid JSON object that matches the required schema. No commentary, no markdown fences.
+
+Schema reminder:
+{{
+  "title": "...",
+  "description": "...",
+  "changes": [
+    {{
+      "path": "relative/path.py",
+      "apply_mode": "replace_block" | "full_file",
+      "search_anchor": "...",
+      "replacement": "..."
+    }}
+  ]
+}}
+
+Previous response:
+{raw1}
+"""
+    raw2 = self.brain.ask_brain(repair_prompt, system_prompt=system_prompt).strip()
+    obj2 = _parse_llm_json(raw2)
+    if obj2:
+        return raw2, obj2
+
+    # Give back the original for logging/debugging
+    return raw1, {}
+
+
 class ProposalEngine:
     def __init__(self, repo_root: str, brain: Brain | None = None):
         self.root = Path(repo_root).resolve()
@@ -127,46 +170,6 @@ class ProposalEngine:
             return True, rp, ""
 
         return False, rp, "outside allowed prefixes"
-
-    def _ask_for_proposal_json(self, *, user_prompt: str, system_prompt: str) -> tuple[str, dict]:
-        """
-        Ask the LLM for proposal JSON, retrying once if the first response isn't valid JSON.
-        Returns (raw_text, parsed_obj_dict).
-        """
-        raw1 = self.brain.ask_brain(user_prompt, system_prompt=system_prompt).strip()
-        obj1 = _parse_llm_json(raw1)
-        if obj1:
-            return raw1, obj1
-
-        # Retry with an explicit "repair" prompt (smaller, more forceful)
-        repair_prompt = f"""Your previous response was NOT valid JSON.
-
-    Return ONLY a valid JSON object that matches the required schema. No commentary, no markdown fences.
-
-    Schema reminder:
-    {{
-    "title": "...",
-    "description": "...",
-    "changes": [
-        {{
-        "path": "relative/path.py",
-        "apply_mode": "replace_block" | "full_file",
-        "search_anchor": "...",
-        "replacement": "..."
-        }}
-    ]
-    }}
-
-    Previous response:
-    {raw1}
-    """
-        raw2 = self.brain.ask_brain(repair_prompt, system_prompt=system_prompt).strip()
-        obj2 = _parse_llm_json(raw2)
-        if obj2:
-            return raw2, obj2
-
-        # Give back the original for logging/debugging
-        return raw1, {}
 
     def safe_write(self, path: str, new_content: str) -> bool:
         """
@@ -265,10 +268,25 @@ class ProposalEngine:
 
             # ---- replace_block ----
             if not target.exists():
+                if change.path.endswith(".py") and not change.path.startswith("tests/"):
+<<<<<<< HEAD
+                    return False, "refused: new .py files must be under tests/"
                 target.write_text(replacement, encoding="utf-8")
                 logger.info(f"[apply_change] created new file {target}")
                 return True, "created new file"
+            # Deny arbitrary new source files (prevents junk like some_file.py)
 
+=======
+                    return (
+                        False,
+                        f"refused: new .py files must be under tests/ (got '{change.path}')",
+                    )
+
+                target.write_text(replacement, encoding="utf-8")
+                logger.info(f"[apply_change] created new file {target}")
+                return True, "created new file"
+                return True, "created new file"
+>>>>>>> a686f44 (Fixed early returns before speech)
             if not anchor.strip():
                 # Safety: do not allow empty-anchor rewrite of existing files
                 return False, "replace_block refused: empty anchor for existing file"
@@ -289,25 +307,75 @@ class ProposalEngine:
             logger.exception(f"[apply_change] error for {change.path}: {e}")
             return False, f"error: {e}"
 
+    def _ask_for_proposal_json(self, *, user_prompt: str, system_prompt: str) -> tuple[str, dict]:
+        """
+        Ask the LLM for proposal JSON, retrying once if the first response isn't valid JSON.
+        Returns (raw_text, parsed_obj_dict).
+        """
+        raw1 = self.brain.ask_brain(user_prompt, system_prompt=system_prompt).strip()
+        obj1 = _parse_llm_json(raw1)
+        if obj1:
+            return raw1, obj1
+
+        # Retry with an explicit "repair" prompt (smaller, more forceful)
+        repair_prompt = f"""Your previous response was NOT valid JSON.
+
+    Return ONLY a valid JSON object that matches the required schema. No commentary, no markdown fences.
+
+    Schema reminder:
+    {{
+    "title": "...",
+    "description": "...",
+    "changes": [
+        {{
+        "path": "relative/path.py",
+        "apply_mode": "replace_block" | "full_file",
+        "search_anchor": "...",
+        "replacement": "..."
+        }}
+    ]
+    }}
+
+    Previous response:
+    {raw1}
+    """
+        raw2 = self.brain.ask_brain(repair_prompt, system_prompt=system_prompt).strip()
+        obj2 = _parse_llm_json(raw2)
+        if obj2:
+            return raw2, obj2
+
+        # Give back the original for logging/debugging
+        return raw1, {}
+
     def propose(self, instruction: str, index_md: str) -> Proposal:
         sys_prompt = PROPOSAL_SYS_PROMPT.format(
             max_files=settings.proposer_max_files_per_pr,
             max_bytes=settings.proposer_max_patch_bytes,
         )
         user_prompt = f"""User request:
-{instruction}
+                        {instruction}
 
-Repository index:
-{index_md}
+                        Repository index:
+                        {index_md}
 
-Respond with strictly the JSON schema described.
-"""
-        raw = self.brain.ask_brain(user_prompt, system_prompt=sys_prompt).strip()
+<<<<<<< HEAD
+                        Respond with strictly the JSON schema described.
+                        """
+        # raw = self.brain.ask_brain(user_prompt, system_prompt=sys_prompt).strip()
         force_nonempty = getattr(settings, "proposer_force_nonempty", False)
 
-        obj = _parse_llm_json(raw)
+        raw, obj = self._ask_for_proposal_json(user_prompt=user_prompt, system_prompt=sys_prompt)
+=======
+Respond with strictly the JSON schema described.
+"""
+        raw, obj = self._ask_for_proposal_json(user_prompt=user_prompt, system_prompt=sys_prompt)
+        raw = (raw or "").strip()
+        force_nonempty = getattr(settings, "proposer_force_nonempty", False)
+
+        # obj = _parse_llm_json(raw)
+>>>>>>> a686f44 (Fixed early returns before speech)
         if not obj:
-            logger.error("LLM returned invalid JSON; wrapping into no-op change.")
+            logger.error("LLM returned invalid JSON twice; wrapping into no-op change.")
             obj = {
                 "title": f"Aerith Proposal: {instruction[:40]}",
                 "description": raw,
@@ -339,6 +407,32 @@ Respond with strictly the JSON schema described.
             for ch in obj.get("changes", [])
         ]
 
+        normalized: list[ProposedChange] = []
+        for ch in changes:
+            target = self.root / ch.path
+            if ch.apply_mode == "full_file" and target.exists():
+                # Convert to a safe block replace:
+                # anchor is the first ~15 lines of the current file (stable enough for one iteration)
+                try:
+                    original = target.read_text(encoding="utf-8", errors="ignore")
+                    anchor_lines = original.splitlines()[:15]
+                    anchor = "\n".join(anchor_lines).strip()
+                except Exception:
+                    anchor = ""
+
+                if anchor:
+                    ch.apply_mode = "replace_block"
+                    ch.search_anchor = anchor
+                    # replacement stays as the model proposed (whole file). It will replace the anchored header block only.
+                    # That *still* might not be what we want, but it converts a guaranteed-noop into a real attempt.
+                else:
+                    # If we can't build an anchor, keep it as-is (it will be refused)
+                    pass
+
+            normalized.append(ch)
+
+        changes = normalized
+
         if not changes and force_nonempty:
             changes.append(
                 ProposedChange(
@@ -355,6 +449,99 @@ Respond with strictly the JSON schema described.
             description=obj.get("description", ""),
             changes=changes,
         )
+
+    def preflight_proposal(self, proposal: Proposal) -> tuple[list[ProposedChange], list[dict]]:
+        """
+        Determine which changes are actually applicable *before* we create a branch.
+        Returns: (applicable_changes, refusals)
+        - applicable_changes: changes that should apply cleanly under current safety rules
+        - refusals: list of {"path": ..., "apply_mode": ..., "reason": ...} for each rejected change
+        """
+        applicable: list[ProposedChange] = []
+        refusals: list[dict] = []
+
+        for ch in proposal.changes:
+            try:
+                rel = (ch.path or "").strip()
+                if not rel:
+                    refusals.append(
+                        {"path": rel, "apply_mode": ch.apply_mode, "reason": "empty path"}
+                    )
+                    continue
+
+                target = (self.root / rel).resolve()
+
+                mode = getattr(ch, "apply_mode", None) or "replace_block"
+                anchor = getattr(ch, "search_anchor", None) or ""
+                replacement = ch.replacement or ""
+
+                # full_file: allowed only for new files unless explicitly enabled
+                if mode == "full_file":
+                    if target.exists() and not getattr(
+                        settings, "proposer_allow_full_file_overwrite", False
+                    ):
+                        refusals.append(
+                            {
+                                "path": rel,
+                                "apply_mode": mode,
+                                "reason": "full_file refused: overwrite disabled",
+                            }
+                        )
+                        continue
+                    if not replacement:
+                        refusals.append(
+                            {"path": rel, "apply_mode": mode, "reason": "empty replacement"}
+                        )
+                        continue
+                    applicable.append(ch)
+                    continue
+
+                # replace_block rules
+                if not target.exists():
+                    # creating a new file is fine
+                    if not replacement:
+                        refusals.append(
+                            {"path": rel, "apply_mode": mode, "reason": "empty replacement"}
+                        )
+                        continue
+                    applicable.append(ch)
+                    continue
+
+                # existing file requires non-empty anchor that exists in file
+                if not anchor.strip():
+                    refusals.append(
+                        {
+                            "path": rel,
+                            "apply_mode": mode,
+                            "reason": "replace_block refused: empty anchor",
+                        }
+                    )
+                    continue
+
+                original = target.read_text(encoding="utf-8", errors="ignore")
+                if anchor not in original:
+                    refusals.append(
+                        {
+                            "path": rel,
+                            "apply_mode": mode,
+                            "reason": "replace_block refused: anchor not found",
+                        }
+                    )
+                    continue
+
+                # would replace, so it's applicable
+                applicable.append(ch)
+
+            except Exception as e:
+                refusals.append(
+                    {
+                        "path": getattr(ch, "path", ""),
+                        "apply_mode": getattr(ch, "apply_mode", None),
+                        "reason": f"preflight error: {e}",
+                    }
+                )
+
+        return applicable, refusals
 
     def apply_proposal(self, proposal: Proposal) -> list[tuple[ProposedChange, bool, str]]:
         """

@@ -355,11 +355,12 @@ class SelfImproveService:
           - open PR
           - run tests and update PR body
         """
+        base = (settings.github_default_branch or "main").strip()
         index_md = self._index_md()
         proposal = self.proposal_engine.propose(instruction, index_md=index_md)
 
         suffix = self._sanitize_suffix(proposal.title)
-        branch = self.pr_manager.prepare_branch(suffix, base=settings.github_default_branch)
+        branch = self.pr_manager.prepare_branch(suffix, base=base)
 
         results = self.proposal_engine.apply_proposal(proposal)
         failed = [f"- {c.path}: {msg}" for (c, ok, msg) in results if not ok]
@@ -406,9 +407,9 @@ class SelfImproveService:
     def _run_unified(
         self, *, branch_label: str, cfg: SelfImproveRunConfig, extra_context: str | None = None
     ) -> dict[str, Any]:
-        base = settings.github_default_branch
+        base = (settings.github_default_branch or "main").strip()
         suffix = self._sanitize_suffix(f"{branch_label}-{int(time.time())}")
-        branch = self.pr_manager.prepare_branch(suffix, base=base)
+        branch = self.pr_manager.prepare_branch(suffix, base=base, restore_stash=False)
 
         baseline = self.scoreboard.run(mode="all", fix=False)
         self.log_gaps_from_scoreboard(baseline, source="scoreboard")

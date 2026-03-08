@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 from base.database.sqlite import SQLiteConn
 from base.utils.time import utc_now

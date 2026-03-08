@@ -1,7 +1,7 @@
 # base/utils/timeparse.py
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 
 from dateutil import parser as dateparser
 

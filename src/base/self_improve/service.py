@@ -22,7 +22,6 @@ from base.self_improve.self_improve_db import (
     fetch_open_gaps,
     insert_score_run,
     make_gap_fingerprint,
-    mark_gap_status,
     upsert_gap,
 )
 from config.config import settings

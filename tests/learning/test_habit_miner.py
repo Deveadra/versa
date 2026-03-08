@@ -1,6 +1,6 @@
 # tests/learning/test_habit_miner.py
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
 import pytest
@@ -14,15 +14,15 @@ def dummy_store():
     store.conn.execute.return_value.fetchall.return_value = [
         {
             "content": "play jazz",
-            "ts": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
+            "ts": (datetime.now(UTC) - timedelta(days=1)).isoformat(),
         },
         {
             "content": "play jazz",
-            "ts": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
+            "ts": (datetime.now(UTC) - timedelta(days=1)).isoformat(),
         },
         {
             "content": "turn on light",
-            "ts": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
+            "ts": (datetime.now(UTC) - timedelta(days=1)).isoformat(),
         },
     ]
     return store
@@ -32,10 +32,10 @@ def dummy_store():
 def dummy_db():
     db = MagicMock()
     db.conn.execute.return_value.fetchall.return_value = [
-        ["play jazz", (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()],
-        ["play jazz", (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()],
-        ["play jazz", (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()],
-        ["turn on light", (datetime.now(timezone.utc) - timedelta(days=4)).isoformat()],
+        ["play jazz", (datetime.now(UTC) - timedelta(days=1)).isoformat()],
+        ["play jazz", (datetime.now(UTC) - timedelta(days=2)).isoformat()],
+        ["play jazz", (datetime.now(UTC) - timedelta(days=3)).isoformat()],
+        ["turn on light", (datetime.now(UTC) - timedelta(days=4)).isoformat()],
     ]
     return db
 
@@ -63,7 +63,7 @@ def test_summarize_and_get_summaries(habit_miner):
 
 def test_check_upcoming(habit_miner):
     habit_miner.habits = [
-        {"action": "play jazz", "time": (datetime.now(timezone.utc) + timedelta(minutes=10)).time()}
+        {"action": "play jazz", "time": (datetime.now(UTC) + timedelta(minutes=10)).time()}
     ]
     result = habit_miner.check_upcoming()
     assert isinstance(result, list)

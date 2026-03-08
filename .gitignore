@@ -23,6 +23,11 @@ aerith.db
 aerith.db-wal
 aerith.db-shm
 
+# SQLite runtime files
+*.db
+*.db-wal
+*.db-shm
+
 # Ignore self-improve artifacts, cache and log files
 *.log
 *.cache
@@ -32,10 +37,10 @@ aerith.db-shm
 *.swp
 .aerith_index_cache.json
 
-# SQLite runtime files
-*.db
-*.db-wal
-*.db-shm
+node_modules/
+.next/
+dist/
+coverage/
 
 # tests/
 reports/

@@ -538,6 +538,11 @@ class SelfImproveService:
             )
 
             if hasattr(self.store, "add_event"):
-                self.store.add_event(content=text, importance=0.2, type_="dream_summary")
+                self.store.add_event(
+                    content=text,
+                    importance=0.2,
+                    type_="dream_summary",
+                    vector_write="sync",
+                )
         except Exception as e:
             logger.debug(f"[self-improve] dream summary event skipped: {e}")

@@ -56,7 +56,13 @@ def _validate_internal_cmd(cmd: Sequence[str]) -> list[str]:
     return out
 
 
-def _run_tool(tool: str, cwd: Path, timeout_sec: int = 600) -> tuple[int, str, str, float]:
+def _run_tool(
+    tool: str,
+    cwd: Path,
+    timeout_sec: int = 600,
+    *,
+    fix: bool = False,
+) -> tuple[int, str, str, float]:
     """
     Run only a whitelisted tool with a fixed argv structure.
     This prevents arbitrary command execution and keeps scanners satisfied.
@@ -65,9 +71,15 @@ def _run_tool(tool: str, cwd: Path, timeout_sec: int = 600) -> tuple[int, str, s
         raise ValueError(f"refused to run unknown tool: {tool}")
 
     if tool == "ruff":
-        cmd = [sys.executable, "-m", "ruff", "check", "--output-format=json", "."]
+        cmd = [sys.executable, "-m", "ruff", "check", "--output-format=json"]
+        if fix:
+            cmd.append("--fix")
+        cmd.append(".")
     elif tool == "black":
-        cmd = [sys.executable, "-m", "black", "--check", "."]
+        cmd = [sys.executable, "-m", "black"]
+        if not fix:
+            cmd.append("--check")
+        cmd.append(".")
     else:  # compileall
         cmd = [sys.executable, "-m", "compileall", "-q", "."]
 
@@ -76,8 +88,6 @@ def _run_tool(tool: str, cwd: Path, timeout_sec: int = 600) -> tuple[int, str, s
     env["PYTHONUTF8"] = "1"
 
     start = time.perf_counter()
-    # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
-    # Justification: argv is constructed internally from a strict allowlist (shell=False) and validated above.
     proc = subprocess.run(
         argv,
         cwd=str(cwd),
@@ -173,7 +183,7 @@ class ScoreboardRunner:
         results: dict[str, ToolResult] = {}
 
         # Ruff
-        rc, out, err, ms = _run_tool("ruff", self.repo, timeout_sec=600)
+        rc, out, err, ms = _run_tool("ruff", self.repo, timeout_sec=600, fix=fix)
         try:
             parsed = {"count": len(json.loads(out))} if out.strip() else {"count": 0}
         except Exception:
@@ -181,7 +191,7 @@ class ScoreboardRunner:
         results["ruff"] = ToolResult("ruff", rc, ms, _tail(out), _tail(err), parsed)
 
         # Black
-        rc, out, err, ms = _run_tool("black", self.repo, timeout_sec=600)
+        rc, out, err, ms = _run_tool("black", self.repo, timeout_sec=600, fix=fix)
         results["black"] = ToolResult("black", rc, ms, _tail(out), _tail(err), {})
 
         # Pytest (junit)

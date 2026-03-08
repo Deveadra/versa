@@ -11,6 +11,7 @@ from typing import Any
 
 from loguru import logger
 
+from base.self_improve.models import Proposal
 from base.self_improve.scoreboard import ScoreboardRunner
 from base.self_improve.self_improve_db import (
     fetch_open_gaps,
@@ -428,6 +429,10 @@ class RepoJanitorIterationController:
         improved_any = False
         pr_url: str | None = None
         best_branch: str | None = None
+        safe_autofix_only = bool(getattr(settings, "self_improve_safe_autofix_only", True))
+        allow_llm_autonomous = bool(
+            getattr(settings, "self_improve_enable_llm_autonomous_changes", False)
+        )
 
         for i in range(1, budget.max_iterations + 1):
             attempt_artifacts: dict[str, Any] = {
@@ -463,6 +468,235 @@ class RepoJanitorIterationController:
                     pr_url=None,
                     improved=False,
                     error_text="budget timeout",
+                )
+                break
+
+            if i == 1:
+                branch_name = f"repo-janitor-autofix-{int(time.time())}-it{i}"
+                branch = self.pr_manager.prepare_branch(branch_name, base=base_for_branches)
+
+                before_artifact = run_artifact_dir / f"iteration_{i:02d}_before_scoreboard.json"
+                before = self.scoreboard.run(
+                    mode="all",
+                    fix=False,
+                    artifact_path=before_artifact,
+                    context={
+                        "phase": "iteration_before_autofix",
+                        "iteration": i,
+                        "branch": branch,
+                        "attempt_type": "safe_autofix",
+                    },
+                )
+                attempt_artifacts["before"] = {
+                    "path": before.artifact_path,
+                    "relative_path": before.artifact_relpath,
+                }
+
+                before_id = insert_score_run(
+                    self.conn,
+                    run_type="iteration_before",
+                    mode="all",
+                    fix_enabled=False,
+                    git_branch=branch,
+                    git_sha=self._current_sha(),
+                    score=float(before.score()),
+                    passed=bool(before.passed()),
+                    metrics=before.to_dict(),
+                )
+
+                after_artifact = run_artifact_dir / f"iteration_{i:02d}_after_scoreboard.json"
+                after = self.scoreboard.run(
+                    mode="all",
+                    fix=True,
+                    artifact_path=after_artifact,
+                    context={
+                        "phase": "iteration_after_autofix",
+                        "iteration": i,
+                        "branch": branch,
+                        "attempt_type": "safe_autofix",
+                    },
+                )
+                attempt_artifacts["after"] = {
+                    "path": after.artifact_path,
+                    "relative_path": after.artifact_relpath,
+                }
+
+                after_id = insert_score_run(
+                    self.conn,
+                    run_type="iteration_after",
+                    mode="all",
+                    fix_enabled=True,
+                    git_branch=branch,
+                    git_sha=self._current_sha(),
+                    score=float(after.score()),
+                    passed=bool(after.passed()),
+                    metrics=after.to_dict(),
+                )
+                self._log_gaps_from_scoreboard(after, source="scoreboard")
+
+                diff_summary = self._score_delta_summary(before, after)
+                diff_summary.update(
+                    {
+                        "iteration": i,
+                        "branch": branch,
+                        "proposal_title": "Repo Janitor: safe autofix",
+                        "attempt_type": "safe_autofix",
+                        "before_artifact": before.artifact_relpath,
+                        "after_artifact": after.artifact_relpath,
+                    }
+                )
+
+                diff_path = run_artifact_dir / f"iteration_{i:02d}_diff_summary.json"
+                self._write_json(diff_path, diff_summary)
+                attempt_artifacts["diff_summary"] = {
+                    "path": str(diff_path.resolve()),
+                    "relative_path": self._artifact_relpath(diff_path),
+                }
+
+                best_gates = int(getattr(best, "gates_failing", 0))
+                after_gates = int(getattr(after, "gates_failing", 0))
+                best_score = float(best.score())
+                after_score = float(after.score())
+                eps = 1e-6
+
+                if after_gates < best_gates:
+                    is_improved = True
+                elif after_gates > best_gates:
+                    is_improved = False
+                else:
+                    is_improved = after_score > (best_score + eps)
+
+                is_improved = bool(is_improved and self._worktree_dirty())
+
+                attempt_artifacts["summary"] = self._write_attempt_summary_artifact(
+                    run_artifact_dir=run_artifact_dir,
+                    iteration=i,
+                    branch=branch,
+                    stage="safe_autofix_scored",
+                    improved=bool(is_improved),
+                    error=None if is_improved else "safe autofix made no measurable improvement",
+                    attempt_artifacts=attempt_artifacts,
+                    extra={"diff_summary": diff_summary},
+                )
+
+                attempt_row = {
+                    "iteration": i,
+                    "branch": branch,
+                    "before_score": float(before.score()),
+                    "after_score": float(after.score()),
+                    "before_gates": int(before.gates_failing),
+                    "after_gates": int(after.gates_failing),
+                    "improved": bool(is_improved),
+                    "mode": "safe_autofix",
+                    "artifacts": attempt_artifacts,
+                    "diff_summary": diff_summary,
+                }
+                attempts.append(attempt_row)
+                artifacts["attempts"].append(attempt_artifacts)
+
+                if is_improved:
+                    improved_any = True
+                    best = after
+                    best_id = after_id
+                    best_branch = branch
+
+                    safe_autofix_proposal = Proposal(
+                        title="Repo Janitor: safe autofix",
+                        description="Applied Black formatting and Ruff safe fixes.",
+                        changes=[],
+                    )
+
+                    pr_url = None
+                    if budget.open_pr_on_improvement:
+                        self.pr_manager.commit_and_push(branch, safe_autofix_proposal.title)
+                        pr_url = self.pr_manager.open_pr(
+                            branch=branch, proposal=safe_autofix_proposal
+                        )
+                        if pr_url:
+                            try:
+                                self.pr_manager.run_tests_and_update_pr(branch)
+                            except Exception:
+                                pass
+
+                    insert_improvement_attempt(
+                        self.conn,
+                        iteration=i,
+                        baseline_run_id=baseline_id,
+                        before_run_id=before_id,
+                        after_run_id=after_id,
+                        branch=branch,
+                        proposal_title=safe_autofix_proposal.title,
+                        proposal_json={
+                            "mode": "safe_autofix",
+                            "description": safe_autofix_proposal.description,
+                            "artifacts": attempt_artifacts,
+                            "diff_summary": diff_summary,
+                        },
+                        pr_url=pr_url,
+                        improved=True,
+                        error_text=None,
+                    )
+                    break
+
+                insert_improvement_attempt(
+                    self.conn,
+                    iteration=i,
+                    baseline_run_id=baseline_id,
+                    before_run_id=before_id,
+                    after_run_id=after_id,
+                    branch=branch,
+                    proposal_title="Repo Janitor: safe autofix",
+                    proposal_json={
+                        "mode": "safe_autofix",
+                        "description": "Applied Black formatting and Ruff safe fixes.",
+                        "artifacts": attempt_artifacts,
+                        "diff_summary": diff_summary,
+                    },
+                    pr_url=None,
+                    improved=False,
+                    error_text="safe autofix made no measurable improvement",
+                )
+                self._rollback_to_base(base_branch)
+
+                if safe_autofix_only and not allow_llm_autonomous:
+                    break
+
+                continue
+
+            if safe_autofix_only and not allow_llm_autonomous:
+                attempts.append(
+                    {
+                        "iteration": i,
+                        "error": "LLM autonomous changes disabled by policy after safe autofix lane",
+                        "mode": "policy_stop",
+                    }
+                )
+                attempt_artifacts["summary"] = self._write_attempt_summary_artifact(
+                    run_artifact_dir=run_artifact_dir,
+                    iteration=i,
+                    branch=base_branch,
+                    stage="policy_stop",
+                    improved=False,
+                    error="LLM autonomous changes disabled by policy after safe autofix lane",
+                    attempt_artifacts=attempt_artifacts,
+                    extra={"safe_autofix_only": True, "allow_llm_autonomous": False},
+                )
+                artifacts["attempts"].append(attempt_artifacts)
+                insert_improvement_attempt(
+                    self.conn,
+                    iteration=i,
+                    baseline_run_id=baseline_id,
+                    before_run_id=best_id,
+                    after_run_id=None,
+                    branch=base_branch,
+                    proposal_title=None,
+                    proposal_json={
+                        "mode": "policy_stop",
+                        "artifacts": attempt_artifacts,
+                    },
+                    pr_url=None,
+                    improved=False,
+                    error_text="LLM autonomous changes disabled by policy after safe autofix lane",
                 )
                 break
 

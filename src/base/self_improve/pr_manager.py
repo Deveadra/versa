@@ -29,6 +29,46 @@ class PRManager:
         self.original_branch: str | None = None
         self._pending_stash_pop: bool = False
 
+    def _github_headers(self) -> dict[str, str]:
+        headers = {
+            "Accept": "application/vnd.github+json",
+        }
+        api_version = getattr(settings, "github_api_version", None)
+        if api_version:
+            headers["X-GitHub-Api-Version"] = str(api_version)
+
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+
+        return headers
+
+    def _github_request(self, method: str, url: str, **kwargs) -> requests.Response:
+        timeout = int(getattr(settings, "github_api_timeout_sec", 20))
+        headers = kwargs.pop("headers", {}) or {}
+        merged_headers = self._github_headers()
+        merged_headers.update(headers)
+        return requests.request(
+            method,
+            url,
+            headers=merged_headers,
+            timeout=timeout,
+            **kwargs,
+        )
+
+    def _github_ready(self) -> bool:
+        if not self.repo_slug:
+            self.logger.error("GitHub repo slug is not configured.")
+            return False
+        if not self.token:
+            self.logger.error("GitHub token is not configured.")
+            return False
+        return True
+
+    def _repo_owner(self) -> str:
+        if not self.repo_slug or "/" not in self.repo_slug:
+            raise ValueError(f"Invalid github repo slug: {self.repo_slug!r}")
+        return self.repo_slug.split("/", 1)[0]
+
     def prepare_branch(
         self, branch_name: str, base: str = "main", *, restore_stash: bool = True
     ) -> str:
@@ -127,56 +167,87 @@ class PRManager:
         self.client.push(branch)
 
     def open_pr(self, branch: str, proposal: Proposal, extra_tests: str = "") -> str:
-        title = proposal.title
-        body = f"""## Summary
-            {proposal.description}
+        if not self._github_ready():
+            return ""
 
-            ## Implementation Details
-            {chr(10).join(f"- {ch.path} ({ch.apply_mode})" for ch in proposal.changes)}
+        base_branch = settings.github_default_branch
+        if not branch or branch == base_branch:
+            self.logger.error(
+                f"Refusing to open PR with invalid branch selection: head={branch!r} base={base_branch!r}"
+            )
+            return ""
 
-            ## Why This Matters
-            This change was proposed by Aerith to address: *"{title}"*
+        title = proposal.title.strip() or "Repo Janitor improvement"
+        change_lines = "\n".join(f"- {ch.path} ({ch.apply_mode})" for ch in proposal.changes)
+        if not change_lines:
+            change_lines = "- Safe automated fixes"
 
-            ## Tests / Validation
-            {extra_tests or "- ⚠️ No tests were run"}
-            """
+        body = (
+            "## Summary\n"
+            f"{proposal.description or 'Automated repository improvement.'}\n\n"
+            "## Implementation Details\n"
+            f"{change_lines}\n\n"
+            "## Why This Matters\n"
+            f'This change was proposed by Aerith to address: *"{title}"*\n\n'
+            "## Tests / Validation\n"
+            f"{extra_tests or '- ⚠️ No tests were run'}\n"
+        )
 
-        url = f"https://api.github.com/repos/{settings.github_repo}/pulls"
-        headers = {"Authorization": f"token {settings.github_token}"}
-        resp = requests.post(
+        url = f"https://api.github.com/repos/{self.repo_slug}/pulls"
+        resp = self._github_request(
+            "POST",
             url,
-            headers=headers,
             json={
                 "title": title,
                 "body": body,
                 "head": branch,
-                "base": settings.github_default_branch,
+                "base": base_branch,
             },
         )
         if resp.status_code not in (200, 201):
-            logger.error(f"Failed to open PR: {resp.text}")
+            self.logger.error(f"Failed to open PR: {resp.status_code} {resp.text}")
             return ""
+
         return resp.json().get("html_url", "")
 
     def update_pr_body(self, branch: str, extra: str) -> None:
-        url = f"https://api.github.com/repos/{settings.github_repo}/pulls"
-        headers = {"Authorization": f"token {settings.github_token}"}
-        resp = requests.get(url, headers=headers)
-        if resp.status_code != 200:
-            logger.error(f"Failed to fetch PRs: {resp.text}")
-            return
-        prs = resp.json()
-        pr = next((p for p in prs if p["head"]["ref"] == branch), None)
-        if not pr:
-            logger.error(f"No PR found for branch {branch}")
+        if not self._github_ready():
             return
 
+        try:
+            owner = self._repo_owner()
+        except ValueError as e:
+            self.logger.error(str(e))
+            return
+
+        list_url = f"https://api.github.com/repos/{self.repo_slug}/pulls"
+        resp = self._github_request(
+            "GET",
+            list_url,
+            params={
+                "state": "open",
+                "head": f"{owner}:{branch}",
+                "base": settings.github_default_branch,
+                "per_page": 1,
+            },
+        )
+        if resp.status_code != 200:
+            self.logger.error(f"Failed to fetch PRs: {resp.status_code} {resp.text}")
+            return
+
+        prs = resp.json()
+        if not prs:
+            self.logger.error(f"No open PR found for branch {branch}")
+            return
+
+        pr = prs[0]
         pr_number = pr["number"]
         new_body = (pr.get("body") or "") + "\n" + extra
-        update_url = f"{url}/{pr_number}"
-        resp2 = requests.patch(update_url, headers=headers, json={"body": new_body})
+
+        update_url = f"{list_url}/{pr_number}"
+        resp2 = self._github_request("PATCH", update_url, json={"body": new_body})
         if resp2.status_code not in (200, 201):
-            logger.error(f"Failed to update PR body: {resp2.text}")
+            self.logger.error(f"Failed to update PR body: {resp2.status_code} {resp2.text}")
 
     def run_tests_and_update_pr(self, branch: str) -> str:
         """

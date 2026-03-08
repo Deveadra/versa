@@ -117,6 +117,12 @@ class Settings(BaseModel):
     github_remote_name: str = Field(
         default_factory=lambda: os.getenv("GITHUB_REMOTE_NAME", "origin")
     )
+    github_api_timeout_sec: int = Field(
+        default_factory=lambda: _get_int("GITHUB_API_TIMEOUT_SEC", 20)
+    )
+    github_api_version: str = Field(
+        default_factory=lambda: os.getenv("GITHUB_API_VERSION", "2022-11-28")
+    )
 
     # Optional: key material from files (handy for git signing / SSH operations)
     github_ssh_key: str | None = Field(default_factory=lambda: _read_secret("GITHUB_SSH_KEY_FILE"))
@@ -151,6 +157,17 @@ class Settings(BaseModel):
     )
     proposal_notify_stdout: bool = True
     proposer_allow_full_file_overwrite: bool = False
+    proposer_allowed_prefixes: list[str] = [
+        "src/base",
+        "src/config",
+        "scripts",
+        "tests",
+        ".github/workflows",
+    ]
+    proposer_allowed_exact_paths: list[str] = [
+        "README.md",
+        "run.py",
+    ]
 
     # Qdrant vector database settings
     qdrant_url: str | None = Field(default_factory=lambda: os.getenv("QDRANT_URL"))
@@ -198,6 +215,14 @@ class Settings(BaseModel):
     )
     open_mr_on_any_fix: bool = Field(
         default_factory=lambda: _get_bool("AERITH_OPEN_MR_ON_ANY_FIX", True)
+    )
+    self_improve_safe_autofix_only: bool = Field(
+        default_factory=lambda: _get_bool("AERITH_SELF_IMPROVE_SAFE_AUTOFIX_ONLY", True)
+    )
+    self_improve_enable_llm_autonomous_changes: bool = Field(
+        default_factory=lambda: _get_bool(
+            "AERITH_SELF_IMPROVE_ENABLE_LLM_AUTONOMOUS_CHANGES", False
+        )
     )
 
     @property

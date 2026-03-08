@@ -411,15 +411,9 @@ class SelfImproveService:
         suffix = self._sanitize_suffix(f"{branch_label}-{int(time.time())}")
         branch = self.pr_manager.prepare_branch(suffix, base=base, restore_stash=False)
 
-        baseline = self.scoreboard.run(mode="all", fix=False)
-        self.log_gaps_from_scoreboard(baseline, source="scoreboard")
-
-        goal, gap_ids = self.build_goal_from_gaps(limit=cfg.gap_limit)
+        goal_hint = ""
         if extra_context and extra_context.strip():
-            goal += "\n\nDream context:\n" + extra_context.strip()[:4000]
-
-        for gid in gap_ids:
-            mark_gap_status(self.conn, gid, "in_progress")
+            goal_hint = "Dream context:\n" + extra_context.strip()[:4000]
 
         controller = RepoJanitorIterationController(
             repo_root=str(self.repo),
@@ -427,31 +421,26 @@ class SelfImproveService:
             code_indexer=self.code_indexer,
             proposal_engine=self.proposal_engine,
             policy=self._default_policy(),
-            pr_manager=self.pr_manager,  # controller can ignore if it doesn't accept this (see below)
+            pr_manager=self.pr_manager,
         )
 
-        # If controller doesn't accept pr_manager param, retry without it
         try:
-            result = controller.run(goal=goal, budget=cfg.budget)
+            result = controller.run(goal=goal_hint, budget=cfg.budget)
         except TypeError:
             controller = RepoJanitorIterationController(
                 repo_root=str(self.repo),
                 db_conn=self.db,
                 code_indexer=self.code_indexer,
                 proposal_engine=self.proposal_engine,
-                pr_manager=None,  # not all controllers will support this; it's optional
+                pr_manager=None,
                 policy=self._default_policy(),
             )
-            result = controller.run(goal=goal, budget=cfg.budget)
+            result = controller.run(goal=goal_hint, budget=cfg.budget)
 
-        final = self.scoreboard.run(mode="all", fix=False)
-        self.log_gaps_from_scoreboard(final, source="scoreboard")
-
-        pr_url = result.get("pr_url")  # respect controller-provided PR if it exists
+        pr_url = result.get("pr_url")
 
         if cfg.open_pr and result.get("improved") and not pr_url:
             try:
-                # If controller left changes uncommitted, commit+push; else just push.
                 if self._git_dirty():
                     self.pr_manager.commit_and_push(branch, f"Repo Janitor: {branch_label}")
                 else:
@@ -459,7 +448,7 @@ class SelfImproveService:
 
                 body = (
                     "Repo Janitor unified self-improvement run\n\n"
-                    f"### Goal\n{goal}\n\n"
+                    f"### Goal\n{result.get('goal', '')}\n\n"
                     f"### Baseline\nscore={result['baseline']['score']:.2f} gates={result['baseline']['gates']}\n\n"
                     f"### Best\nscore={result['best']['score']:.2f} gates={result['best']['gates']}\n\n"
                     f"Branch: `{branch}`\n"
@@ -478,22 +467,16 @@ class SelfImproveService:
             except Exception as e:
                 logger.exception(f"[self-improve] PR open failed: {e}")
 
-        if pr_url and hasattr(final, "passed") and final.passed():
-            for gid in gap_ids:
-                mark_gap_status(self.conn, gid, "fixed")
-        else:
-            for gid in gap_ids:
-                mark_gap_status(self.conn, gid, "queued")
-
         try:
             self.pr_manager.restore_original_branch()
         except Exception:
             pass
 
-        self._record_dream_summary_event(result=result, goal=goal)
-
         result["pr_url"] = pr_url
-        result["branch"] = branch
+        result["branch"] = result.get("branch") or branch
+
+        self._record_dream_summary_event(result=result, goal=result.get("goal", ""))
+
         return result
 
     def _record_dream_summary_event(self, *, result: dict[str, Any], goal: str) -> None:

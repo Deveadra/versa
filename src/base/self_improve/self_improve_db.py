@@ -147,10 +147,21 @@ def upsert_gap(
         )
         VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(fingerprint) DO UPDATE SET
-          status=excluded.status,
+          requested_capability=excluded.requested_capability,
+          classification=excluded.classification,
+          repro_steps=COALESCE(excluded.repro_steps, capability_gaps.repro_steps),
           priority=MAX(capability_gaps.priority, excluded.priority),
-          observed_failure=excluded.observed_failure,
-          metadata_json=excluded.metadata_json
+          observed_failure=COALESCE(excluded.observed_failure, capability_gaps.observed_failure),
+          metadata_json=excluded.metadata_json,
+          status=CASE
+              WHEN capability_gaps.status = 'fixed'
+                   AND excluded.status IN ('queued', 'new', 'in_progress')
+              THEN capability_gaps.status
+              WHEN capability_gaps.status = 'in_progress'
+                   AND excluded.status IN ('queued', 'new')
+              THEN capability_gaps.status
+              ELSE excluded.status
+          END
         """,
         (
             source,

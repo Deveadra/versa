@@ -6,7 +6,7 @@ import re
 import sqlite3
 import threading
 import time
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
@@ -21,7 +21,7 @@ from base.memory.vector_backend import (
     VectorBackend,
 )
 from base.utils.embeddings import get_embedder
-from base.utils.time import utc_iso, utc_now, parse_iso_utc
+from base.utils.time import parse_iso_utc, utc_iso, utc_now
 from config.config import settings  # OK where your settings live
 
 DB_PATH = Path("memory.db")

@@ -8,7 +8,7 @@ import threading
 import time
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from loguru import logger
 
@@ -276,14 +276,69 @@ class MemoryStore:
         """
         self._subscribers.append(callback)
 
+    def _store_vector_for_event(
+        self,
+        *,
+        event_id: int,
+        text: str,
+        timestamp: str,
+        importance: float,
+        type_: str,
+    ) -> None:
+        """
+        Store a single event in the configured vector backend.
+        This can be called synchronously for shutdown-safe writes or from a background thread.
+        """
+        backend = self._vector_backend
+        if backend is None:
+            return
+
+        metadata = {
+            "timestamp": int(parse_iso_utc(timestamp).timestamp()),
+            "ts_iso": timestamp,
+            "importance": float(importance),
+            "type": type_,
+        }
+
+        attempts = 0
+        while attempts < 3:
+            try:
+                backend.add_text(text, vector_id=event_id, metadata=metadata)
+                logger.info(f"MemoryStore: Event {event_id} embedded and stored in vector DB.")
+                return
+            except Exception as e:
+                attempts += 1
+                if attempts < 3:
+                    logger.warning(
+                        f"MemoryStore: Embedding attempt {attempts} failed for event {event_id}: {e}. Retrying..."
+                    )
+                    time.sleep(1.0 * attempts)
+                else:
+                    logger.error(
+                        f"MemoryStore: Failed to embed event {event_id} after {attempts} attempts: {e}"
+                    )
+
     # ---------- events ----------
-    def add_event(self, content: str, importance: float = 0.0, type_: str = "event") -> int:
+
+    def add_event(
+        self,
+        content: str,
+        importance: float = 0.0,
+        type_: str = "event",
+        *,
+        vector_write: Literal["async", "sync", "off"] = "async",
+    ) -> int:
         """
-        Add a new event (memory) to the store.
-        This stores the content and metadata in the SQLite DB and triggers an asynchronous embedding
-        to store the vector in the vector database (if configured).
-        Returns the new event's ID.
+        Add a new event to the store.
+
+        vector_write controls how semantic/vector storage happens:
+        - "async": default behavior for normal runtime writes
+        - "sync": shutdown-safe write for short-lived scripts/system events
+        - "off": skip vector storage entirely
         """
+        if vector_write not in {"async", "sync", "off"}:
+            raise ValueError(f"Invalid vector_write mode: {vector_write!r}")
+
         ts = utc_iso()
         cur = self.conn.execute(
             "INSERT INTO events(content, ts, importance, type) VALUES(?, ?, ?, ?)",
@@ -293,84 +348,145 @@ class MemoryStore:
         if rowid is None:
             raise RuntimeError("Failed to insert event: lastrowid is None")
 
-        # If FTS indexing is enabled, index this content for keyword search
-        if self._fts_enabled:
-            try:
-                self.conn.execute(
-                    "INSERT INTO events_fts(rowid, content) VALUES(?, ?)",
-                    (rowid, content),
-                )
-            except sqlite3.OperationalError:
-                # FTS table might be unavailable; disable FTS to avoid further errors
-                self._fts_enabled = False
-
+        # FTS indexing is owned by SQLite triggers created in _ensure_schema().
         self.conn.commit()
 
-        # Notify any subscribers about the new event (synchronous callbacks)
         for cb in self._subscribers:
             try:
                 cb(content=content, ts=ts, type_=type_, importance=importance)
             except Exception as err:
                 logger.error(f"MemoryStore: subscriber callback failed: {err}")
 
-        # Asynchronously embed and store the vector for semantic search (non-blocking)
-        backend = self._vector_backend
-        if backend is not None:
+        if self._vector_backend is None or vector_write == "off":
+            return int(rowid)
 
-            def _embed_and_store_vector(
-                event_id: int, text: str, timestamp: str, importance_val: float, type_val: str
-            ):
-                """
-                Background task: generate embedding and store in vector DB.
-                """
-                try:
-                    # Prepare metadata payload for vector (timestamp as numeric, importance, type, and ISO string)
-                    # Use epoch seconds for timestamp to enable range filtering
-                    ts_dt = datetime.fromisoformat(timestamp)  # parse to datetime
-                    ts_epoch = int(ts_dt.timestamp())
-                    metadata = {
-                        "timestamp": ts_epoch,
-                        "ts_iso": timestamp,
-                        "importance": importance_val,
-                        "type": type_val,
-                    }
-                    # Use QdrantMemoryBackend's add_text to insert vector with given ID and metadata
-                    # Retry logic for embedding API call (e.g., OpenAI) in case of transient failures
-                    attempts = 0
-                    while attempts < 3:
-                        try:
-                            backend.add_text(text, vector_id=event_id, metadata=metadata)
-                            logger.info(
-                                f"MemoryStore: Event {event_id} embedded and stored in vector DB."
-                            )
-                            break  # success
-                        except Exception as e:
-                            attempts += 1
-                            if attempts < 3:
-                                logger.warning(
-                                    f"MemoryStore: Embedding attempt {attempts} failed for event {event_id}: {e}. Retrying..."
-                                )
-                                time.sleep(1.0 * attempts)  # exponential backoff delay
-                            else:
-                                logger.error(
-                                    f"MemoryStore: Failed to embed event {event_id} after {attempts} attempts: {e}"
-                                )
-                except Exception as e:
-                    logger.error(
-                        f"MemoryStore: Unexpected error in vector embedding thread for event {event_id}: {e}"
-                    )
-
-            # Launch the embedding thread (daemon so it won't block program exit)
-            t = threading.Thread(
-                target=_embed_and_store_vector,
-                args=(int(rowid), content, ts, importance, type_),
-                daemon=True,
+        if vector_write == "sync":
+            self._store_vector_for_event(
+                event_id=int(rowid),
+                text=content,
+                timestamp=ts,
+                importance=importance,
+                type_=type_,
             )
-            with self._bg_threads_lock:
-                self._bg_threads.append(t)
-            t.start()
+            return int(rowid)
+
+        def _embed_async() -> None:
+            try:
+                self._store_vector_for_event(
+                    event_id=int(rowid),
+                    text=content,
+                    timestamp=ts,
+                    importance=importance,
+                    type_=type_,
+                )
+            finally:
+                current = threading.current_thread()
+                with self._bg_threads_lock:
+                    self._bg_threads = [
+                        t for t in self._bg_threads if t is not current and t.is_alive()
+                    ]
+
+        t = threading.Thread(target=_embed_async, daemon=True)
+        with self._bg_threads_lock:
+            self._bg_threads.append(t)
+        t.start()
 
         return int(rowid)
+
+    # def add_event(self, content: str, importance: float = 0.0, type_: str = "event") -> int:
+    #     """
+    #     Add a new event (memory) to the store.
+    #     This stores the content and metadata in the SQLite DB and triggers an asynchronous embedding
+    #     to store the vector in the vector database (if configured).
+    #     Returns the new event's ID.
+    #     """
+    #     ts = utc_iso()
+    #     cur = self.conn.execute(
+    #         "INSERT INTO events(content, ts, importance, type) VALUES(?, ?, ?, ?)",
+    #         (content, ts, importance, type_),
+    #     )
+    #     rowid = cur.lastrowid
+    #     if rowid is None:
+    #         raise RuntimeError("Failed to insert event: lastrowid is None")
+
+    #     # If FTS indexing is enabled, index this content for keyword search
+    #     if self._fts_enabled:
+    #         try:
+    #             self.conn.execute(
+    #                 "INSERT INTO events_fts(rowid, content) VALUES(?, ?)",
+    #                 (rowid, content),
+    #             )
+    #         except sqlite3.OperationalError:
+    #             # FTS table might be unavailable; disable FTS to avoid further errors
+    #             self._fts_enabled = False
+
+    #     self.conn.commit()
+
+    #     # Notify any subscribers about the new event (synchronous callbacks)
+    #     for cb in self._subscribers:
+    #         try:
+    #             cb(content=content, ts=ts, type_=type_, importance=importance)
+    #         except Exception as err:
+    #             logger.error(f"MemoryStore: subscriber callback failed: {err}")
+
+    #     # Asynchronously embed and store the vector for semantic search (non-blocking)
+    #     backend = self._vector_backend
+    #     if backend is not None:
+
+    #         def _embed_and_store_vector(
+    #             event_id: int, text: str, timestamp: str, importance_val: float, type_val: str
+    #         ):
+    #             """
+    #             Background task: generate embedding and store in vector DB.
+    #             """
+    #             try:
+    #                 # Prepare metadata payload for vector (timestamp as numeric, importance, type, and ISO string)
+    #                 # Use epoch seconds for timestamp to enable range filtering
+    #                 ts_dt = datetime.fromisoformat(timestamp)  # parse to datetime
+    #                 ts_epoch = int(ts_dt.timestamp())
+    #                 metadata = {
+    #                     "timestamp": ts_epoch,
+    #                     "ts_iso": timestamp,
+    #                     "importance": importance_val,
+    #                     "type": type_val,
+    #                 }
+    #                 # Use QdrantMemoryBackend's add_text to insert vector with given ID and metadata
+    #                 # Retry logic for embedding API call (e.g., OpenAI) in case of transient failures
+    #                 attempts = 0
+    #                 while attempts < 3:
+    #                     try:
+    #                         backend.add_text(text, vector_id=event_id, metadata=metadata)
+    #                         logger.info(
+    #                             f"MemoryStore: Event {event_id} embedded and stored in vector DB."
+    #                         )
+    #                         break  # success
+    #                     except Exception as e:
+    #                         attempts += 1
+    #                         if attempts < 3:
+    #                             logger.warning(
+    #                                 f"MemoryStore: Embedding attempt {attempts} failed for event {event_id}: {e}. Retrying..."
+    #                             )
+    #                             time.sleep(1.0 * attempts)  # exponential backoff delay
+    #                         else:
+    #                             logger.error(
+    #                                 f"MemoryStore: Failed to embed event {event_id} after {attempts} attempts: {e}"
+    #                             )
+    #             except Exception as e:
+    #                 logger.error(
+    #                     f"MemoryStore: Unexpected error in vector embedding thread for event {event_id}: {e}"
+    #                 )
+
+    #         # Launch the embedding thread (daemon so it won't block program exit)
+    #         t = threading.Thread(
+    #             target=_embed_and_store_vector,
+    #             args=(int(rowid), content, ts, importance, type_),
+    #             daemon=True,
+    #         )
+    #         with self._bg_threads_lock:
+    #             self._bg_threads.append(t)
+    #         t.start()
+
+    #     return int(rowid)
 
     def wait_for_background_tasks(self, timeout: float = 5.0) -> None:
         """
@@ -643,6 +759,7 @@ class MemoryStore:
                 content=json.dumps(payload, ensure_ascii=False),
                 importance=0.0,
                 type_="diagnostic",
+                vector_write="off",
             )
         except Exception:
             # Graceful fallback: don't crash the run; keep an audit trail.

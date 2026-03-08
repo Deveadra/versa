@@ -269,24 +269,15 @@ class ProposalEngine:
             # ---- replace_block ----
             if not target.exists():
                 if change.path.endswith(".py") and not change.path.startswith("tests/"):
-<<<<<<< HEAD
-                    return False, "refused: new .py files must be under tests/"
-                target.write_text(replacement, encoding="utf-8")
-                logger.info(f"[apply_change] created new file {target}")
-                return True, "created new file"
-            # Deny arbitrary new source files (prevents junk like some_file.py)
-
-=======
                     return (
                         False,
                         f"refused: new .py files must be under tests/ (got '{change.path}')",
                     )
-
                 target.write_text(replacement, encoding="utf-8")
                 logger.info(f"[apply_change] created new file {target}")
                 return True, "created new file"
-                return True, "created new file"
->>>>>>> a686f44 (Fixed early returns before speech)
+
+            # Deny arbitrary new source files (prevents junk like some_file.py)
             if not anchor.strip():
                 # Safety: do not allow empty-anchor rewrite of existing files
                 return False, "replace_block refused: empty anchor for existing file"
@@ -358,22 +349,15 @@ class ProposalEngine:
                         Repository index:
                         {index_md}
 
-<<<<<<< HEAD
                         Respond with strictly the JSON schema described.
                         """
         # raw = self.brain.ask_brain(user_prompt, system_prompt=sys_prompt).strip()
         force_nonempty = getattr(settings, "proposer_force_nonempty", False)
-
-        raw, obj = self._ask_for_proposal_json(user_prompt=user_prompt, system_prompt=sys_prompt)
-=======
-Respond with strictly the JSON schema described.
-"""
         raw, obj = self._ask_for_proposal_json(user_prompt=user_prompt, system_prompt=sys_prompt)
         raw = (raw or "").strip()
         force_nonempty = getattr(settings, "proposer_force_nonempty", False)
 
         # obj = _parse_llm_json(raw)
->>>>>>> a686f44 (Fixed early returns before speech)
         if not obj:
             logger.error("LLM returned invalid JSON twice; wrapping into no-op change.")
             obj = {

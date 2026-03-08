@@ -29,13 +29,9 @@ class PRManager:
         self.original_branch: str | None = None
         self._pending_stash_pop: bool = False
 
-<<<<<<< HEAD
     def prepare_branch(
         self, branch_name: str, base: str = "main", *, restore_stash: bool = True
     ) -> str:
-=======
-    def prepare_branch(self, branch_name: str, base: str = "main", *, restore_stash: bool = True) -> str:
->>>>>>> a686f44 (Fixed early returns before speech)
         """
         Create/switch to a fresh proposal branch safely.
         - Stash uncommitted local changes (if any) and restore afterward.
@@ -100,7 +96,6 @@ class PRManager:
             return final
 
         finally:
-<<<<<<< HEAD
             pass
             # if stashed and restore_stash:
             #     # `stash pop` can fail if conflicts; if so, just leave the stash
@@ -109,13 +104,15 @@ class PRManager:
             #     #     self.logger.warning(f"Stash pop had conflicts; leaving stash in place: {err.strip()}")
             #     self.git.stash_pop()
             #     self._pending_stash_pop = False
-=======
             if stashed:
                 if restore_stash:
-                    self.logger.info("Stashed local changes; will restore when returning to original branch.")
+                    self.logger.info(
+                        "Stashed local changes; will restore when returning to original branch."
+                    )
                 else:
-                    self.logger.info("Stashed local changes; restore_stash=False so leaving stash in place.")
->>>>>>> a686f44 (Fixed early returns before speech)
+                    self.logger.info(
+                        "Stashed local changes; restore_stash=False so leaving stash in place."
+                    )
 
     def commit_and_push(self, branch: str, title: str) -> None:
         self.client.ensure_user(settings.github_bot_name, settings.github_bot_email)
@@ -206,7 +203,6 @@ class PRManager:
         self.update_pr_body(branch, body_append)
         return test_report
 
-<<<<<<< HEAD
     def restore_original_branch(self) -> None:
         """Switch back to the branch the user was on and deterministically restore any autosaved stash."""
         if not self.original_branch:
@@ -257,22 +253,21 @@ class PRManager:
         self._autosave_stash_ref = None
         self._autosave_stash_sha = None
         self._pending_stash_pop = False
-=======
-    def restore_original_branch(self):
-        """Switch back to the branch the user was on."""
-        if self.original_branch:
-            try:
-                self.client.safe_switch(self.original_branch)
-                logger.info(f"Restored user branch: {self.original_branch}")
 
-                if self._pending_stash_pop:
-                    try:
-                        self.git.stash_pop()
-                        self.logger.info("Restored autosave stash")
-                    except Exception as e:
-                        self.logger.warning(f"Failed to pop autosave stash; leaving it in place: {e}")
-                    finally:
-                        self._pending_stash_pop = False
-            except Exception as e:
-                logger.error(f"Failed to restore branch: {e}")
->>>>>>> a686f44 (Fixed early returns before speech)
+    # def restore_original_branch(self):
+    #     """Switch back to the branch the user was on."""
+    #     if self.original_branch:
+    #         try:
+    #             self.client.safe_switch(self.original_branch)
+    #             logger.info(f"Restored user branch: {self.original_branch}")
+
+    #             if self._pending_stash_pop:
+    #                 try:
+    #                     self.git.stash_pop()
+    #                     self.logger.info("Restored autosave stash")
+    #                 except Exception as e:
+    #                     self.logger.warning(f"Failed to pop autosave stash; leaving it in place: {e}")
+    #                 finally:
+    #                     self._pending_stash_pop = False
+    #         except Exception as e:
+    #             logger.error(f"Failed to restore branch: {e}")

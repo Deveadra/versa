@@ -21,17 +21,17 @@ from config.config import settings
 from ..core.core import PERSONALITIES, messages
 
 # ---------- OpenAI client / model ----------
-# _openai_client = OpenAI()
-_CLIENT = OpenAI(api_key=settings.openai_api_key)  # new SDK
+_CLIENT = OpenAI(api_key=settings.openai_api_key)
 _MODEL = settings.openai_model or os.getenv("BRAIN_MODEL", "gpt-4o-mini")
-
-# complete = cast(OpenAI, _CLIENT).chat.completions.create
 
 
 def _check_vocal_cue(user_text: str) -> str | None:
     lowered = user_text.lower()
-    if lowered.startswith(settings.wake_word.lower()):
-        for phrase, command in settings.wake_commands.items():
+    wake_word = getattr(settings, "wake_word", "").lower()
+    wake_commands = getattr(settings, "wake_commands", {})
+
+    if wake_word and lowered.startswith(wake_word):
+        for phrase, command in wake_commands.items():
             if phrase in lowered:
                 return command
     return None
@@ -43,248 +43,121 @@ class Brain:
         self.model = model or _MODEL
         self.voice = Voice.get_instance()
 
-    _openai_client = OpenAI()
-
-    # -------- persona -----------
-    def auto_set_personality(self, user_text: str) -> None:
-        global CURRENT_PERSONALITY, JARVIS_PROMPT
-        lowered = user_text.lower()
-        if any(w in lowered for w in ["cpu", "memory", "system", "process"]):
-            CURRENT_PERSONALITY = PERSONALITIES["sarcastic"]
-        elif any(w in lowered for w in ["email", "calendar", "meeting", "schedule"]):
-            CURRENT_PERSONALITY = PERSONALITIES["formal"]
+    # ---------- helpers ----------
+    def _set_system_prompt(self, prompt: str) -> None:
+        if messages and messages[0].get("role") == "system":
+            messages[0]["content"] = prompt
         else:
-            CURRENT_PERSONALITY = PERSONALITIES["default"]
-        JARVIS_PROMPT = CURRENT_PERSONALITY["prompt"]
+            messages.insert(0, {"role": "system", "content": prompt})
 
-    # -------- ask (text or json) -----------
-    def ask_brain(
-<<<<<<< HEAD
-        self, prompt: str, system_prompt: str | None = None, response_format: str = "text"
-    ) -> str:
-        """
-        Send a prompt to OpenAI. Supports text or JSON output.
-        """
-
-        _openai_client = OpenAI()
+    def _speak_async(self, text: str) -> None:
+        if not text or not getattr(settings, "auto_speak", False):
+            return
 
         try:
-            messages = []
-            if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
-            if response_format == "json":
-                messages.append({"role": "system", "content": "Respond ONLY in strict JSON."})
-            messages.append({"role": "user", "content": prompt})
-=======
-    self, prompt: str, system_prompt: str | None = None, response_format: str = "text"
-) -> str:
-    """
-    Send a prompt to OpenAI. Supports text or JSON output.
-    """
-    try:
-        msg_list: list[dict[str, str]] = []
-        if system_prompt:
-            msg_list.append({"role": "system", "content": system_prompt})
-        if response_format == "json":
-            msg_list.append({"role": "system", "content": "Respond ONLY in strict JSON."})
-        msg_list.append({"role": "user", "content": prompt})
->>>>>>> a686f44 (Fixed early returns before speech)
+            speak_async = getattr(self.voice, "speak_async", None)
+            if callable(speak_async):
+                speak_async(text)
+            else:
+                stream_speak(text)
+        except Exception:
+            logger.exception("auto_speak failed")
 
-        # vocal cue handling (before speaking)
-        command = _check_vocal_cue(prompt)
-        if command == "disable_speak":
-            settings.auto_speak = False
-            return "Understood. I’ll stop speaking and switch to text."
-        if command == "enable_speak":
-            settings.auto_speak = True
-            return "Voice enabled again."
+    # ---------- persona ----------
+    def auto_set_personality(self, user_text: str) -> None:
+        lowered = user_text.lower()
 
-        completion = self.client.chat.completions.create(
-            model=self.model,
-            messages=cast(list[ChatCompletionMessageParam], msg_list),
-            temperature=0.6,
-        )
+        if any(word in lowered for word in ("cpu", "memory", "system", "process")):
+            personality = PERSONALITIES["sarcastic"]
+        elif any(word in lowered for word in ("email", "calendar", "meeting", "schedule")):
+            personality = PERSONALITIES["formal"]
+        else:
+            personality = PERSONALITIES["default"]
 
-        reply = (completion.choices[0].message.content or "").strip()
+        self._set_system_prompt(personality["prompt"])
 
-<<<<<<< HEAD
-            # vocal cue handling
+    # ---------- ask (text or json) ----------
+    def ask_brain(
+        self,
+        prompt: str,
+        system_prompt: str | None = None,
+        response_format: str = "text",
+    ) -> str:
+        """
+        Send a prompt to OpenAI. Supports plain text replies and JSON-only replies.
+        """
+        try:
+            # Voice toggle commands should happen before the API call.
             command = _check_vocal_cue(prompt)
             if command == "disable_speak":
                 settings.auto_speak = False
                 return "Understood. I’ll stop speaking and switch to text."
-            elif command == "enable_speak":
+            if command == "enable_speak":
                 settings.auto_speak = True
                 return "Voice enabled again."
 
-            kwargs = {}
-            if response_format is not None:
-                kwargs["response_format"] = response_format
+            msg_list: list[dict[str, str]] = []
 
-            completion = _openai_client.chat.completions.create(
-                model=getattr(settings, "openai_model", "gpt-4o-mini"),
-                messages=messages,
-                temperature=getattr(settings, "openai_temperature", 0.2),
-                **kwargs,
+            if system_prompt:
+                msg_list.append({"role": "system", "content": system_prompt})
+            elif messages and messages[0].get("role") == "system":
+                msg_list.append(
+                    {
+                        "role": "system",
+                        "content": str(messages[0].get("content", "")),
+                    }
+                )
+
+            if response_format == "json":
+                msg_list.append({"role": "system", "content": "Respond ONLY in strict JSON."})
+
+            msg_list.append({"role": "user", "content": prompt})
+
+            completion = self.client.chat.completions.create(
+                model=self.model,
+                messages=cast(list[ChatCompletionMessageParam], msg_list),
+                temperature=0.6,
             )
-            return completion.choices[0].message.content or ""
 
-            # auto-speak if enabled
-            if settings.auto_speak:
-                self.voice.speak_async(reply)
+            reply = (completion.choices[0].message.content or "").strip()
 
-            # brain.py
-            if getattr(settings, "auto_speak", False) and hasattr(self, "voice"):
-=======
-        # auto-speak if enabled
-        if getattr(settings, "auto_speak", False) and reply:
-            try:
->>>>>>> a686f44 (Fixed early returns before speech)
-                speak_async = getattr(self.voice, "speak_async", None)
-                if callable(speak_async):
-                    speak_async(reply)
-            except Exception:
-                logger.exception("auto_speak failed")
+            if reply:
+                self._speak_async(reply)
 
-        return reply
+            return reply or "Okay."
 
-    except Exception as e:
-        logger.exception(f"[ask_brain error] {e}")
-        return "Sorry, I couldn’t process that."
+        except Exception as e:
+            logger.exception(f"[ask_brain error] {e}")
+            return "Sorry, I couldn’t process that."
 
-    # -------- streaming ask with TTS -----------
-    # def ask_aerith_stream(self, user_text: str) -> str:
-    #     import time
-    #     from loguru import logger
-
-    #     self.auto_set_personality(user_text)
-
-    #     # Quick plugin dispatch
-    #     for name, fn in PLUGINS.items():
-    #         if name in user_text.lower():
-    #             return fn()
-
-    #     # Voice toggle commands
-    #     command = _check_vocal_cue(user_text)
-    #     if command == "disable_speak":
-    #         settings.auto_speak = False
-    #         return "Understood. I’ll stop speaking and switch to text."
-    #     elif command == "enable_speak":
-    #         settings.auto_speak = True
-    #         return "Voice enabled again."
-
-    #     # Validate and sanitize conversation history
-    #     safe_messages = []
-    #     for m in messages:
-    #         if not m.get("content"):
-    #             logger.warning(f"Removed empty message from history: {m}")
-    #             continue
-    #         safe_messages.append(m)
-
-    #     if not safe_messages or safe_messages[0]["role"] != "system":
-    #         system_prompt = messages[0].get("content", PERSONALITIES["default"]["prompt"])
-    #         safe_messages.insert(0, {"role": "system", "content": system_prompt})
-
-    #     # Context trimming
-    #     MAX_PAIRS = 10
-    #     placeholder = {"role": "system", "content": "[Previous conversation truncated]"}
-    #     placeholder_present = len(safe_messages) > 1 and "truncated" in safe_messages[1]["content"]
-
-    #     while len(safe_messages) - 1 > 2 * MAX_PAIRS:
-    #         if placeholder_present:
-    #             safe_messages.pop(2); safe_messages.pop(2)
-    #         else:
-    #             safe_messages.pop(1); safe_messages.pop(1)
-    #             safe_messages.insert(1, placeholder)
-    #             placeholder_present = True
-
-    #     # API call with retry logic
-    #     user_msg = {"role": "user", "content": user_text}
-    #     payload = safe_messages + [user_msg]
-
-    #     try:
-    #         stream = self.client.chat.completions.create(
-    #             model=self.model,
-    #             messages=payload,
-    #             temperature=0.6,
-    #             stream=True,
-    #         )
-    #     except Exception as e:
-    #         logger.error(f"LLM error: {e}, retrying once...")
-    #         time.sleep(2)
-    #         try:
-    #             stream = self.client.chat.completions.create(
-    #                 model=self.model,
-    #                 messages=payload,
-    #                 temperature=0.6,
-    #                 stream=True,
-    #             )
-    #         except Exception as e2:
-    #             logger.error(f"Retry failed: {e2}")
-    #             if settings.auto_speak:
-    #                 stream_speak("I'm sorry, I couldn’t process that.")
-    #             return None
-
-    #     # Streaming and buffering
-    #     full_reply = ""
-    #     buffer = ""
-    #     error_happened = False
-
-    #     try:
-    #         for chunk in stream:
-    #             for choice in chunk.choices:
-    #                 token = choice.delta.content or ""
-    #                 if not token:
-    #                     continue
-    #                 full_reply += token
-    #                 buffer += token
-    #                 if token.endswith(('.', '?', '!')):
-    #                     stream_speak(buffer.strip())
-    #                     buffer = ""
-    #     except Exception as err:
-    #         error_happened = True
-    #         logger.error(f"Stream interrupted: {err}")
-
-    #     if buffer:
-    #         stream_speak(buffer.strip())
-
-    #     full_reply = full_reply.strip()
-
-    #     if error_happened:
-    #         if full_reply and settings.auto_speak:
-    #             stream_speak("Sorry, I lost connection.")
-    #         elif not full_reply and settings.auto_speak:
-    #             stream_speak("I'm sorry, I couldn't process that.")
-    #         return None
-
-    #     # Update global history
-    #     messages.clear()
-    #     messages.extend(safe_messages)
-    #     messages.append(user_msg)
-    #     messages.append({"role": "assistant", "content": full_reply})
-
-    #     return full_reply
-
+    # ---------- streaming ask with TTS ----------
     def ask_aerith_stream(self, user_text: str) -> str:
-        from loguru import logger
-
-        self.auto_set_personality(user_text)
-
-        # Add user message
-        messages.append({"role": "user", "content": user_text})
-
-        # Filter last N user/assistant turns, and enforce system prompt
-        safe_messages = [m for m in messages if m.get("role") in ("user", "assistant")][-10:]
-
-        if not safe_messages or safe_messages[0]["role"] != "system":
-            system_prompt = PERSONALITIES["default"]["prompt"]
-            safe_messages.insert(0, {"role": "system", "content": system_prompt})
-
-        typed_msgs: list[ChatCompletionMessageParam] = cast(
-            list[ChatCompletionMessageParam], safe_messages
-        )
-
         try:
+            self.auto_set_personality(user_text)
+
+            # Voice toggle commands should happen before the API call.
+            command = _check_vocal_cue(user_text)
+            if command == "disable_speak":
+                settings.auto_speak = False
+                return "Understood. I’ll stop speaking and switch to text."
+            if command == "enable_speak":
+                settings.auto_speak = True
+                return "Voice enabled again."
+
+            # Ensure a system prompt exists and gather recent conversation history.
+            system_message = (
+                messages[0]
+                if messages and messages[0].get("role") == "system"
+                else {"role": "system", "content": PERSONALITIES["default"]["prompt"]}
+            )
+
+            recent_history = [
+                m for m in messages if m.get("role") in ("user", "assistant") and m.get("content")
+            ][-10:]
+
+            payload = [system_message, *recent_history, {"role": "user", "content": user_text}]
+            typed_msgs = cast(list[ChatCompletionMessageParam], payload)
+
             stream = self.client.chat.completions.create(
                 model=self.model,
                 messages=typed_msgs,
@@ -292,70 +165,52 @@ class Brain:
                 stream=True,
             )
 
-            reply_accum = ""
+            full_reply = ""
+            speech_buffer = ""
+
             for chunk in stream:
                 for choice in chunk.choices:
                     token = choice.delta.content or ""
                     if not token:
                         continue
-                    reply_accum += token
-                    if token.endswith((".", "?", "!")):
-                        stream_speak(reply_accum.strip())
-                        reply_accum = ""
 
-            if reply_accum:
-                stream_speak(reply_accum.strip())
-                messages.append({"role": "assistant", "content": reply_accum})
+                    full_reply += token
+                    speech_buffer += token
 
-            return reply_accum.strip() or "Okay."
+                    if getattr(settings, "auto_speak", False) and token.endswith((".", "?", "!")):
+                        stream_speak(speech_buffer.strip())
+                        speech_buffer = ""
+
+            if speech_buffer and getattr(settings, "auto_speak", False):
+                stream_speak(speech_buffer.strip())
+
+            full_reply = full_reply.strip()
+
+            messages.append({"role": "user", "content": user_text})
+            if full_reply:
+                messages.append({"role": "assistant", "content": full_reply})
+
+            return full_reply or "Okay."
+
         except Exception as e:
             logger.error(f"[stream error] {e}")
             return "Something went wrong during streaming."
-
-    # def ask_aerith_stream(self, user_text: str) -> str:
-    #     self.auto_set_personality(user_text)
-
-    #     # quick plugin dispatch
-    #     for name, fn in PLUGINS.items():
-    #         if name in user_text.lower():
-    #             return fn()
-
-    #     messages.append({"role": "user", "content": user_text})
-    #     typed_msgs: list[ChatCompletionMessageParam] = cast(
-    #         list[ChatCompletionMessageParam], messages
-    #     )
-
-    #     stream = self.client.chat.completions.create(
-    #         model=self.model,
-    #         messages=typed_msgs,
-    #         temperature=0.6,
-    #         stream=True,
-    #     )
-
-    #     reply_accum = ""
-    #     for chunk in stream:
-    #         for choice in chunk.choices:
-    #             token = choice.delta.content or ""
-    #             if not token:
-    #                 continue
-    #             reply_accum += token
-    #             if token.endswith((".", "?", "!")):
-    #                 stream_speak(reply_accum.strip())
-    #                 reply_accum = ""
-
-    #     if reply_accum:
-    #         stream_speak(reply_accum.strip())
-    #         messages.append({"role": "assistant", "content": reply_accum})
-
-    #     return reply_accum
 
 
 # ---------- Singleton + module-level wrappers ----------
 _brain = Brain()
 
 
-def ask_brain(prompt: str, system_prompt: str | None = None, response_format: str = "text") -> str:
-    return _brain.ask_brain(prompt, system_prompt=system_prompt, response_format=response_format)
+def ask_brain(
+    prompt: str,
+    system_prompt: str | None = None,
+    response_format: str = "text",
+) -> str:
+    return _brain.ask_brain(
+        prompt,
+        system_prompt=system_prompt,
+        response_format=response_format,
+    )
 
 
 def ask_aerith_stream(user_text: str) -> str:

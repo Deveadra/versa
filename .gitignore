@@ -54,3 +54,9 @@ token*.pickle
 
 # Random files
 md.md
+# Phase 0 monorepo additions
+node_modules/
+.next/
+.turbo/
+coverage/
+*.tsbuildinfo

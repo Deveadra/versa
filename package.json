@@ -1,0 +1,30 @@
+{
+  "name": "versa",
+  "private": true,
+  "packageManager": "pnpm@9.12.3",
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "format": "prettier --check .",
+    "format:write": "prettier --write .",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "db:migrate": "pnpm --filter @versa/database migrate",
+    "db:seed": "pnpm --filter @versa/database seed",
+    "db:reset": "pnpm --filter @versa/database reset"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "eslint": "^9.22.0",
+    "prettier": "^3.5.3",
+    "turbo": "^2.4.4",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.9",
+    "@eslint/js": "^9.22.0",
+    "@types/express": "^5.0.1",
+    "@types/cors": "^2.8.17",
+    "@types/better-sqlite3": "^7.6.13"
+  }
+}

@@ -1,56 +1,18 @@
-.coverage
+node_modules/
+.next/
+dist/
+coverage/
+
 .venv/
-.venv.bak/
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
-.github/
-.vscode/
-pyrightconfig.json
 
-# build / packaging artifacts
-*.egg-info/
-dist/
-build/
-__pycache__/
-.aerith/
-
-src/aerith_mvp.egg-info/*
-
-# Ignore runtime DB files
-aerith.db
-aerith.db-wal
-aerith.db-shm
-
-# Ignore self-improve artifacts, cache and log files
-*.log
-*.cache
-*.tmp
-*.bak
-*.backup
-*.swp
-.aerith_index_cache.json
-
-# SQLite runtime files
 *.db
 *.db-wal
 *.db-shm
 
-# tests/
-reports/
-*reports/
-base/agents/orchestrator1.py
-orchestrator_feedback.patch
-apply_orchestrator_feedback.py
-base/agents/orchestrator.py.bak
-protect-main.sh
-
-# Secrets
-/.env/
 .env
-config/client_secret_*.json
-token*.pickle
 
-# Random files
-md.md
+*.log
+*.tmp
+*.bak

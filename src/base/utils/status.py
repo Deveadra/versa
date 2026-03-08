@@ -1,4 +1,4 @@
-# base/utils/aerith_status.py
+# base/utils/status.py
 from __future__ import annotations
 
 import itertools

@@ -28,6 +28,8 @@ class PRManager:
         self.logger = logger.bind(component="PRManager", repo=str(self.root))
         self.original_branch: str | None = None
         self._pending_stash_pop: bool = False
+        self._autosave_stash_ref: str | None = None
+        self._autosave_stash_sha: str | None = None
 
     def _github_headers(self) -> dict[str, str]:
         headers = {
@@ -74,85 +76,96 @@ class PRManager:
     ) -> str:
         """
         Create/switch to a fresh proposal branch safely.
-        - Stash uncommitted local changes (if any) and restore afterward.
+
+        - Stash uncommitted local changes (if any).
+        - Preserve the first autosave restore context across nested prepare_branch() calls.
         - If branch already exists locally or remotely, append a short suffix.
         - Ensures user.name/email are set for the repo.
+
         Returns the final branch name.
         """
         self.git.ensure_user(
             getattr(settings, "github_bot_name", "aerith-bot"),
             getattr(settings, "github_bot_email", "aerith-bot@local"),
         )
-        # Remember where the user was
-        try:
-            self.original_branch = self.git.current_branch()
-        except Exception:
-            self.original_branch = None
 
-        # Generate collision-safe name if needed
+        try:
+            current_branch = self.git.current_branch()
+        except Exception:
+            current_branch = None
+
+        # Preserve the *user's* original branch across nested prepare_branch() calls.
+        if self.original_branch is None and current_branch:
+            self.original_branch = current_branch
+
         final = branch_name
         suffix = 0
         while self.git.branch_exists(final):
             suffix += 1
             final = f"{branch_name}-{suffix}"
 
-        # Stash if dirty
-        stashed = False
-        self._pending_stash_pop = False
-        self._autosave_stash_ref = None
-        self._autosave_stash_sha = None
+        pending_restore = bool(
+            getattr(self, "_pending_stash_pop", False)
+            or getattr(self, "_autosave_stash_ref", None)
+            or getattr(self, "_autosave_stash_sha", None)
+        )
+
+        stashed_this_call = False
+        stash_ref: str | None = None
+        stash_sha: str | None = None
 
         if self.git.has_uncommitted_changes():
             self.logger.info("Uncommitted changes detected — stashing")
-            ref, sha = self.git.stash_push("aerith-autosave")
-            self._autosave_stash_ref = ref
-            self._autosave_stash_sha = sha
-            stashed = True
-            self._pending_stash_pop = bool(restore_stash)
+            stash_ref, stash_sha = self.git.stash_push("aerith-autosave")
+            stashed_this_call = bool(stash_ref or stash_sha)
 
-            # Repeat the restore command here too (no guessing games)
-            if ref:
-                self.logger.info(f"Your changes were stashed as {ref}.")
-                self.logger.info(f"Restore with: git stash pop {ref}")
-                if sha:
-                    self.logger.info(f"Or (stable): git stash apply {sha}")
-            self._pending_stash_pop = True
+            if stashed_this_call:
+                # Only record a new restore target if one is not already being tracked.
+                if pending_restore:
+                    self.logger.warning(
+                        "A pending autosave stash is already being tracked; "
+                        "preserving the original restore target for this run."
+                    )
+                elif restore_stash:
+                    self._autosave_stash_ref = stash_ref
+                    self._autosave_stash_sha = stash_sha
+                    self._pending_stash_pop = True
 
-        try:
-            self.git.fetch()
-            # ensure base is present and reasonably up to date
-            self.git.checkout(base)
-            self.git.run(["pull", self.git.remote, base], check=False)
+                if stash_ref:
+                    self.logger.info(f"Your changes were stashed as {stash_ref}.")
+                    self.logger.info(f"Restore with: git stash pop {stash_ref}")
+                if stash_sha:
+                    self.logger.info(f"Or (stable): git stash apply {stash_sha}")
 
-            # Create new branch from up-to-date base
-            if not self.git.branch_exists(final):
-                # self.git.run(["git", "checkout", "-b", final, f"origin/{base}"])
-                self.git.checkout(final, create=True, start_point=base)
+        self.git.fetch()
+
+        # Ensure base exists locally and is reasonably current.
+        self.git.checkout(base)
+        self.git.run(["pull", self.git.remote, base], check=False)
+
+        if not self.git.branch_exists(final):
+            self.git.checkout(final, create=True, start_point=base)
+        else:
+            self.git.checkout(final)
+
+        self.logger.info(f"Created/checked out branch {final} from {base}")
+
+        if stashed_this_call:
+            if pending_restore:
+                self.logger.info(
+                    "An earlier autosave stash remains the active restore target for this run."
+                )
+            elif restore_stash:
+                self.logger.info(
+                    "Stashed local changes; they will be restored automatically "
+                    "when returning to the original branch."
+                )
             else:
-                # self.git.run(["git", "checkout", final])
-                self.git.checkout(final)
+                self.logger.info(
+                    "Stashed local changes; automatic restore is disabled for this branch preparation."
+                )
 
-            self.logger.info(f"Created/checked out branch {final} from {base}")
-            return final
-
-        finally:
-            pass
-            # if stashed and restore_stash:
-            #     # `stash pop` can fail if conflicts; if so, just leave the stash
-            #     # rc, out, err = self.git.run_rc(["git", "stash", "pop"])
-            #     # if rc != 0:
-            #     #     self.logger.warning(f"Stash pop had conflicts; leaving stash in place: {err.strip()}")
-            #     self.git.stash_pop()
-            #     self._pending_stash_pop = False
-            if stashed:
-                if restore_stash:
-                    self.logger.info(
-                        "Stashed local changes; will restore when returning to original branch."
-                    )
-                else:
-                    self.logger.info(
-                        "Stashed local changes; restore_stash=False so leaving stash in place."
-                    )
+        return final
 
     def commit_and_push(self, branch: str, title: str) -> None:
         self.client.ensure_user(settings.github_bot_name, settings.github_bot_email)
@@ -275,70 +288,42 @@ class PRManager:
         return test_report
 
     def restore_original_branch(self) -> None:
-        """Switch back to the branch the user was on and deterministically restore any autosaved stash."""
+        """Switch back to the user's original branch and restore any tracked autosave stash."""
         if not self.original_branch:
             return
 
+        target_branch = self.original_branch
+        stash_ref = self._autosave_stash_ref
+        stash_sha = self._autosave_stash_sha
+        should_restore_stash = bool(self._pending_stash_pop and (stash_ref or stash_sha))
+
         try:
-            self.client.safe_switch(self.original_branch)
-            self.logger.info(f"Restored user branch: {self.original_branch}")
+            self.client.safe_switch(target_branch)
+            self.logger.info(f"Restored user branch: {target_branch}")
         except Exception as e:
             self.logger.error(f"Failed to restore branch: {e}")
-            return  # Don't touch stash if branch restore failed
-
-        if not getattr(self, "_pending_stash_pop", False):
             return
 
-        stash_ref = getattr(self, "_autosave_stash_ref", None)
-        stash_sha = getattr(self, "_autosave_stash_sha", None)
+        if should_restore_stash:
+            if stash_ref:
+                self.logger.info(f"Your changes were stashed as {stash_ref}.")
+                self.logger.info(f"Restore with: git stash pop {stash_ref}")
+            if stash_sha:
+                self.logger.info(f"Or (stable): git stash apply {stash_sha}")
 
-        # Repeat exact commands (always)
-        if stash_ref:
-            self.logger.info(f"Your changes are stashed as {stash_ref}.")
-            self.logger.info(f"Restore with: git stash pop {stash_ref}")
-        if stash_sha:
-            self.logger.info(f"Or (stable): git stash apply {stash_sha}")
+            if stash_sha:
+                self.logger.info(f"Restoring stashed changes (stable SHA): {stash_sha}")
+                self.git.stash_apply(stash_sha)
 
-        # Deterministic restore (never pop without an explicit ref)
-        if stash_sha:
-            self.logger.info(f"Restoring stashed changes (stable SHA): {stash_sha}")
-            self.git.stash_apply(stash_sha)
+                ref = self.git.find_stash_ref_by_sha(stash_sha)
+                if ref:
+                    self.logger.info(f"Dropping restored stash entry: {ref}")
+                    self.git.stash_drop(ref)
+            elif stash_ref:
+                self.logger.info(f"Restoring stashed changes (explicit ref): {stash_ref}")
+                self.git.stash_pop(stash_ref)
 
-            # Optional hygiene: drop the stash entry if it's still present
-            ref = self.git.find_stash_ref_by_sha(stash_sha)
-            if ref:
-                self.logger.info(f"Dropping restored stash entry: {ref}")
-                self.git.stash_drop(ref)
-
-        elif stash_ref:
-            self.logger.info(f"Restoring stashed changes (explicit ref): {stash_ref}")
-            self.git.stash_pop(stash_ref)
-
-        else:
-            self.logger.warning(
-                "Autosave stash restore was requested, but no stash ref/sha was recorded. "
-                "Nothing will be restored automatically."
-            )
-
-        # Clear stored pointers so we never attempt to reapply
+        self.original_branch = None
         self._autosave_stash_ref = None
         self._autosave_stash_sha = None
         self._pending_stash_pop = False
-
-    # def restore_original_branch(self):
-    #     """Switch back to the branch the user was on."""
-    #     if self.original_branch:
-    #         try:
-    #             self.client.safe_switch(self.original_branch)
-    #             logger.info(f"Restored user branch: {self.original_branch}")
-
-    #             if self._pending_stash_pop:
-    #                 try:
-    #                     self.git.stash_pop()
-    #                     self.logger.info("Restored autosave stash")
-    #                 except Exception as e:
-    #                     self.logger.warning(f"Failed to pop autosave stash; leaving it in place: {e}")
-    #                 finally:
-    #                     self._pending_stash_pop = False
-    #         except Exception as e:
-    #             logger.error(f"Failed to restore branch: {e}")

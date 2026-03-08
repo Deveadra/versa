@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
+from hypothesis import event
 import numpy as np
 from dateutil import parser as dateparser
 from loguru import logger
@@ -123,6 +124,49 @@ class FAISSBackendCompat(FAISSBackend):
 class ConsoleNotifier:
     def notify(self, title: str, message: str):
         print(f"\n[NOTIFY] {title}: {message}\n")
+
+    def _self_improve_status_callback(self, event: dict[str, Any]) -> None:
+        phase = str(event.get("phase") or "self_improve")
+        state = str(event.get("state") or "update")
+        pct_raw = event.get("pct")
+        pct = int(pct_raw) if isinstance(pct_raw, (int, float)) else None
+        iteration = event.get("iteration")
+        branch = event.get("branch")
+        duration_ms = event.get("duration_ms")
+        outcome = event.get("outcome")
+        error = event.get("error")
+
+        message = str(event.get("message") or phase.replace("_", " ").title())
+
+        if iteration is not None:
+            message = f"[it {iteration}] {message}"
+        if branch:
+            message = f"{message} ({branch})"
+        if outcome:
+            message = f"{message} — {outcome}"
+        if error:
+            message = f"{message} — {error}"
+        if duration_ms is not None and state in {"complete", "error"}:
+            message = f"{message} [{int(duration_ms)} ms]"
+
+        logger.info(
+            f"[self-improve-status] phase={phase} state={state} pct={pct} message={message}"
+        )
+
+        if state == "start" and phase == "diagnose":
+            self.status.begin(phase, message)
+            return
+
+        if state == "complete" and phase == "summarize":
+            self.status.complete(message)
+            return
+
+        if state == "error" and phase == "summarize":
+            self.status.stage(phase, message, pct=pct)
+            self.status.stop()
+            return
+
+        self.status.stage(phase, message, pct=pct)
 
 
 class Orchestrator:
@@ -1263,61 +1307,16 @@ class Orchestrator:
     # ------------------------------------
 
     def _job_self_improvement(self) -> None:
-        cfg = SelfImproveRunConfig()
+        cfg = SelfImproveRunConfig(status_callback=self._self_improve_status_callback)
         try:
             result = self.self_improve.run_daily(cfg=cfg)
             logger.info(f"[self-improve] daily result={result}")
         except Exception as e:
+            try:
+                self.status.stop()
+            except Exception:
+                pass
             logger.exception(f"[self-improve] daily run failed: {e}")
-
-    # def _job_self_improvement(self):
-    #     """
-    #     Daily self-improvement pipeline:
-    #     1) Run diagnostics and write a report.
-    #     2) Open a proposal/PR referencing that report.
-    #     """
-    #     # Resolve repo root for the tools
-    #     # repo_root = getattr(settings, "repo_root", str(Path(__file__).resolve().parents[3]))
-    #     repo_root = str(self.repo_root)
-    #     policy = LeashPolicy(
-    #         allowlist=(
-    #             "src/base/**",
-    #             "src/config/**",
-    #             "scripts/**",
-    #             "tests/**",
-    #             ".github/workflows/**",
-    #             "pyproject.toml",
-    #             "README.md",
-    #             "run.py",
-    #         )
-    #     )
-
-    #     ctl = RepoJanitorIterationController(
-    #         repo_root=repo_root,
-    #         db_path=settings.db_path,     # or wherever aerith.db lives
-    #         pr_manager=self.pr_manager,   # whatever your orchestrator stores it as
-    #         policy=policy,
-    #     )
-
-    #     result = ctl.run(goal="Daily self-improvement based on diagnostics", budget=IterationBudget())
-    #     logger.info(f"[self-improve] result={result}")
-
-    #     # try:
-    #     #     diag = DiagnosticEngine(repo_root=repo_root)
-    #     #     report_path = diag.run()
-    #     # except Exception as e:
-    #     #     logger.exception(f"[self-improve] Diagnostics failed: {e}")
-    #     #     return
-
-    #     # try:
-    #     #     self._propose_self_improvement(
-    #     #         repo_root=repo_root,
-    #     #         instruction="Daily self-improvement based on diagnostics",
-    #     #         diagnostic_path=report_path,
-    #     #     )
-    #     #     logger.info("[self-improve] Proposal opened.")
-    #     # except Exception as e:
-    #     #     logger.exception(f"[self-improve] Proposal failed: {e}")
 
     def handle_user(self, msg: str) -> str:
         """
@@ -1343,10 +1342,11 @@ class Orchestrator:
                 )
                 self.status.complete("Proposed code change")
                 return self.propose_code_change(instruction)
+
             if lower.startswith("selfimprove"):
-                cfg = SelfImproveRunConfig()
+                self.status.stop()
+                cfg = SelfImproveRunConfig(status_callback=self._self_improve_status_callback)
                 result = self.self_improve.run_manual(cfg=cfg, include_dream=False)
-                self.status.complete("Self-improvement run complete")
                 return json.dumps(result, indent=2)
 
             if any(
@@ -1886,57 +1886,16 @@ class Orchestrator:
             from base.agents.dream import DreamCycle  # lazy import to avoid circular
 
             dc = DreamCycle()
-            result = self.self_improve.run_manual(include_dream=True)
+            cfg = SelfImproveRunConfig(status_callback=self._self_improve_status_callback)
+            result = self.self_improve.run_manual(cfg=cfg, include_dream=True)
             self.notify(f"Manual self-improve complete: {result.get('pr_url') or 'no PR opened'}")
         except Exception as e:
+            try:
+                self.status.stop()
+            except Exception:
+                pass
             self.notify(f"Dream cycle unavailable or failed: {e}")
             self.notify(f"Manual self-improve failed: {e}")
-
-    # def cmd_self_improve(self, *args):
-    #     repo_root = str(self.repo_root)
-
-    #     dream_context = ""
-    #     try:
-    #         dc = DreamCycle()
-    #         notes = dc.run()
-    #         if isinstance(notes, dict):
-    #             dream_path = dc.write_summary(notes)
-    #             try:
-    #                 dream_context = Path(dream_path).read_text(encoding="utf-8")
-    #             except Exception:
-    #                 dream_context = ""
-    #         self.notify("Dream cycle completed.")
-    #     except Exception as e:
-    #         self.notify(f"Dream cycle failed: {e}")
-
-    #     policy = LeashPolicy(
-    #         allowlist=(
-    #             "src/base/**",
-    #             "src/config/**",
-    #             "scripts/**",
-    #             "tests/**",
-    #             ".github/workflows/**",
-    #             "pyproject.toml",
-    #             "README.md",
-    #             "run.py",
-    #         )
-    #     )
-
-    #     goal = "Manual self-improvement run"
-    #     if dream_context.strip():
-    #         goal += "\n\nDream context:\n" + dream_context[:4000]
-
-    #     try:
-    #         ctl = RepoJanitorIterationController(
-    #             repo_root=repo_root,
-    #             db_path=settings.db_path,
-    #             pr_manager=self.pr_manager,
-    #             policy=policy,
-    #         )
-    #         result = ctl.run(goal=goal, budget=IterationBudget())
-    #         self.notify(f"Self-improve run complete: {result.get('pr_url') or 'no PR opened'}")
-    #     except Exception as e:
-    #         self.notify(f"Self-improve controller failed: {e}")
 
     # --------
     # Cleanup

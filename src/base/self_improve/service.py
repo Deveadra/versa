@@ -4,11 +4,12 @@ import inspect
 import re
 import subprocess
 import time
+
+from collections.abc import Callable
 from dataclasses import dataclass
+from loguru import logger
 from pathlib import Path
 from typing import Any
-
-from loguru import logger
 
 from base.self_improve.iteration_controller import (
     IterationBudget,
@@ -32,6 +33,7 @@ class SelfImproveRunConfig:
     budget: IterationBudget = IterationBudget()
     gap_limit: int = 5
     open_pr: bool = True
+    status_callback: Callable[[dict[str, Any]], None] | None = None
 
 
 class SelfImproveService:
@@ -244,6 +246,43 @@ class SelfImproveService:
         out = self._git(["diff", "--name-only", f"{base}..HEAD"], check=False).stdout or ""
         return [ln.strip() for ln in out.splitlines() if ln.strip()]
 
+    def _emit_status(
+        self,
+        callback: Callable[[dict[str, Any]], None] | None,
+        *,
+        phase: str,
+        state: str,
+        message: str,
+        pct: int | None = None,
+        iteration: int | None = None,
+        branch: str | None = None,
+        duration_ms: float | None = None,
+        outcome: str | None = None,
+        error: str | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        if callback is None:
+            return
+
+        payload: dict[str, Any] = {
+            "phase": phase,
+            "state": state,
+            "message": message,
+            "pct": pct,
+            "iteration": iteration,
+            "branch": branch,
+            "duration_ms": duration_ms,
+            "outcome": outcome,
+            "error": error,
+        }
+        if extra:
+            payload["extra"] = extra
+
+        try:
+            callback(payload)
+        except Exception as e:
+            logger.debug(f"[self-improve] status callback failed: {e}")
+
     # -------------------------
     # gap logging
     # -------------------------
@@ -408,7 +447,7 @@ class SelfImproveService:
     ) -> dict[str, Any]:
         base = (settings.github_default_branch or "main").strip()
         suffix = self._sanitize_suffix(f"{branch_label}-{int(time.time())}")
-        branch = self.pr_manager.prepare_branch(suffix, base=base, restore_stash=False)
+        branch = self.pr_manager.prepare_branch(suffix, base=base, restore_stash=True)
 
         goal_hint = ""
         if extra_context and extra_context.strip():
@@ -424,7 +463,11 @@ class SelfImproveService:
         )
 
         try:
-            result = controller.run(goal=goal_hint, budget=cfg.budget)
+            result = controller.run(
+                goal=goal_hint,
+                budget=cfg.budget,
+                status_callback=cfg.status_callback,
+            )
         except TypeError:
             controller = RepoJanitorIterationController(
                 repo_root=str(self.repo),
@@ -434,23 +477,38 @@ class SelfImproveService:
                 pr_manager=None,
                 policy=self._default_policy(),
             )
-            result = controller.run(goal=goal_hint, budget=cfg.budget)
+            result = controller.run(
+                goal=goal_hint,
+                budget=cfg.budget,
+                status_callback=cfg.status_callback,
+            )
 
         pr_url = result.get("pr_url")
+        promotion_branch = str(result.get("branch") or branch)
 
         if cfg.open_pr and result.get("improved") and not pr_url:
+            self._emit_status(
+                cfg.status_callback,
+                phase="propose_pr",
+                state="start",
+                message="Opening improvement PR",
+                pct=85,
+                branch=promotion_branch,
+            )
             try:
                 if self._git_dirty():
-                    self.pr_manager.commit_and_push(branch, f"Repo Janitor: {branch_label}")
+                    self.pr_manager.commit_and_push(
+                        promotion_branch, f"Repo Janitor: {branch_label}"
+                    )
                 else:
-                    self._push_branch_compat(branch)
+                    self._push_branch_compat(promotion_branch)
 
                 body = (
                     "Repo Janitor unified self-improvement run\n\n"
                     f"### Goal\n{result.get('goal', '')}\n\n"
                     f"### Baseline\nscore={result['baseline']['score']:.2f} gates={result['baseline']['gates']}\n\n"
                     f"### Best\nscore={result['best']['score']:.2f} gates={result['best']['gates']}\n\n"
-                    f"Branch: `{branch}`\n"
+                    f"Branch: `{promotion_branch}`\n"
                 )
 
                 pr_url = self.open_pr_from_branch(
@@ -460,10 +518,29 @@ class SelfImproveService:
                 )
 
                 try:
-                    self.pr_manager.run_tests_and_update_pr(branch)
+                    self.pr_manager.run_tests_and_update_pr(promotion_branch)
                 except Exception:
                     pass
+
+                self._emit_status(
+                    cfg.status_callback,
+                    phase="propose_pr",
+                    state="complete",
+                    message="Improvement PR ready",
+                    pct=95,
+                    branch=promotion_branch,
+                    outcome=pr_url or "branch_pushed",
+                )
             except Exception as e:
+                self._emit_status(
+                    cfg.status_callback,
+                    phase="propose_pr",
+                    state="error",
+                    message="Improvement PR failed",
+                    pct=95,
+                    branch=promotion_branch,
+                    error=str(e),
+                )
                 logger.exception(f"[self-improve] PR open failed: {e}")
 
         try:
@@ -472,7 +549,7 @@ class SelfImproveService:
             pass
 
         result["pr_url"] = pr_url
-        result["branch"] = result.get("branch") or branch
+        result["branch"] = result.get("branch") or promotion_branch
 
         self._record_dream_summary_event(result=result, goal=result.get("goal", ""))
 

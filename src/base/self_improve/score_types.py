@@ -32,42 +32,24 @@ class ScoreboardRun:
     fix_enabled: bool
     tool_results: dict[str, ToolResult]
     total_duration_ms: float
-
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "mode": self.mode,
-            "fix_enabled": bool(self.fix_enabled),
-            "total_duration_ms": float(self.total_duration_ms),
-            "tool_results": {
-                name: (
-                    tr.to_dict()
-                    if hasattr(tr, "to_dict")
-                    else {
-                        "name": getattr(tr, "name", name),
-                        "exit_code": int(getattr(tr, "exit_code", 1)),
-                        "duration_ms": float(getattr(tr, "duration_ms", 0.0)),
-                        "stdout_tail": getattr(tr, "stdout_tail", ""),
-                        "stderr_tail": getattr(tr, "stderr_tail", ""),
-                        "parsed": getattr(tr, "parsed", {}) or {},
-                    }
-                )
-                for name, tr in self.tool_results.items()
-            },
-            # gates_failing is a COUNT (int), not an iterable
-            "gates_failing": int(self.gates_failing),
-            # Optional but very useful for debugging/reporting
-            "failing_tools": [
-                name
-                for name, tr in self.tool_results.items()
-                if int(getattr(tr, "exit_code", 1)) != 0
-            ],
-            "score": float(self.score()),
-            "passed": bool(self.passed()),
-        }
+    artifact_path: str | None = None
+    artifact_relpath: str | None = None
 
     @property
     def gates_failing(self) -> int:
         return sum(1 for tr in self.tool_results.values() if tr.exit_code != 0)
+
+    @property
+    def failing_tool_names(self) -> list[str]:
+        return sorted(
+            name for name, tr in self.tool_results.items() if int(getattr(tr, "exit_code", 1)) != 0
+        )
+
+    @property
+    def passing_tool_names(self) -> list[str]:
+        return sorted(
+            name for name, tr in self.tool_results.items() if int(getattr(tr, "exit_code", 1)) == 0
+        )
 
     def passed(self) -> bool:
         return self.gates_failing == 0
@@ -98,3 +80,43 @@ class ScoreboardRun:
             - 10.0 * compile_failures
             - 0.5 * total_sec
         )
+
+    def gating_summary(self) -> dict[str, object]:
+        return {
+            "gates_failing": int(self.gates_failing),
+            "failing_tools": list(self.failing_tool_names),
+            "passing_tools": list(self.passing_tool_names),
+            "passed": bool(self.passed()),
+        }
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "mode": self.mode,
+            "fix_enabled": bool(self.fix_enabled),
+            "total_duration_ms": float(self.total_duration_ms),
+            "tool_results": {
+                name: (
+                    tr.to_dict()
+                    if hasattr(tr, "to_dict")
+                    else {
+                        "name": getattr(tr, "name", name),
+                        "exit_code": int(getattr(tr, "exit_code", 1)),
+                        "duration_ms": float(getattr(tr, "duration_ms", 0.0)),
+                        "stdout_tail": getattr(tr, "stdout_tail", ""),
+                        "stderr_tail": getattr(tr, "stderr_tail", ""),
+                        "parsed": getattr(tr, "parsed", {}) or {},
+                    }
+                )
+                for name, tr in self.tool_results.items()
+            },
+            "gates_failing": int(self.gates_failing),
+            "failing_tools": list(self.failing_tool_names),
+            "passing_tools": list(self.passing_tool_names),
+            "score": float(self.score()),
+            "passed": bool(self.passed()),
+            "gating_summary": self.gating_summary(),
+            "artifact": {
+                "path": self.artifact_path,
+                "relative_path": self.artifact_relpath,
+            },
+        }

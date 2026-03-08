@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import time
@@ -277,10 +278,85 @@ class RepoJanitorIterationController:
             return False, f"Leash policy blocked worktree changes: {', '.join(bad)}"
         return True, "ok"
 
+    def _artifact_relpath(self, path: Path) -> str:
+        resolved = path.resolve()
+        try:
+            return resolved.relative_to(self.repo).as_posix()
+        except ValueError:
+            return str(resolved)
+
+    def _write_json(self, path: Path, payload: dict[str, Any]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+    def _failing_tools(self, run) -> list[str]:
+        return sorted(
+            name for name, tr in run.tool_results.items() if int(getattr(tr, "exit_code", 1)) != 0
+        )
+
+    def _score_delta_summary(self, before, after) -> dict[str, Any]:
+        before_failing = set(self._failing_tools(before))
+        after_failing = set(self._failing_tools(after))
+
+        return {
+            "before_score": float(before.score()),
+            "after_score": float(after.score()),
+            "score_delta": float(after.score() - before.score()),
+            "before_gates": int(before.gates_failing),
+            "after_gates": int(after.gates_failing),
+            "gates_delta": int(after.gates_failing) - int(before.gates_failing),
+            "newly_failing_tools": sorted(after_failing - before_failing),
+            "resolved_tools": sorted(before_failing - after_failing),
+            "still_failing_tools": sorted(before_failing & after_failing),
+        }
+
+    def _write_attempt_summary_artifact(
+        self,
+        *,
+        run_artifact_dir: Path,
+        iteration: int,
+        branch: str,
+        stage: str,
+        improved: bool | None,
+        error: str | None,
+        attempt_artifacts: dict[str, Any],
+        extra: dict[str, Any] | None = None,
+    ) -> dict[str, str]:
+        payload = {
+            "schema_version": 1,
+            "iteration": int(iteration),
+            "branch": branch,
+            "stage": stage,
+            "improved": improved,
+            "error": error,
+            "artifacts": attempt_artifacts,
+            "extra": extra or {},
+        }
+
+        path = run_artifact_dir / f"iteration_{iteration:02d}_attempt_summary.json"
+        self._write_json(path, payload)
+
+        return {
+            "path": str(path.resolve()),
+            "relative_path": self._artifact_relpath(path),
+        }
+
     # ---------------- run ----------------
 
     def run(self, *, goal: str, budget: IterationBudget) -> dict[str, Any]:
         started = time.perf_counter()
+        run_token = f"run-{int(time.time() * 1000)}"
+        run_artifact_dir = self.repo / "reports" / "self_improve" / run_token
+        artifacts: dict[str, Any] = {
+            "run_dir": self._artifact_relpath(run_artifact_dir),
+            "baseline": None,
+            "attempts": [],
+            "final": None,
+        }
+
         base_branch = self._current_branch()
         logger.info(f"[self-improve] base_branch={base_branch}")
 
@@ -295,23 +371,36 @@ class RepoJanitorIterationController:
             self._git(["checkout", base_for_branches], check=False)
             base_branch = base_for_branches
 
-        # Hard safety: do not run if user already has a dirty working tree
         if self._worktree_dirty():
             msg = "Working tree is not clean; commit/stash changes before self-improve."
             logger.error(f"[self-improve] {msg}")
             return {
                 "goal": goal,
-                "baseline": {"score": 0.0, "gates": []},
-                "best": {"score": 0.0, "gates": []},
+                "baseline": {"score": 0.0, "gates": 0},
+                "best": {"score": 0.0, "gates": 0},
                 "attempts": [{"iteration": 0, "error": msg}],
                 "improved": False,
                 "pr_url": None,
                 "branch": base_branch,
+                "artifacts": artifacts,
             }
 
-        # Baseline
-        # Baseline: controller owns scoring, gap collection, and goal generation.
-        baseline = self.scoreboard.run(mode="all", fix=False)
+        baseline_artifact = run_artifact_dir / "baseline_scoreboard.json"
+        baseline = self.scoreboard.run(
+            mode="all",
+            fix=False,
+            artifact_path=baseline_artifact,
+            context={
+                "phase": "baseline",
+                "branch": base_branch,
+                "goal_hint_present": bool(goal.strip()),
+            },
+        )
+        artifacts["baseline"] = {
+            "path": baseline.artifact_path,
+            "relative_path": baseline.artifact_relpath,
+        }
+
         baseline_id = insert_score_run(
             self.conn,
             run_type="baseline",
@@ -332,15 +421,6 @@ class RepoJanitorIterationController:
 
         for gid in gap_ids:
             mark_gap_status(self.conn, gid, "in_progress")
-            
-        # self._log_gaps_from_scoreboard(baseline, source="scoreboard")
-
-        # computed_goal, gap_ids = self._goal_from_gaps(limit=budget.gap_limit)
-        # if goal.strip():
-        #     computed_goal = goal.strip() + "\n\n" + computed_goal
-
-        # for gid in gap_ids:
-        #     mark_gap_status(self.conn, gid, "in_progress")
 
         best = baseline
         best_id = baseline_id
@@ -349,11 +429,28 @@ class RepoJanitorIterationController:
         pr_url: str | None = None
         best_branch: str | None = None
 
-        # base_for_branches = settings.github_default_branch or "main"
-
         for i in range(1, budget.max_iterations + 1):
+            attempt_artifacts: dict[str, Any] = {
+                "iteration": i,
+                "before": None,
+                "after": None,
+                "diff_summary": None,
+                "summary": None,
+            }
+
             if (time.perf_counter() - started) > budget.max_seconds:
                 attempts.append({"iteration": i, "error": "budget timeout"})
+                attempt_artifacts["summary"] = self._write_attempt_summary_artifact(
+                    run_artifact_dir=run_artifact_dir,
+                    iteration=i,
+                    branch=base_branch,
+                    stage="timeout",
+                    improved=False,
+                    error="budget timeout",
+                    attempt_artifacts=attempt_artifacts,
+                    extra={},
+                )
+                artifacts["attempts"].append(attempt_artifacts)
                 insert_improvement_attempt(
                     self.conn,
                     iteration=i,
@@ -362,23 +459,32 @@ class RepoJanitorIterationController:
                     after_run_id=None,
                     branch=base_branch,
                     proposal_title=None,
-                    proposal_json={"timeout": True},
+                    proposal_json={"timeout": True, "artifacts": attempt_artifacts},
                     pr_url=None,
                     improved=False,
                     error_text="budget timeout",
                 )
                 break
 
-            # Build index_md (via CodeIndexer)
             idx = self.code_indexer.scan(incremental=True)  # type: ignore[call-arg]
             index_md = self._index_to_markdown(idx)
 
-            # Propose patch
             proposal = self.proposal_engine.propose(computed_goal, index_md=index_md)
 
             ok, msg = self._enforce_leash_on_proposal(proposal)
             if not ok:
                 attempts.append({"iteration": i, "error": msg})
+                attempt_artifacts["summary"] = self._write_attempt_summary_artifact(
+                    run_artifact_dir=run_artifact_dir,
+                    iteration=i,
+                    branch=base_branch,
+                    stage="proposal_leash_blocked",
+                    improved=False,
+                    error=msg,
+                    attempt_artifacts=attempt_artifacts,
+                    extra={"proposal_title": getattr(proposal, "title", None)},
+                )
+                artifacts["attempts"].append(attempt_artifacts)
                 insert_improvement_attempt(
                     self.conn,
                     iteration=i,
@@ -387,7 +493,11 @@ class RepoJanitorIterationController:
                     after_run_id=None,
                     branch=base_branch,
                     proposal_title=getattr(proposal, "title", None),
-                    proposal_json={"title": getattr(proposal, "title", ""), "blocked": True},
+                    proposal_json={
+                        "title": getattr(proposal, "title", ""),
+                        "blocked": True,
+                        "artifacts": attempt_artifacts,
+                    },
                     pr_url=None,
                     improved=False,
                     error_text=msg,
@@ -396,6 +506,17 @@ class RepoJanitorIterationController:
 
             if not getattr(proposal, "changes", None):
                 attempts.append({"iteration": i, "error": "empty proposal (no changes)"})
+                attempt_artifacts["summary"] = self._write_attempt_summary_artifact(
+                    run_artifact_dir=run_artifact_dir,
+                    iteration=i,
+                    branch=base_branch,
+                    stage="empty_proposal",
+                    improved=False,
+                    error="empty proposal (no changes)",
+                    attempt_artifacts=attempt_artifacts,
+                    extra={"proposal_title": getattr(proposal, "title", None)},
+                )
+                artifacts["attempts"].append(attempt_artifacts)
                 insert_improvement_attempt(
                     self.conn,
                     iteration=i,
@@ -404,7 +525,11 @@ class RepoJanitorIterationController:
                     after_run_id=None,
                     branch=base_branch,
                     proposal_title=getattr(proposal, "title", None),
-                    proposal_json={"title": getattr(proposal, "title", ""), "empty": True},
+                    proposal_json={
+                        "title": getattr(proposal, "title", ""),
+                        "empty": True,
+                        "artifacts": attempt_artifacts,
+                    },
                     pr_url=None,
                     improved=False,
                     error_text="empty proposal (no changes)",
@@ -416,6 +541,20 @@ class RepoJanitorIterationController:
             if not applicable:
                 msg = "proposal has no applicable changes under current safety policy"
                 attempts.append({"iteration": i, "error": msg, "refusals": refusals[:5]})
+                attempt_artifacts["summary"] = self._write_attempt_summary_artifact(
+                    run_artifact_dir=run_artifact_dir,
+                    iteration=i,
+                    branch=base_branch,
+                    stage="preflight_refused",
+                    improved=False,
+                    error=msg,
+                    attempt_artifacts=attempt_artifacts,
+                    extra={
+                        "proposal_title": getattr(proposal, "title", None),
+                        "refusals": refusals,
+                    },
+                )
+                artifacts["attempts"].append(attempt_artifacts)
                 insert_improvement_attempt(
                     self.conn,
                     iteration=i,
@@ -428,6 +567,7 @@ class RepoJanitorIterationController:
                         "title": getattr(proposal, "title", ""),
                         "description": getattr(proposal, "description", ""),
                         "preflight_refusals": refusals,
+                        "artifacts": attempt_artifacts,
                     },
                     pr_url=None,
                     improved=False,
@@ -435,14 +575,28 @@ class RepoJanitorIterationController:
                 )
                 continue
 
-            # Narrow proposal to only changes that can actually apply
             proposal.changes = applicable
 
-            # Prepare branch (include iteration so you can read history easily)
             branch_name = f"repo-janitor-{int(time.time())}-it{i}"
             branch = self.pr_manager.prepare_branch(branch_name, base=base_for_branches)
 
-            before = self.scoreboard.run(mode="all", fix=False)
+            before_artifact = run_artifact_dir / f"iteration_{i:02d}_before_scoreboard.json"
+            before = self.scoreboard.run(
+                mode="all",
+                fix=False,
+                artifact_path=before_artifact,
+                context={
+                    "phase": "iteration_before",
+                    "iteration": i,
+                    "branch": branch,
+                    "proposal_title": getattr(proposal, "title", None),
+                },
+            )
+            attempt_artifacts["before"] = {
+                "path": before.artifact_path,
+                "relative_path": before.artifact_relpath,
+            }
+
             before_id = insert_score_run(
                 self.conn,
                 run_type="iteration_before",
@@ -455,12 +609,10 @@ class RepoJanitorIterationController:
                 metrics=before.to_dict(),
             )
 
-            # Apply proposal
             applied = self.proposal_engine.apply_proposal(proposal)
             applied_ok = any(ok for (_c, ok, _m) in applied)
 
             if not applied_ok:
-                # Capture why each change failed (anchor not found, overwrite disabled, etc.)
                 details = "; ".join(
                     f"{getattr(c, 'path', '?')}: {msg}" for (c, ok, msg) in applied if not ok
                 )[:800]
@@ -469,6 +621,20 @@ class RepoJanitorIterationController:
                 attempts.append(
                     {"iteration": i, "error": f"proposal applied no changes ({details})"}
                 )
+                attempt_artifacts["summary"] = self._write_attempt_summary_artifact(
+                    run_artifact_dir=run_artifact_dir,
+                    iteration=i,
+                    branch=branch,
+                    stage="apply_no_changes",
+                    improved=False,
+                    error=f"proposal applied no changes ({details})",
+                    attempt_artifacts=attempt_artifacts,
+                    extra={
+                        "proposal_title": getattr(proposal, "title", None),
+                        "details": details,
+                    },
+                )
+                artifacts["attempts"].append(attempt_artifacts)
                 insert_improvement_attempt(
                     self.conn,
                     iteration=i,
@@ -481,6 +647,7 @@ class RepoJanitorIterationController:
                         "title": getattr(proposal, "title", ""),
                         "applied": False,
                         "details": details,
+                        "artifacts": attempt_artifacts,
                     },
                     pr_url=None,
                     improved=False,
@@ -488,11 +655,21 @@ class RepoJanitorIterationController:
                 )
                 continue
 
-            # Enforce leash on actual worktree changes (critical!)
             ok2, msg2 = self._enforce_leash_on_worktree()
             if not ok2:
                 self._rollback_to_base(base_branch)
                 attempts.append({"iteration": i, "error": msg2})
+                attempt_artifacts["summary"] = self._write_attempt_summary_artifact(
+                    run_artifact_dir=run_artifact_dir,
+                    iteration=i,
+                    branch=branch,
+                    stage="worktree_leash_blocked",
+                    improved=False,
+                    error=msg2,
+                    attempt_artifacts=attempt_artifacts,
+                    extra={"proposal_title": getattr(proposal, "title", None)},
+                )
+                artifacts["attempts"].append(attempt_artifacts)
                 insert_improvement_attempt(
                     self.conn,
                     iteration=i,
@@ -504,6 +681,7 @@ class RepoJanitorIterationController:
                     proposal_json={
                         "title": getattr(proposal, "title", ""),
                         "blocked_worktree": True,
+                        "artifacts": attempt_artifacts,
                     },
                     pr_url=None,
                     improved=False,
@@ -511,7 +689,23 @@ class RepoJanitorIterationController:
                 )
                 continue
 
-            after = self.scoreboard.run(mode="all", fix=False)
+            after_artifact = run_artifact_dir / f"iteration_{i:02d}_after_scoreboard.json"
+            after = self.scoreboard.run(
+                mode="all",
+                fix=False,
+                artifact_path=after_artifact,
+                context={
+                    "phase": "iteration_after",
+                    "iteration": i,
+                    "branch": branch,
+                    "proposal_title": getattr(proposal, "title", None),
+                },
+            )
+            attempt_artifacts["after"] = {
+                "path": after.artifact_path,
+                "relative_path": after.artifact_relpath,
+            }
+
             after_id = insert_score_run(
                 self.conn,
                 run_type="iteration_after",
@@ -525,22 +719,49 @@ class RepoJanitorIterationController:
             )
             self._log_gaps_from_scoreboard(after, source="scoreboard")
 
+            diff_summary = self._score_delta_summary(before, after)
+            diff_summary.update(
+                {
+                    "iteration": i,
+                    "branch": branch,
+                    "proposal_title": getattr(proposal, "title", None),
+                    "before_artifact": before.artifact_relpath,
+                    "after_artifact": after.artifact_relpath,
+                }
+            )
+
+            diff_path = run_artifact_dir / f"iteration_{i:02d}_diff_summary.json"
+            self._write_json(diff_path, diff_summary)
+            attempt_artifacts["diff_summary"] = {
+                "path": str(diff_path.resolve()),
+                "relative_path": self._artifact_relpath(diff_path),
+            }
+
             best_gates = int(getattr(best, "gates_failing", 0))
             after_gates = int(getattr(after, "gates_failing", 0))
 
             best_score = float(best.score())
             after_score = float(after.score())
 
-            EPS = 1e-6
+            eps = 1e-6
 
-            # Gates are the primary objective: never accept worse gate count.
             if after_gates < best_gates:
                 is_improved = True
             elif after_gates > best_gates:
                 is_improved = False
             else:
-                # Same failing gates → require a score improvement
-                is_improved = after_score > (best_score + EPS)
+                is_improved = after_score > (best_score + eps)
+
+            attempt_artifacts["summary"] = self._write_attempt_summary_artifact(
+                run_artifact_dir=run_artifact_dir,
+                iteration=i,
+                branch=branch,
+                stage="scored",
+                improved=bool(is_improved),
+                error=None,
+                attempt_artifacts=attempt_artifacts,
+                extra={"diff_summary": diff_summary},
+            )
 
             attempt_row = {
                 "iteration": i,
@@ -550,8 +771,11 @@ class RepoJanitorIterationController:
                 "before_gates": int(before.gates_failing),
                 "after_gates": int(after.gates_failing),
                 "improved": bool(is_improved),
+                "artifacts": attempt_artifacts,
+                "diff_summary": diff_summary,
             }
             attempts.append(attempt_row)
+            artifacts["attempts"].append(attempt_artifacts)
 
             if is_improved:
                 improved_any = True
@@ -559,7 +783,6 @@ class RepoJanitorIterationController:
                 best_id = after_id
                 best_branch = branch
 
-                # Commit + push + PR
                 if budget.open_pr_on_improvement:
                     self.pr_manager.commit_and_push(
                         branch,
@@ -582,6 +805,8 @@ class RepoJanitorIterationController:
                     proposal_json={
                         "title": getattr(proposal, "title", ""),
                         "description": getattr(proposal, "description", ""),
+                        "artifacts": attempt_artifacts,
+                        "diff_summary": diff_summary,
                     },
                     pr_url=pr_url,
                     improved=True,
@@ -602,6 +827,8 @@ class RepoJanitorIterationController:
                     proposal_json={
                         "title": getattr(proposal, "title", ""),
                         "description": getattr(proposal, "description", ""),
+                        "artifacts": attempt_artifacts,
+                        "diff_summary": diff_summary,
                     },
                     pr_url=None,
                     improved=False,
@@ -609,9 +836,21 @@ class RepoJanitorIterationController:
                 )
                 self._rollback_to_base(base_branch)
 
-        # Final scoreboard on current state (best branch if improved + stopped; base branch otherwise)
-                # Final scoreboard on current state (best branch if improved + stopped; base branch otherwise)
-        final = self.scoreboard.run(mode="all", fix=False)
+        final_artifact = run_artifact_dir / "final_scoreboard.json"
+        final = self.scoreboard.run(
+            mode="all",
+            fix=False,
+            artifact_path=final_artifact,
+            context={
+                "phase": "final",
+                "branch": best_branch or base_branch,
+                "improved": bool(improved_any),
+            },
+        )
+        artifacts["final"] = {
+            "path": final.artifact_path,
+            "relative_path": final.artifact_relpath,
+        }
         self._log_gaps_from_scoreboard(final, source="scoreboard")
 
         if gap_ids:
@@ -622,13 +861,11 @@ class RepoJanitorIterationController:
                 for gid in gap_ids:
                     mark_gap_status(self.conn, gid, "queued")
 
-        # Always restore to base branch explicitly (do NOT rely on PRManager.original_branch)
         try:
             self._rollback_to_base(base_branch)
         except Exception:
             pass
 
-        # Restore the user's original branch best-effort (so running self-improve doesn't yank your context)
         try:
             if user_branch != base_branch:
                 self._git(["checkout", user_branch], check=False)
@@ -643,4 +880,5 @@ class RepoJanitorIterationController:
             "improved": bool(improved_any),
             "pr_url": pr_url,
             "branch": best_branch or base_branch,
+            "artifacts": artifacts,
         }

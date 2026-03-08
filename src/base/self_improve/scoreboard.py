@@ -7,6 +7,7 @@ import sys
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -148,11 +149,26 @@ def _parse_pytest_junit(junit_path: Path) -> dict[str, Any]:
     }
 
 
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
 class ScoreboardRunner:
     def __init__(self, repo_root: str | Path):
         self.repo = Path(repo_root).resolve()
 
-    def run(self, *, mode: str = "all", fix: bool = False) -> ScoreboardRun:
+    def run(
+        self,
+        *,
+        mode: str = "all",
+        fix: bool = False,
+        artifact_path: str | Path | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> ScoreboardRun:
         t0 = time.perf_counter()
         results: dict[str, ToolResult] = {}
 
@@ -183,9 +199,37 @@ class ScoreboardRunner:
         results["compile"] = ToolResult("compile", rc, ms, _tail(out), _tail(err), parsed)
 
         total_ms = (time.perf_counter() - t0) * 1000.0
+
+        artifact_abs: Path | None = None
+        artifact_rel: str | None = None
+        if artifact_path is not None:
+            candidate = Path(artifact_path)
+            artifact_abs = candidate if candidate.is_absolute() else (self.repo / candidate)
+            artifact_abs = artifact_abs.resolve()
+            try:
+                artifact_rel = artifact_abs.relative_to(self.repo).as_posix()
+            except ValueError:
+                artifact_rel = str(artifact_abs)
+
         run = ScoreboardRun(
-            mode=mode, fix_enabled=fix, tool_results=results, total_duration_ms=total_ms
+            mode=mode,
+            fix_enabled=fix,
+            tool_results=results,
+            total_duration_ms=total_ms,
+            artifact_path=str(artifact_abs) if artifact_abs is not None else None,
+            artifact_relpath=artifact_rel,
         )
+
+        if artifact_abs is not None:
+            payload = {
+                "schema_version": 1,
+                "generated_at": datetime.now(UTC).isoformat(),
+                "repo_root": str(self.repo),
+                "context": context or {},
+                "run": run.to_dict(),
+            }
+            _write_json(artifact_abs, payload)
+
         logger.info(f"[scoreboard] gates_failing={run.gates_failing} score={run.score():.2f}")
         return run
 

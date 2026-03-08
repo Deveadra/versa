@@ -45,11 +45,11 @@ def main() -> None:
             max_iterations=1,
             max_seconds=300,
             stop_on_first_improvement=True,
-            open_pr_on_improvement=False,
+            open_pr_on_improvement=True,
             gap_limit=3,
         ),
         gap_limit=3,
-        open_pr=False,
+        open_pr=True,
     )
 
     result = service.run_manual(cfg=cfg, include_dream=False)

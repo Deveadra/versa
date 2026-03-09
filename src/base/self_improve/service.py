@@ -4,12 +4,12 @@ import inspect
 import re
 import subprocess
 import time
-
 from collections.abc import Callable
 from dataclasses import dataclass
-from loguru import logger
 from pathlib import Path
 from typing import Any
+
+from loguru import logger
 
 from base.self_improve.iteration_controller import (
     IterationBudget,
@@ -23,6 +23,7 @@ from base.self_improve.self_improve_db import (
     fetch_open_gaps,
     insert_score_run,
     make_gap_fingerprint,
+    reconcile_gap_states_for_source,
     upsert_gap,
 )
 from config.config import settings
@@ -287,13 +288,18 @@ class SelfImproveService:
     # gap logging
     # -------------------------
 
-    def log_gaps_from_scoreboard(self, run, *, source: str = "scoreboard") -> None:
+    def log_gaps_from_scoreboard(self, run, *, source: str = "scoreboard") -> set[str]:
+        active_fingerprints: set[str] = set()
+
         for name, tr in run.tool_results.items():
             if tr.exit_code == 0:
                 continue
+
             fingerprint = make_gap_fingerprint(
                 source, name, str(tr.exit_code), tr.stderr_tail or tr.stdout_tail
             )
+            active_fingerprints.add(fingerprint)
+
             upsert_gap(
                 self.conn,
                 source=source,
@@ -305,6 +311,15 @@ class SelfImproveService:
                 priority=50 if name in ("pytest", "compile") else 25,
                 metadata={"tool": name, "exit_code": tr.exit_code},
             )
+
+        reconcile_gap_states_for_source(
+            self.conn,
+            source=source,
+            active_fingerprints=active_fingerprints,
+            active_status="queued",
+        )
+
+        return active_fingerprints
 
     def build_goal_from_gaps(self, *, limit: int) -> tuple[str, list[int]]:
         gaps = fetch_open_gaps(self.conn, limit=limit)

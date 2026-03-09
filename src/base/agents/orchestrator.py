@@ -12,7 +12,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
-from hypothesis import event
 import numpy as np
 from dateutil import parser as dateparser
 from loguru import logger

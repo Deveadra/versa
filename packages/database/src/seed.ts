@@ -15,5 +15,11 @@ if ((tasks.list() ?? []).length === 0) {
   study.createAssignment(String(course.id), 'Homework 1', new Date(Date.now() + 86400000).toISOString());
   const lead = jobs.createLead('Example Inc', 'Backend Engineer');
   jobs.convertLeadToApplication(String(lead.id));
+import { connectDb, taskRepo } from './index';
+
+const db = connectDb();
+const repo = taskRepo(db);
+if ((repo.listTasks() ?? []).length === 0) {
+  repo.createTask({ title: 'Phase 0 seeded task', description: 'Validate e2e task flow' });
 }
 console.log('seed complete');

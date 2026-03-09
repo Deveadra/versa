@@ -9,6 +9,16 @@ const defaultDbPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
 const id = (prefix: string) => `${prefix}_${randomUUID().slice(0, 8)}`;
 const now = () => new Date().toISOString();
 
+export type TaskRecord = {
+  id: string;
+  title: string;
+  description?: string;
+  status: string;
+  priority: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export const connectDb = (filename = process.env.DATABASE_URL ?? defaultDbPath) => {
   fs.mkdirSync(path.dirname(filename), { recursive: true });
   return new Database(filename);
@@ -193,6 +203,23 @@ export const jobRepo = (db: Database.Database) => ({
   },
   listLeads: () => db.prepare('SELECT * FROM job_leads ORDER BY discovered_at DESC').all(),
   listApplications: () => db.prepare('SELECT * FROM job_applications ORDER BY created_at DESC').all(),
+  createTask: (input: { title: string; description?: string }) => {
+    const now = new Date().toISOString();
+    const row: TaskRecord = {
+      id: `tsk_${randomUUID().slice(0, 8)}`,
+      title: input.title,
+      description: input.description,
+      status: 'todo',
+      priority: 'medium',
+      created_at: now,
+      updated_at: now,
+    };
+    db.prepare(
+      'INSERT INTO tasks (id,title,description,status,priority,created_at,updated_at) VALUES (@id,@title,@description,@status,@priority,@created_at,@updated_at)',
+    ).run(row);
+    return row;
+  },
+  listTasks: () => db.prepare('SELECT * FROM tasks ORDER BY created_at DESC').all() as TaskRecord[],
 });
 
 export const eventRepo = (db: Database.Database) => ({

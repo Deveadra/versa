@@ -4,13 +4,13 @@ import json
 import shutil
 import subprocess
 import time
-
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from fnmatch import fnmatch
-from loguru import logger
 from pathlib import Path
 from typing import Any
+
+from loguru import logger
 
 from base.self_improve.models import Proposal
 from base.self_improve.scoreboard import ScoreboardRunner
@@ -20,6 +20,7 @@ from base.self_improve.self_improve_db import (
     insert_score_run,
     make_gap_fingerprint,
     mark_gap_status,
+    reconcile_gap_states_for_source,
     upsert_gap,
 )
 from config.config import settings
@@ -216,13 +217,16 @@ class RepoJanitorIterationController:
 
     # ---------------- gaps ----------------
 
-    def _log_gaps_from_scoreboard(self, run, source: str = "scoreboard") -> None:
+    def _log_gaps_from_scoreboard(self, run, source: str = "scoreboard") -> set[str]:
+        active_fingerprints: set[str] = set()
+
         for name, tr in run.tool_results.items():
             if tr.exit_code == 0:
                 continue
 
             tail = (tr.stderr_tail or tr.stdout_tail or "")[:4000]
             fingerprint = make_gap_fingerprint(source, name, str(tr.exit_code), tail)
+            active_fingerprints.add(fingerprint)
 
             upsert_gap(
                 self.conn,
@@ -236,16 +240,24 @@ class RepoJanitorIterationController:
                 metadata={"tool": name, "exit_code": tr.exit_code},
             )
 
-    def _goal_from_gaps(self, limit: int) -> tuple[str, list[int]]:
+        return active_fingerprints
+
+    def _goal_from_gaps(self, limit: int) -> tuple[str, list[dict[str, Any]]]:
         gaps = fetch_open_gaps(self.conn, limit=limit)
         if not gaps:
             return "Reduce failing gates and improve repository hygiene.", []
 
         lines = ["Fix the highest priority open capability gaps:"]
-        ids: list[int] = []
+        selected_gaps: list[dict[str, Any]] = []
 
         for gap in gaps:
-            ids.append(int(gap["id"]))
+            selected_gaps.append(
+                {
+                    "id": int(gap["id"]),
+                    "source": str(gap.get("source") or ""),
+                    "fingerprint": str(gap.get("fingerprint") or ""),
+                }
+            )
             lines.append(
                 f"- [{gap['classification']}] {gap['requested_capability']} (priority={gap['priority']})"
             )
@@ -253,7 +265,7 @@ class RepoJanitorIterationController:
                 tail = (gap["observed_failure"] or "").splitlines()[-10:]
                 lines.append("  - failure_tail: " + " | ".join(tail)[:400])
 
-        return "\n".join(lines), ids
+        return "\n".join(lines), selected_gaps
 
     # ---------------- leash ----------------
 
@@ -535,7 +547,14 @@ class RepoJanitorIterationController:
             passed=bool(baseline.passed()),
             metrics=baseline.to_dict(),
         )
-        self._log_gaps_from_scoreboard(baseline, source="scoreboard")
+
+        baseline_fingerprints = self._log_gaps_from_scoreboard(baseline, source="scoreboard")
+        reconcile_gap_states_for_source(
+            self.conn,
+            source="scoreboard",
+            active_fingerprints=baseline_fingerprints,
+            active_status="queued",
+        )
 
         self._status_finish(
             status_callback,
@@ -556,12 +575,12 @@ class RepoJanitorIterationController:
             branch=base_branch,
         )
 
-        computed_goal, gap_ids = self._goal_from_gaps(limit=budget.gap_limit)
+        computed_goal, selected_gaps = self._goal_from_gaps(limit=budget.gap_limit)
         if goal.strip():
             computed_goal = goal.strip() + "\n\n" + computed_goal
 
-        for gid in gap_ids:
-            mark_gap_status(self.conn, gid, "in_progress")
+        for gap in selected_gaps:
+            mark_gap_status(self.conn, int(gap["id"]), "in_progress")
 
         self._status_finish(
             status_callback,
@@ -570,7 +589,7 @@ class RepoJanitorIterationController:
             message="Improvement goal prepared",
             pct=30,
             branch=base_branch,
-            outcome=f"{len(gap_ids)} tracked gaps",
+            outcome=f"{len(selected_gaps)} tracked gaps",
         )
 
         best = baseline
@@ -1502,15 +1521,23 @@ class RepoJanitorIterationController:
             "path": final.artifact_path,
             "relative_path": final.artifact_relpath,
         }
-        self._log_gaps_from_scoreboard(final, source="scoreboard")
 
-        if gap_ids:
-            if final.passed():
-                for gid in gap_ids:
-                    mark_gap_status(self.conn, gid, "fixed")
-            else:
-                for gid in gap_ids:
-                    mark_gap_status(self.conn, gid, "queued")
+        final_fingerprints = self._log_gaps_from_scoreboard(final, source="scoreboard")
+        reconcile_gap_states_for_source(
+            self.conn,
+            source="scoreboard",
+            active_fingerprints=final_fingerprints,
+            active_status="queued",
+        )
+
+        for gap in selected_gaps:
+            if str(gap.get("source") or "") == "scoreboard":
+                continue
+            mark_gap_status(
+                self.conn,
+                int(gap["id"]),
+                "fixed" if final.passed() else "queued",
+            )
 
         try:
             self._rollback_to_base(base_branch)

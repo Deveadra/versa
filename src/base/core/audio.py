@@ -14,8 +14,6 @@ try:
 except ModuleNotFoundError:
     CoquiTTS = None
 
-# from base.voice.tts_aerith import AerithVoice
-# from base.voice.tts_elevenlabs import Voice
 from base.voice.tts_elevenlabs import Voice as ElevenLabsVoice
 from config.config import settings
 

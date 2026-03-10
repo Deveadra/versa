@@ -25,6 +25,24 @@ from base.self_improve.self_improve_db import (
 )
 from config.config import settings
 
+# ------------------------------
+# Constants
+# ------------------------------
+EXIT_OK = 0
+STATUS_PORCELAIN_PATH_OFFSET = 3  # "XY " prefix length in `git status --porcelain`
+RUN_TOKEN_MS_PER_SEC = 1000
+
+FAILURE_TAIL_MAX_CHARS = 4000
+FAILURE_TAIL_LINES = 10
+FAILURE_TAIL_JOIN_MAX_CHARS = 400
+DETAILS_MAX_CHARS = 800
+
+PRIORITY_HIGH = 50
+PRIORITY_NORMAL = 25
+
+FIRST_ITERATION = 1
+SCORE_EPS = 1e-6
+
 
 @dataclass(frozen=True)
 class IterationBudget:
@@ -102,10 +120,7 @@ class RepoJanitorIterationController:
 
     def _git(self, args: list[str], check: bool = True) -> subprocess.CompletedProcess:
         p = subprocess.run(
-            ["git", *args],
-            cwd=str(self.repo),
-            text=True,
-            capture_output=True,
+            ["git", *args], cwd=str(self.repo), text=True, capture_output=True, check=False
         )
         if check and p.returncode != 0:
             raise RuntimeError(
@@ -132,7 +147,7 @@ class RepoJanitorIterationController:
             if not ln.strip():
                 continue
             # format: XY <path> or ?? <path>
-            paths.append(ln[3:].strip())
+            paths.append(ln[STATUS_PORCELAIN_PATH_OFFSET:].strip())
         return paths
 
     def _untracked_paths(self) -> list[str]:
@@ -140,7 +155,7 @@ class RepoJanitorIterationController:
         items: list[str] = []
         for ln in out.splitlines():
             if ln.startswith("?? "):
-                items.append(ln[3:].strip())
+                items.append(ln[STATUS_PORCELAIN_PATH_OFFSET:].strip())
         return items
 
     def _safe_remove_path(self, relpath: str) -> None:
@@ -224,7 +239,7 @@ class RepoJanitorIterationController:
             if tr.exit_code == 0:
                 continue
 
-            tail = (tr.stderr_tail or tr.stdout_tail or "")[:4000]
+            tail = (tr.stderr_tail or tr.stdout_tail or "")[:FAILURE_TAIL_MAX_CHARS]
             fingerprint = make_gap_fingerprint(source, name, str(tr.exit_code), tail)
             active_fingerprints.add(fingerprint)
 
@@ -236,7 +251,7 @@ class RepoJanitorIterationController:
                 observed_failure=tail,
                 classification="quality_gate",
                 repro_steps=f"Scoreboard tool '{name}' failed (exit={tr.exit_code}).",
-                priority=50 if name in ("pytest", "compile") else 25,
+                priority=PRIORITY_HIGH if name in ("pytest", "compile") else PRIORITY_NORMAL,
                 metadata={"tool": name, "exit_code": tr.exit_code},
             )
 
@@ -262,8 +277,8 @@ class RepoJanitorIterationController:
                 f"- [{gap['classification']}] {gap['requested_capability']} (priority={gap['priority']})"
             )
             if gap.get("observed_failure"):
-                tail = (gap["observed_failure"] or "").splitlines()[-10:]
-                lines.append("  - failure_tail: " + " | ".join(tail)[:400])
+                tail = (gap["observed_failure"] or "").splitlines()[-FAILURE_TAIL_LINES:]
+                lines.append("  - failure_tail: " + " | ".join(tail)[:FAILURE_TAIL_JOIN_MAX_CHARS])
 
         return "\n".join(lines), selected_gaps
 
@@ -466,7 +481,7 @@ class RepoJanitorIterationController:
     ) -> dict[str, Any]:
         started = time.perf_counter()
         status_timers: dict[str, float] = {}
-        run_token = f"run-{int(time.time() * 1000)}"
+        run_token = f"run-{int(time.time() * RUN_TOKEN_MS_PER_SEC)}"
         run_artifact_dir = self.repo / "reports" / "self_improve" / run_token
         artifacts: dict[str, Any] = {
             "run_dir": self._artifact_relpath(run_artifact_dir),
@@ -1188,7 +1203,7 @@ class RepoJanitorIterationController:
             if not applied_ok:
                 details = "; ".join(
                     f"{getattr(c, 'path', '?')}: {msg}" for (c, ok, msg) in applied if not ok
-                )[:800]
+                )[:DETAILS_MAX_CHARS]
 
                 self._rollback_to_base(base_branch)
                 msg = f"proposal applied no changes ({details})"

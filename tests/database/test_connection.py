@@ -6,6 +6,8 @@ import sqlite3
 
 import pytest
 
+from base.database.sqlite import SQLiteConn
+
 
 def test_open_close_connection(db) -> None:
     assert isinstance(db.conn, sqlite3.Connection)
@@ -20,6 +22,4 @@ def test_open_close_connection(db) -> None:
 def test_invalid_path_connection(tmp_path) -> None:
     # Passing a directory path should fail
     with pytest.raises(sqlite3.OperationalError):
-        from base.database.sqlite import SQLiteConn
-
         SQLiteConn(str(tmp_path))

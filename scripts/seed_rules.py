@@ -15,8 +15,6 @@ def load_rules(path: Path):
         with open(path, encoding="utf-8") as f:
             return yaml.safe_load(f)
     else:
-        import json
-
         return json.loads(path.read_text(encoding="utf-8"))
 
 

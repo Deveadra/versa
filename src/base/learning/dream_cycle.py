@@ -23,7 +23,7 @@ def propose_new_signals_and_rules(conn):
     # Fetch context for LLM
     cur = conn.cursor()
     stats = cur.execute("""
-        SELECT topic_id, COUNT(*) as fires, 
+        SELECT topic_id, COUNT(*) as fires,
                SUM(CASE WHEN outcome='acted' THEN 1 ELSE 0 END) as acted,
                SUM(CASE WHEN outcome='ignore' THEN 1 ELSE 0 END) as ignored
         FROM rule_history

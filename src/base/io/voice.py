@@ -27,11 +27,12 @@ def record_audio(duration: int = 5) -> str:
         int(duration * SD_RATE), samplerate=SD_RATE, channels=SD_CHANNELS, dtype=np.int16
     )
     sd.wait()
-    temp = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-    import soundfile as sf
 
-    sf.write(temp.name, audio, SD_RATE)
-    return temp.name
+    import soundfile as sf  # noqa: PLC0415
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp:
+        sf.write(temp.name, audio, SD_RATE)
+        return temp.name
 
 
 def transcribe(file_path: str) -> str:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from base.database.sqlite import SQLiteConn
 from tests.database.schema_contract import REQUIRED_MIGRATIONS
 
 
@@ -20,7 +21,6 @@ def test_migration_recorded(db) -> None:
 
 
 def test_migration_not_reapplied_on_reconnect(tmp_path) -> None:
-    from base.database.sqlite import SQLiteConn
 
     db_path = tmp_path / "reconnect.db"
 

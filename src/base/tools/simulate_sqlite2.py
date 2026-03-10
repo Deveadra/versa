@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS facts (
 """)
 conn.commit()
 
-for i in range(50):
+for _i in range(50):
     svc = random.choices(["spotify", "youtube_music"], weights=[0.8, 0.2])[0]
     genre = random.choices(["lo-fi", "jazz", "vaporwave"], weights=[0.7, 0.2, 0.1])[0]
     params = json.dumps({"service": svc, "genre": genre})

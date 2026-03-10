@@ -5,7 +5,6 @@ import logging
 import os
 import threading
 from collections.abc import Iterable
-from typing import Union
 
 import simpleaudio as sa
 from elevenlabs.client import (
@@ -14,7 +13,7 @@ from elevenlabs.client import (
 
 from config.config import settings
 
-BytesLike = Union[bytes, bytearray, memoryview]
+BytesLike = bytes | bytearray | memoryview
 log = logging.getLogger(__name__)
 
 # class Voice:

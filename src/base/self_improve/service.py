@@ -90,10 +90,7 @@ class SelfImproveService:
 
     def _git(self, args: list[str], *, check: bool = True) -> subprocess.CompletedProcess:
         p = subprocess.run(
-            ["git", *args],
-            cwd=str(self.repo),
-            text=True,
-            capture_output=True,
+            ["git", *args], cwd=str(self.repo), text=True, capture_output=True, check=False
         )
         if check and p.returncode != 0:
             raise RuntimeError(
@@ -361,12 +358,14 @@ class SelfImproveService:
     # public entrypoints
     # -------------------------
 
-    def run_daily(self, *, cfg: SelfImproveRunConfig = SelfImproveRunConfig()) -> dict[str, Any]:
+    def run_daily(self, *, cfg: SelfImproveRunConfig | None = None) -> dict[str, Any]:
+        cfg = cfg or SelfImproveRunConfig()
         return self._run_unified(branch_label="daily-self-improve", cfg=cfg, extra_context=None)
 
     def run_manual(
-        self, *, cfg: SelfImproveRunConfig = SelfImproveRunConfig(), include_dream: bool = True
+        self, *, cfg: SelfImproveRunConfig | None = None, include_dream: bool = True
     ) -> dict[str, Any]:
+        cfg = cfg or SelfImproveRunConfig()
         dream_context = ""
         if include_dream:
             try:

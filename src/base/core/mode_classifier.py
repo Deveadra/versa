@@ -30,16 +30,15 @@ def classify_mode(user_text: str, last_mode: str = "default") -> tuple[str, bool
         return "formal", False
 
     # Sarcasm triggers
-    if any(word in text for word in ["duh", "obvious", "really", "seriously", "bruh"]) or re.search(
-        r"\bwhat is 2\s*\+\s*2\b", text
-    ):
-        if random.random() < 0.7:
-            return "sarcastic", False
+    if (
+        any(word in text for word in ["duh", "obvious", "really", "seriously", "bruh"])
+        or re.search(r"\bwhat is 2\s*\+\s*2\b", text)
+    ) and random.random() < 0.7:
+        return "sarcastic", False
 
     # Repeat escalation
-    if _repeat_count >= 2:
-        if random.random() < 0.9:
-            repeat_triggered = True
-            return "sarcastic", repeat_triggered
+    if _repeat_count >= 2 and random.random() < 0.9:
+      repeat_triggered = True
+      return "sarcastic", repeat_triggered
 
     return "default", False

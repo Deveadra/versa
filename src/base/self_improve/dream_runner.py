@@ -28,7 +28,7 @@ class DreamRunner:
         try:
             # 1) Scan + propose fix plan
             findings = self.janitor.scan()
-            plan = self.janitor.propose_autofix(findings)
+            _plan = self.janitor.propose_autofix(findings)
 
             # 2–3) Apply fixes and run tests
             ruff = self.tests.ruff()

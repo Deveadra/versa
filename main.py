@@ -1,17 +1,6 @@
 # main.py
+
 from __future__ import annotations
-
-import sys
-from pathlib import Path
-
-ROOT = Path(__file__).resolve().parent
-SRC = ROOT / "src"
-
-for p in (SRC, ROOT):
-    s = str(p)
-    if s not in sys.path:
-        sys.path.insert(0, s)
-# -----------------------------------------
 
 import atexit
 import os
@@ -21,34 +10,16 @@ import signal
 import sqlite3
 import threading
 import time
+from contextlib import suppress
+from datetime import UTC, datetime
+from http import HTTPStatus
 
 import requests
-from dotenv import load_dotenv
-
-# ---------- FFmpeg bootstrap (for audio helpers that might need it) ----------
-try:
-    import imageio_ffmpeg as iio_ffmpeg  # downloads/caches a static ffmpeg on first import
-
-    if shutil.which("ffmpeg") is None:
-        ffmpeg_exe = iio_ffmpeg.get_ffmpeg_exe()
-        ffmpeg_dir = os.path.dirname(ffmpeg_exe)
-        os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
-except Exception:
-    pass
-
-# ---------- Env ----------
-dotenv_path = Path(__file__).parent / "config" / ".env"
-load_dotenv(dotenv_path=dotenv_path)
-
-# ---------- Std / 3p ----------
-from datetime import UTC, datetime
 
 from base.agents.scheduler import Scheduler
 from base.calendar import calendar_flow
 from base.core.audio import interrupt, listen_for_wake_word, listen_until_silence, stream_speak
 from base.core.commands import handle_policy_command
-
-# ---------- Aerith imports ----------
 from base.core.core import SLEEP_WORDS, STOP_WORDS, AerithState, reset_session
 from base.core.decider import Decider
 from base.core.mode_classifier import classify_mode
@@ -70,6 +41,32 @@ from base.repl import commands as repl_commands
 from base.voice.tts_elevenlabs import Voice
 from config.config import settings
 from personalities.loader import load_personality
+
+# ------------------------------
+# Constants (kills PLR2004 noise)
+# ------------------------------
+HA_HTTP_TIMEOUT_S = 5
+PRESENCE_POLL_S = 10
+ENGAGEMENT_INTERVAL_S = 3600
+UPDATE_SIGNALS_INTERVAL_S = 60
+DAILY_INTERVAL_S = 86_400
+FEEDBACK_TIMEOUT_S = 5
+SIGNAL_CHECK_DELAY_S = 300
+SIGNAL_PRUNE_DAYS = 30
+HABIT_SUMMARY_DAYS = 30
+HABIT_SUMMARY_TOP_K = 5
+COUNTER_INCREMENT = 1.0
+
+# ---------- FFmpeg bootstrap (for audio helpers that might need it) ----------
+try:
+    import imageio_ffmpeg as iio_ffmpeg  # downloads/caches a static ffmpeg on first import
+
+    if shutil.which("ffmpeg") is None:
+        ffmpeg_exe = iio_ffmpeg.get_ffmpeg_exe()
+        ffmpeg_dir = os.path.dirname(ffmpeg_exe)
+        os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
+except Exception:
+    pass
 
 # ---------------------------------------------------------------------------
 #                               INITIALIZATION
@@ -101,7 +98,9 @@ habit_miner = HabitMiner(db=db, memory=store, store=store)
 
 # optional seeding for EngagementManager
 try:
-    initial_habits = habit_miner.get_summaries(days=30, top_k=5) or []
+    initial_habits = (
+        habit_miner.get_summaries(days=HABIT_SUMMARY_DAYS, top_k=HABIT_SUMMARY_TOP_K) or []
+    )
 except Exception:
     initial_habits = []
 
@@ -148,8 +147,8 @@ headers = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/j
 def check_presence(entity=HA_ENTITY):
     try:
         url = f"{HA_URL}/states/{entity}"
-        r = requests.get(url, headers=headers, timeout=5)
-        if r.status_code == 200:
+        r = requests.get(url, headers=headers, timeout=HA_HTTP_TIMEOUT_S)
+        if r.status_code == HTTPStatus.OK:
             return r.json().get("state")
     except Exception:
         return None
@@ -167,7 +166,7 @@ def presence_monitor():
             elif state == "not_home":
                 stream_speak(f"Goodbye, {name}." if name else "Goodbye.")
             last_state = state
-        time.sleep(10)
+        time.sleep(PRESENCE_POLL_S)
 
 
 threading.Thread(target=presence_monitor, daemon=True).start()
@@ -196,10 +195,8 @@ def classify_feedback(text: str | None) -> str | None:
 def engagement_task():
     try:
         # Update a couple of core context signals that rules might rely on
-        try:
+        with suppress(Exception):
             policy.ctx_mgr.set_signal("hour_of_day", datetime.now(UTC).hour, source="system")
-        except Exception:
-            pass
 
         # Normalize the result from EngagementManager
         result = engagement_mgr.check_for_engagement()
@@ -235,13 +232,13 @@ def engagement_task():
             stream_speak(reply)
 
             decider = Decider(memory=store)  # wherever `store` is your MemoryStore
-            memory_candidate = decider.decide_memory(text, reply)
+            memory_candidate = decider.decide_memory(prompt, reply)
 
             if memory_candidate:
                 store.save_memory(memory_candidate)
 
             # brief window for explicit feedback
-            feedback_text = listen_until_silence(timeout=5)
+            feedback_text = listen_until_silence(timeout=FEEDBACK_TIMEOUT_S)
             fb = classify_feedback(feedback_text)
             if fb:
                 record_feedback(
@@ -266,7 +263,7 @@ def engagement_task():
                     ev.get("context", ""),
                     names,
                     expect_change=expect,
-                    delay=300,
+                    delay=SIGNAL_CHECK_DELAY_S,
                 )
     except Exception as e:
         # Never let the scheduler die
@@ -274,7 +271,7 @@ def engagement_task():
 
 
 # hourly
-scheduler.add_task("engagement_check", interval=3600, func=engagement_task)
+scheduler.add_task("engagement_check", interval=ENGAGEMENT_INTERVAL_S, func=engagement_task)
 
 
 def update_core_signals():
@@ -284,7 +281,7 @@ def update_core_signals():
         for r in rows:
             if r["type"] == "counter":
                 try:
-                    new_val = float(r["value"] or 0) + 1.0
+                    new_val = float(r["value"] or 0) + COUNTER_INCREMENT
                     ctx_signals.upsert(r["name"], new_val, type_="counter")
                 except Exception:
                     continue
@@ -294,7 +291,7 @@ def update_core_signals():
 
 
 # Run every 60s
-scheduler.add_task("update_signals", interval=60, func=update_core_signals)
+scheduler.add_task("update_signals", interval=UPDATE_SIGNALS_INTERVAL_S, func=update_core_signals)
 
 
 # (Nightly) light-weight maintenance; your full self-improve runner now lives elsewhere
@@ -302,10 +299,8 @@ def nightly_maintenance():
     try:
         # as a baseline, prune noisy derived signals etc. (keep very safe)
         if hasattr(policy, "ctx_mgr"):
-            try:
-                policy.ctx_mgr.prune_stale_signals(days=30)
-            except Exception:
-                pass
+            with suppress(Exception):
+                policy.ctx_mgr.prune_stale_signals(days=SIGNAL_PRUNE_DAYS)
         # ensure base topics exist (idempotent)
         for t, pol in [
             ("stretch", "principled"),
@@ -313,20 +308,17 @@ def nightly_maintenance():
             ("hydration", "principled"),
             ("ai_superiority", "advocate"),
         ]:
-            try:
+            with suppress(Exception):
                 policy.upsert_topic(t, pol)
-            except Exception:
-                pass
     finally:
         conn.commit()
 
 
 # daily
-scheduler.add_task("nightly_maintenance", interval=86400, func=nightly_maintenance)
+scheduler.add_task("nightly_maintenance", interval=DAILY_INTERVAL_S, func=nightly_maintenance)
 scheduler.start()
 
-
-scheduler.add_task("habit_mining", interval=86400, func=habit_miner.mine)
+scheduler.add_task("habit_mining", interval=DAILY_INTERVAL_S, func=habit_miner.mine)
 
 # scheduler.add_task("habit_mining", interval=60, func=habit_miner.mine)  # For testing
 
@@ -334,264 +326,208 @@ scheduler.add_task("habit_mining", interval=86400, func=habit_miner.mine)
 # ---------------------------------------------------------------------------
 #                               MAIN LOOP
 # ---------------------------------------------------------------------------
-state = AerithState.IDLE
 last_user_input: str | None = None
+
+
+def shutdown() -> None:
+    print("[Shutdown] Cleaning up before exit...")
+    try:
+        scheduler.stop()
+        print("[Shutdown] Scheduler stopped.")
+    except Exception as exc:
+        print(f"[Shutdown] Error stopping scheduler: {exc}")
+
+    with suppress(Exception):
+        voice.stop_speaking()
+
+    try:
+        conn.close()
+        print("[Shutdown] Database connection closed.")
+    except Exception:
+        pass
+
+
+atexit.register(shutdown)
+
+
+def _exit_on_signal(_sig, _frame) -> None:
+    raise SystemExit(0) from None
+
+
+signal.signal(signal.SIGINT, _exit_on_signal)
+signal.signal(signal.SIGTERM, _exit_on_signal)
 
 try:
     while True:
+        if state == AerithState.IDLE:
+            listen_for_wake_word()
+            stream_speak(
+                f"At your service, {USER_NAME}."
+                if USER_NAME
+                else random.choice(CURRENT_PERSONALITY["wake"])
+            )
+            reset_session()
+            state = AerithState.ACTIVE
 
-        def shutdown():
-            print("[Shutdown] Cleaning up before exit...")
-            try:
-                scheduler.stop()
-                print("[Shutdown] Scheduler stopped.")
-            except Exception as e:
-                print(f"[Shutdown] Error stopping scheduler: {e}")
+        while state == AerithState.ACTIVE:
+            if not listening:
+                listening = True
+                text = listen_until_silence()
+                listening = False
+            else:
+                print("[DEBUG] Ignoring reentrant STT call.")
+                continue
 
-            try:
-                interrupt()
-                voice.stop_speaking()
-            except Exception:
-                pass
+            print(f"You: {text}")
+            last_user_input = text
 
-            try:
-                conn.close()
-                print("[Shutdown] Database connection closed.")
-            except Exception:
-                pass
-
-        # Register cleanup on exit and termination
-        atexit.register(shutdown)
-        signal.signal(signal.SIGINT, lambda sig, frame: sys.exit(0))
-        signal.signal(signal.SIGTERM, lambda sig, frame: sys.exit(0))
-
-        while True:
-            if state == AerithState.IDLE:
-                listen_for_wake_word()
-                stream_speak(
-                    f"At your service, {USER_NAME}."
-                    if USER_NAME
-                    else random.choice(CURRENT_PERSONALITY["wake"])
-                )
+            if not text:
+                state = AerithState.IDLE
                 reset_session()
-                state = AerithState.ACTIVE
+                break
 
-            while state == AerithState.ACTIVE:
-                # text = listen_until_silence()
-                if not listening:
-                    listening = True
-                    text = listen_until_silence()
-                    listening = False
-                else:
-                    print("[DEBUG] Ignoring reentrant STT call.")
-                    continue
+            # Link consequences to ignored advice (non-fatal)
+            try:
+                if link_consequence(conn, text):
+                    print(f"[Consequence linked] {text}")
+            except Exception:
+                pass
 
-                print(f"You: {text}")
-                last_user_input = text
+            # Mode switching
+            detected_mode, repeat_triggered = classify_mode(text, MODE)
+            if detected_mode != MODE:
+                MODE = detected_mode
+                CURRENT_PERSONALITY = load_personality(BASE_PERSONALITY, MODE)
+                print(f"[Mode switched → {MODE}]")
 
-                if not text:
-                    state = AerithState.IDLE
-                    reset_session()
-                    break
+            if repeat_triggered and "repeat_sarcasm" in CURRENT_PERSONALITY:
+                stream_speak(random.choice(CURRENT_PERSONALITY["repeat_sarcasm"]))
+                continue
 
-                # Link consequences to ignored advice (non-fatal)
-                try:
-                    if link_consequence(conn, text):
-                        print(f"[Consequence linked] {text}")
-                except Exception:
-                    pass
+            # sleep / stop words
+            low = text.lower()
+            if any(w in low for w in SLEEP_WORDS):
+                stream_speak(random.choice(CURRENT_PERSONALITY["sleep"]))
+                state = AerithState.IDLE
+                reset_session()
+                break
 
-                # Mode switching
-                detected_mode, repeat_triggered = classify_mode(text, MODE)
-                if detected_mode != MODE:
-                    MODE = detected_mode
-                    CURRENT_PERSONALITY = load_personality(BASE_PERSONALITY, MODE)
-                    print(f"[Mode switched → {MODE}]")
+            if any(w in low for w in STOP_WORDS):
+                interrupt()
+                with suppress(Exception):
+                    voice.stop_speaking()
 
-                if repeat_triggered and "repeat_sarcasm" in CURRENT_PERSONALITY:
-                    stream_speak(random.choice(CURRENT_PERSONALITY["repeat_sarcasm"]))
-                    continue
+                listening = False
+                state = AerithState.IDLE
+                reset_session()
 
-                # sleep / stop words
-                low = text.lower()
-                if any(w in low for w in SLEEP_WORDS):
-                    stream_speak(random.choice(CURRENT_PERSONALITY["sleep"]))
-                    state = AerithState.IDLE
-                    reset_session()
-                    break
-
-                # if any(w in low for w in STOP_WORDS):
-                #     interrupt()
-                #     voice.stop_speaking()
-
-                if any(w in low for w in STOP_WORDS):
-                    interrupt()
-                    try:
-                        voice.stop_speaking()
-                    except Exception:
-                        pass
-
-                    listening = False
-                    state = AerithState.IDLE
-                    reset_session()
-
-                    ack = None
-                    if "interrupt_ack" in CURRENT_PERSONALITY:
-                        ack = random.choice(CURRENT_PERSONALITY["interrupt_ack"])
-
-                    # policy commands (e.g., “Aerith disable speak” etc.)
-                    reply = handle_policy_command(text, policy)
-                    if reply:
-                        print(f"[Policy] {reply}")
-                        stream_speak(reply)
-                        continue
-
-                    if ack:
-                        stream_speak(ack)
-
-                    # capture clarification
-                    correction = listen_until_silence()
-                    if correction:
-                        print(f"You (clarification): {correction}")
-                        revised_input = (
-                            f"Original: {last_user_input}\nUser clarification: {correction}"
-                        )
-                        if isinstance(reply, dict):
-                            reply = reply.get("response") or reply.get("content") or str(reply)
-
-                            # reply = ask_aerith_stream(revised_input)
-                            if reply:
-                                print(f"{BASE_PERSONALITY.capitalize()}: {reply}")
-                                stream_speak(reply)
-                                dec = Decider()
-                                mem = dec.decide_memory(revised_input, reply)
-                                if mem:
-                                    store.add_event(
-                                        f"{mem['content']} || {mem.get('response','')}",
-                                        importance=0.0,
-                                        type_="chat",
-                                    )
-
-                                decider = Decider(
-                                    memory=store
-                                )  # wherever `store` is your MemoryStore
-                                memory_candidate = decider.decide_memory(text, reply)
-
-                                if memory_candidate:
-                                    store.save_memory(memory_candidate)
-                    continue
-
-                # Manual overrides (simple)
-                if "be sarcastic" in low:
-                    MODE = "sarcastic"
-                    CURRENT_PERSONALITY = load_personality(BASE_PERSONALITY, MODE)
-                    stream_speak("Oh, finally. Let me really express myself.")
-                    continue
-                if "be formal" in low:
-                    MODE = "formal"
-                    CURRENT_PERSONALITY = load_personality(BASE_PERSONALITY, MODE)
-                    stream_speak("Very well. I will maintain formal tone.")
-                    continue
-                if "be normal" in low:
-                    MODE = "default"
-                    CURRENT_PERSONALITY = load_personality(BASE_PERSONALITY, MODE)
-                    stream_speak("Back to default mode.")
-                    continue
-
-                resp = repl_commands.handle_command("aerith", text, policy)
-                if resp:
-                    print(f"[Command] {resp}")
-                    stream_speak(resp)
-                    continue
-
-                # Plugin routing (runs before LLM fallback)
-                reply, spoken = manager.handle(
-                    text, manager.plugins, personality=CURRENT_PERSONALITY, mode=MODE
+                ack = (
+                    random.choice(CURRENT_PERSONALITY["interrupt_ack"])
+                    if "interrupt_ack" in CURRENT_PERSONALITY
+                    else None
                 )
-                if reply or spoken:
-                    if reply:
-                        print(f"{BASE_PERSONALITY.capitalize()}: {reply}")
-                    if spoken:
-                        stream_speak(spoken)
+
+                reply = handle_policy_command(text, policy)
+                if reply:
+                    print(f"[Policy] {reply}")
+                    stream_speak(reply)
                     continue
 
-                # Add recall context (if any)
-                try:
-                    memories = recall_relevant(text)
-                    if memories:
-                        recall_ctx = format_memories(memories)
-                        print("[Recall injected]:")
-                        print(recall_ctx)
-                        text = f"(Relevant context from past interactions: {recall_ctx})\n\n{text}"
-                except Exception:
-                    pass
+                if ack:
+                    stream_speak(ack)
 
-                # Default fallback: LLM or graceful error
-                if settings.openai_api_key:
-                    reply = ask_aerith_stream(text)
-                    if reply:
-                        print(f"{BASE_PERSONALITY.capitalize()}: {reply}")
-                        stream_speak(reply)
-                else:
-                    print("[Aerith] LLM is disabled or not configured.")
-                    stream_speak("I'm not currently connected to my AI core.")
-                    reply = None
+                correction = listen_until_silence()
+                if correction:
+                    print(f"You (clarification): {correction}")
+                    revised_input = f"Original: {last_user_input}\nUser clarification: {correction}"
 
-                # Final fallback if no reply generated
-                if not reply:
-                    print("[Aerith] No response generated.")
-                    stream_speak("I didn't catch that. Could you rephrase?")
+                    # NOTE: This branch was confusing before (reply sometimes dict); keep it simple:
+                    revised_reply = (
+                        ask_aerith_stream(revised_input) if settings.openai_api_key else None
+                    )
+                    if revised_reply:
+                        print(f"{BASE_PERSONALITY.capitalize()}: {revised_reply}")
+                        stream_speak(revised_reply)
 
-                # Store memory of the exchange
-                try:
-                    if isinstance(reply, dict):
-                        reply = reply.get("response") or reply.get("content") or str(reply)
+                        try:
+                            decider = Decider(memory=store)
+                            memory_candidate = decider.decide_memory(revised_input, revised_reply)
+                            if memory_candidate:
+                                store.save_memory(memory_candidate)
+                        except Exception as exc:
+                            print(f"[Memory] Failed to evaluate/save: {exc}")
+                continue
 
-                    if reply is not None and isinstance(reply, str):
-                        decider = Decider(memory=store)
-                        memory_candidate = decider.decide_memory(text, reply)
+            # Manual overrides (simple)
+            if "be sarcastic" in low:
+                MODE = "sarcastic"
+                CURRENT_PERSONALITY = load_personality(BASE_PERSONALITY, MODE)
+                stream_speak("Oh, finally. Let me really express myself.")
+                continue
+            if "be formal" in low:
+                MODE = "formal"
+                CURRENT_PERSONALITY = load_personality(BASE_PERSONALITY, MODE)
+                stream_speak("Very well. I will maintain formal tone.")
+                continue
+            if "be normal" in low:
+                MODE = "default"
+                CURRENT_PERSONALITY = load_personality(BASE_PERSONALITY, MODE)
+                stream_speak("Back to default mode.")
+                continue
 
-                        if memory_candidate:
-                            store.save_memory(memory_candidate)
-                except Exception as e:
-                    print(f"[Memory] Failed to evaluate/save: {e}")
+            resp = repl_commands.handle_command("aerith", text, policy)
+            if resp:
+                print(f"[Command] {resp}")
+                stream_speak(resp)
+                continue
 
-                # if settings.openai_api_key:
-                #     reply = ask_aerith_stream(text)
-                #     if reply:
-                #         print(f"{BASE_PERSONALITY.capitalize()}: {reply}")
-                #         stream_speak(reply)
-                # else:
-                #     print("[Aerith] LLM is disabled or not configured.")
-                #     stream_speak("I'm not currently connected to my AI core.")
-                #     reply = None
+            reply, spoken = manager.handle(
+                text, manager.plugins, personality=CURRENT_PERSONALITY, mode=MODE
+            )
+            if reply or spoken:
+                if reply:
+                    print(f"{BASE_PERSONALITY.capitalize()}: {reply}")
+                if spoken:
+                    stream_speak(spoken)
+                continue
 
-                # # Final fallback if no reply generated
-                # if not reply:
-                #     print("[Aerith] No response generated.")
-                #     stream_speak("I didn't catch that. Could you rephrase?")
+            # Add recall context (if any)
+            try:
+                memories = recall_relevant(text)
+                if memories:
+                    recall_ctx = format_memories(memories)
+                    print("[Recall injected]:")
+                    print(recall_ctx)
+                    text = f"(Relevant context from past interactions: {recall_ctx})\n\n{text}"
+            except Exception:
+                pass
 
-                # # Store memory of the exchange
-                # try:
-                #     if isinstance(reply, dict):
-                #         reply = reply.get("response") or reply.get("content") or str(reply)
+            # Default fallback: LLM or graceful error
+            if settings.openai_api_key:
+                reply = ask_aerith_stream(text)
+                if reply:
+                    print(f"{BASE_PERSONALITY.capitalize()}: {reply}")
+                    stream_speak(reply)
+            else:
+                print("[Aerith] LLM is disabled or not configured.")
+                stream_speak("I'm not currently connected to my AI core.")
+                reply = None
 
-                #     dec = Decider()
-                #     mem = dec.decide_memory(text, reply or "")
-                #     if mem:
-                #         store.add_event(
-                #             f"{mem['content']} || {mem.get('response','')}", importance=0.0, type_="chat"
-                #         )
+            if not reply:
+                print("[Aerith] No response generated.")
+                stream_speak("I didn't catch that. Could you rephrase?")
 
-                #     decider = Decider(memory=store)  # wherever `store` is your MemoryStore
-                #     memory_candidate = decider.decide_memory(text, reply)
-
-                #     if memory_candidate:
-                #         store.save_memory(memory_candidate)
-                # except Exception:
-                #     pass
+            # Store memory of the exchange
+            try:
+                if isinstance(reply, str):
+                    decider = Decider(memory=store)
+                    memory_candidate = decider.decide_memory(text, reply)
+                    if memory_candidate:
+                        store.save_memory(memory_candidate)
+            except Exception as exc:
+                print(f"[Memory] Failed to evaluate/save: {exc}")
 
 except KeyboardInterrupt:
     print("Shutting Down...")
-    scheduler.stop()
-    sys.exit(0)
+    shutdown()
+    raise SystemExit(0) from None

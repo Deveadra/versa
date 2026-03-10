@@ -50,7 +50,7 @@ state = AerithState.IDLE
 
 
 def reset_session():
-    global messages, stop_playback # noqa: PLW0603
+    global messages, stop_playback  # noqa: PLW0603
     messages = [{"role": "system", "content": JARVIS_PROMPT}]
     stop_playback = False
 

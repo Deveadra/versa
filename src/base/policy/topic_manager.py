@@ -65,7 +65,11 @@ def prune_stale_topics(
         mem_count = mem_count_row["cnt"] if mem_count_row else 0
 
         # Decide if stale
-        if rule_count <= min_rules and mem_count <= min_memories and (not last_mem or last_mem < cutoff):
+        if (
+            rule_count <= min_rules
+            and mem_count <= min_memories
+            and (not last_mem or last_mem < cutoff)
+        ):
             cur.execute("DELETE FROM topics WHERE id=?", (topic,))
             pruned.append(topic)
 

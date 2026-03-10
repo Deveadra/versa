@@ -786,29 +786,49 @@ class RepoJanitorIterationController:
                 best_score = float(best.score())
                 after_score = float(after.score())
                 eps = 1e-6
+                worktree_changed = self._worktree_dirty()
 
                 if after_gates < best_gates:
-                    is_improved = True
+                    health_improved = True
                 elif after_gates > best_gates:
-                    is_improved = False
+                    health_improved = False
                 else:
-                    is_improved = after_score > (best_score + eps)
+                    health_improved = after_score > (best_score + eps)
 
-                is_improved = bool(is_improved and self._worktree_dirty())
+                durable_improvement = bool(health_improved and worktree_changed)
+
+                # Always track the best observed repo health, even if no files changed.
+                if health_improved:
+                    best = after
+                    best_id = after_id
+                    best_branch = branch if worktree_changed else base_branch
+
+                if durable_improvement:
+                    verify_message = "Safe autofix improved the scoreboard"
+                    verify_outcome = "improved"
+                    summary_error = None
+                elif health_improved:
+                    verify_message = (
+                        "Safe autofix improved scoring, but produced no persistent worktree changes"
+                    )
+                    verify_outcome = "transient_improvement"
+                    summary_error = (
+                        "safe autofix improved scoring but produced no persistent worktree changes"
+                    )
+                else:
+                    verify_message = "Safe autofix made no measurable improvement"
+                    verify_outcome = "no_change"
+                    summary_error = "safe autofix made no measurable improvement"
 
                 self._status_finish(
                     status_callback,
                     status_timers,
                     phase="verify",
-                    message=(
-                        "Safe autofix improved the scoreboard"
-                        if is_improved
-                        else "Safe autofix made no measurable improvement"
-                    ),
+                    message=verify_message,
                     pct=80,
                     iteration=i,
                     branch=branch,
-                    outcome="improved" if is_improved else "no_change",
+                    outcome=verify_outcome,
                 )
 
                 attempt_artifacts["summary"] = self._write_attempt_summary_artifact(
@@ -816,10 +836,14 @@ class RepoJanitorIterationController:
                     iteration=i,
                     branch=branch,
                     stage="safe_autofix_scored",
-                    improved=bool(is_improved),
-                    error=None if is_improved else "safe autofix made no measurable improvement",
+                    improved=bool(durable_improvement),
+                    error=summary_error,
                     attempt_artifacts=attempt_artifacts,
-                    extra={"diff_summary": diff_summary},
+                    extra={
+                        "diff_summary": diff_summary,
+                        "health_improved": bool(health_improved),
+                        "worktree_changed": bool(worktree_changed),
+                    },
                 )
 
                 attempt_row = {
@@ -829,7 +853,9 @@ class RepoJanitorIterationController:
                     "after_score": float(after.score()),
                     "before_gates": int(before.gates_failing),
                     "after_gates": int(after.gates_failing),
-                    "improved": bool(is_improved),
+                    "improved": bool(durable_improvement),
+                    "health_improved": bool(health_improved),
+                    "worktree_changed": bool(worktree_changed),
                     "mode": "safe_autofix",
                     "artifacts": attempt_artifacts,
                     "diff_summary": diff_summary,
@@ -837,11 +863,8 @@ class RepoJanitorIterationController:
                 attempts.append(attempt_row)
                 artifacts["attempts"].append(attempt_artifacts)
 
-                if is_improved:
+                if durable_improvement:
                     improved_any = True
-                    best = after
-                    best_id = after_id
-                    best_branch = branch
 
                     safe_autofix_proposal = Proposal(
                         title="Repo Janitor: safe autofix",
@@ -909,6 +932,8 @@ class RepoJanitorIterationController:
                             "description": safe_autofix_proposal.description,
                             "artifacts": attempt_artifacts,
                             "diff_summary": diff_summary,
+                            "health_improved": bool(health_improved),
+                            "worktree_changed": bool(worktree_changed),
                         },
                         pr_url=pr_url,
                         improved=True,
@@ -931,12 +956,19 @@ class RepoJanitorIterationController:
                         "description": "Applied Black formatting and Ruff safe fixes.",
                         "artifacts": attempt_artifacts,
                         "diff_summary": diff_summary,
+                        "health_improved": bool(health_improved),
+                        "worktree_changed": bool(worktree_changed),
                     },
                     pr_url=None,
                     improved=False,
-                    error_text="safe autofix made no measurable improvement",
+                    error_text=summary_error,
                 )
                 self._rollback_to_base(base_branch)
+
+                if safe_autofix_only and not allow_llm_autonomous:
+                    break
+
+                continue
 
                 if safe_autofix_only and not allow_llm_autonomous:
                     break

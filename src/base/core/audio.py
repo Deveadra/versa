@@ -8,18 +8,38 @@ import sounddevice as sd
 import soundfile as sf
 from loguru import logger
 from pvporcupine import create
-from TTS.api import TTS
 
-from base.voice.tts_aerith import AerithVoice
+try:
+    from TTS.api import TTS as CoquiTTS  # type: ignore
+except ModuleNotFoundError:
+    CoquiTTS = None
+
+# from base.voice.tts_aerith import AerithVoice
+# from base.voice.tts_elevenlabs import Voice
 from base.voice.tts_elevenlabs import Voice as ElevenLabsVoice
-from base.voice.tts_voice import Voice
 from config.config import settings
 
 from .core import AerithState, pick_ack, state
 
 current_playback_thread = None
-tts = TTS("tts_models/en/jenny/jenny")
+# tts = TTS("tts_models/en/jenny/jenny")
+_tts = None
+_tts_lock = threading.Lock()
 stop_playback = False
+
+
+def _get_tts():
+    global _tts
+    if CoquiTTS is None:
+        raise RuntimeError(
+            "Coqui TTS (package `TTS`) is not installed. "
+            "On Python 3.12 it is not installed by your extras. "
+            "Use ElevenLabs, or run under Python < 3.12 with voice extras that include TTS."
+        )
+    with _tts_lock:
+        if _tts is None:
+            _tts = CoquiTTS("tts_models/en/jenny/jenny")
+    return _tts
 
 
 def listen_until_silence(threshold=0.01, timeout=8, samplerate=16000):
@@ -48,6 +68,8 @@ def listen_until_silence(threshold=0.01, timeout=8, samplerate=16000):
 def stream_speak(text):
     try:
         if settings.tts_engine == "aerith":
+            from base.voice.tts_aerith import AerithVoice  # noqa: PLC0415
+
             AerithVoice.get_instance().speak(text)
         else:
             voice = ElevenLabsVoice.get_instance()
@@ -107,7 +129,7 @@ def stream_speak(text):
 
 
 def interrupt():
-    global stop_playback # noqa: PLW0603
+    global stop_playback  # noqa: PLW0603
     stop_playback = True
     ack = pick_ack("stop")
 
@@ -118,8 +140,12 @@ def interrupt():
     threading.Thread(target=voice.speak_async, args=(ack,), daemon=True).start()
     try:
         if settings.tts_engine == "aerith":
+            from base.voice.tts_aerith import AerithVoice  # noqa: PLC0415
+
             AerithVoice.get_instance().speak("Interrupting.")
         else:
+            from base.voice.tts_elevenlabs import Voice  # noqa: PLC0415
+
             Voice.get_instance().stop_speaking()
             Voice.get_instance().speak_async("Interrupting.")
     except Exception as e:
@@ -181,7 +207,7 @@ def listen_for_wake_word():
         #         AerithState = AerithState.ACTIVE
         #         pa.stop()
         #         return
-        global state # noqa: PLW0603
+        global state  # noqa: PLW0603
         while state == AerithState.IDLE:
             pcm = pa.read(porcupine.frame_length)[0]
             pcm = struct.unpack_from("h" * porcupine.frame_length, pcm)

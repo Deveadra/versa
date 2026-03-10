@@ -38,7 +38,7 @@ def classify_mode(user_text: str, last_mode: str = "default") -> tuple[str, bool
 
     # Repeat escalation
     if _repeat_count >= 2 and random.random() < 0.9:
-      repeat_triggered = True
-      return "sarcastic", repeat_triggered
+        repeat_triggered = True
+        return "sarcastic", repeat_triggered
 
     return "default", False

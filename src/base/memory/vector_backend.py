@@ -105,9 +105,7 @@ class _QdrantMemoryBackendImpl:
         points: list[PointStruct] = []
         base_id = int(time.time() * 1000)
         points.extend(
-            PointStruct(
-                id=base_id + i, vector=vec.tolist(), payload={"content": t}
-            )
+            PointStruct(id=base_id + i, vector=vec.tolist(), payload={"content": t})
             for i, (t, vec) in enumerate(zip(texts, vectors, strict=True))
         )
         try:
@@ -418,8 +416,8 @@ class InMemoryBackend:
             return float(self.np.dot(a, b) / denom)
         # Pure-Python fallback
         dot = sum(float(x) * float(y) for x, y in zip(a, b, strict=True))
-        norm_a = sum(float(x)**2 for x in a)**0.5
-        norm_b = sum(float(y)**2 for y in b)**0.5
+        norm_a = sum(float(x) ** 2 for x in a) ** 0.5
+        norm_b = sum(float(y) ** 2 for y in b) ** 0.5
         denom = (norm_a * norm_b) or 1.0
         return float(dot / denom)
 

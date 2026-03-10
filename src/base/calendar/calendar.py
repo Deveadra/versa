@@ -28,7 +28,7 @@ _service = None
 
 def init_google_calendar_service():
     """Authenticate and build Google Calendar service."""
-    global _service # noqa: PLW0603
+    global _service  # noqa: PLW0603
     token_path = "token.google.pickle"
     if not GAPI_AVAILABLE:
         return None

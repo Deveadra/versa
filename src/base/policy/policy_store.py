@@ -147,9 +147,9 @@ class PolicyStore:
 
         # honor soft override while active; allow trigger- or time-based reintro
         if override and override["type"] == "soft" and (exp := override.get("expires_at")):
-          with contextlib.suppress(Exception):
-              if now < parse_iso_utc(exp) and not context_signals.get("trigger", False):
-                  return False, {"reason": "soft_override_active"}
+            with contextlib.suppress(Exception):
+                if now < parse_iso_utc(exp) and not context_signals.get("trigger", False):
+                    return False, {"reason": "soft_override_active"}
         st = self.state(topic_id)
         ignore_penalty_cap = {"principled": 0.25, "advocate": 0.5, "adaptive": 1.0}[topic.policy]
         ignore_penalty = min(st.get("ignore_count", 0) * 0.05, ignore_penalty_cap)

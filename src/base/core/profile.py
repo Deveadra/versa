@@ -67,8 +67,6 @@ def set_pref(key: str, value):
     try:
         json.dumps({key: value})
     except TypeError as e:
-        raise TypeError(
-          f"Preference value for '{key}' must be JSON-serializable: {e}"
-          ) from e
+        raise TypeError(f"Preference value for '{key}' must be JSON-serializable: {e}") from e
 
     return update_profile({key: value})

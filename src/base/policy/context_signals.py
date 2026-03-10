@@ -2,6 +2,7 @@ import sqlite3
 from typing import Any
 
 from base.database.sqlite import SQLiteConn
+from base.utils.time import utc_iso
 
 
 def _unwrap_conn(db: SQLiteConn | sqlite3.Connection) -> sqlite3.Connection:

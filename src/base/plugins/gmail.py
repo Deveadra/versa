@@ -1,5 +1,8 @@
+
+import base64
 import os
 import pickle
+from email.mime.text import MIMEText
 
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -58,9 +61,6 @@ def get_unread_emails(n=5):
 
 def send_email(recipient, subject, body):
     """Send an email via Gmail (fallback to mock if unavailable)."""
-    import base64
-    from email.mime.text import MIMEText
-
     global _service
     if not _service:
         return f"[Mock] Would send email to {recipient} with subject '{subject}'."

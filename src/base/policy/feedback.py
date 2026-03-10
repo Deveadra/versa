@@ -67,7 +67,7 @@ def schedule_signal_check(
             if row:
                 try:
                     vals[name] = float(row["value"])
-                except:
+                except (TypeError, ValueError):
                     vals[name] = row["value"]
         if not vals:
             return

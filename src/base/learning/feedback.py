@@ -10,6 +10,7 @@ from typing import Any
 
 from base.database.sqlite import SQLiteConn
 from base.memory.store import MemoryStore
+from base.policy.context_signals import ContextSignals
 from base.policy.tone_memory import update_tone_memory
 from config.config import settings
 
@@ -132,8 +133,6 @@ def record_rule_feedback(
         if rule_row and rule_row["reset_signals"]:
             try:
                 resets = json.loads(rule_row["reset_signals"])
-                from base.policy.context_signals import ContextSignals
-
                 ctx_mgr = ContextSignals(SQLiteConn(settings.db_path))
                 for sig in resets:
                     ctx_mgr.reset(sig, 0)

@@ -8,7 +8,8 @@ from base.llm.retriever import DbRetriever
 
 class RetrieverTests(unittest.TestCase):
     def setUp(self):
-        self.dbfile = tempfile.NamedTemporaryFile(delete=False).name
+        fd, self.dbfile = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
         self.conn = sqlite3.connect(self.dbfile, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         cur = self.conn.cursor()

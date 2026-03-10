@@ -1,7 +1,5 @@
 # base/plugins/__init__.py
 from base.calendar.calendar import (
-    add_event,
-    calendar_has_pending,
     get_upcoming_events,
     init_google_calendar_service,
 )
@@ -13,10 +11,10 @@ from .system import get_system_stats
 
 def show_calendar() -> str:
     default_cal = str(get_pref("default_calendar", "primary"))
-    events = get_upcoming_events(calendar_id=default_cal, n=5)
-    if not events:
+    if events := get_upcoming_events(calendar_id=default_cal, n=5):
+        return ", ".join(f"{e['summary']} on {e['start']}" for e in events)
+    else:
         return "No upcoming events."
-    return ", ".join(f"{e['summary']} on {e['start']}" for e in events)
 
 
 PLUGINS = {

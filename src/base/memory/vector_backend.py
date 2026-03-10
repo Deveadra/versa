@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: MIT
 # src/base/memory/vector_backend.py
+
 from __future__ import annotations
 
+import time
 from typing import Any, Protocol
 
 from loguru import logger
@@ -100,13 +102,14 @@ class _QdrantMemoryBackendImpl:
             logger.error(f"QdrantMemoryBackend.index: Embedding batch failed: {e}")
             return
 
-        import time
-
         points: list[PointStruct] = []
         base_id = int(time.time() * 1000)
-        for i, (t, vec) in enumerate(zip(texts, vectors)):
-            points.append(PointStruct(id=base_id + i, vector=vec.tolist(), payload={"content": t}))
-
+        points.extend(
+            PointStruct(
+                id=base_id + i, vector=vec.tolist(), payload={"content": t}
+            )
+            for i, (t, vec) in enumerate(zip(texts, vectors, strict=True))
+        )
         try:
             self.client.upsert(collection_name=self.collection_name, points=points)
             logger.info(f"QdrantMemoryBackend: Indexed {len(points)} vectors.")
@@ -124,8 +127,6 @@ class _QdrantMemoryBackendImpl:
         except Exception as e:
             logger.error(f"QdrantMemoryBackend.add_text: embed failed: {e}")
             return
-
-        import time
 
         pid = vector_id if vector_id is not None else int(time.time() * 1000)
         point = PointStruct(id=pid, vector=vec.tolist(), payload=payload)
@@ -153,10 +154,7 @@ class _QdrantMemoryBackendImpl:
 
         try:
             qv = self.embedder.encode([query])[0]
-            if hasattr(qv, "tolist"):
-                qv = qv.tolist()
-            else:
-                qv = list(qv)
+            qv = qv.tolist() if hasattr(qv, "tolist") else list(qv)
         except Exception as e:
             logger.error(f"QdrantMemoryBackend.search: embed failed: {e}")
             return []
@@ -389,7 +387,7 @@ class InMemoryBackend:
 
     def __init__(self, embedder=None):
         try:
-            import numpy as np  # preferred, but optional
+            import numpy as np  # noqa: PLC0415
         except Exception:
             np = None
         self.np = np
@@ -419,9 +417,9 @@ class InMemoryBackend:
             denom = (self.np.linalg.norm(a) * self.np.linalg.norm(b)) or 1.0
             return float(self.np.dot(a, b) / denom)
         # Pure-Python fallback
-        dot = sum(float(x) * float(y) for x, y in zip(a, b))
-        norm_a = sum(float(x) * float(x) for x in a) ** 0.5
-        norm_b = sum(float(y) * float(y) for y in b) ** 0.5
+        dot = sum(float(x) * float(y) for x, y in zip(a, b, strict=True))
+        norm_a = sum(float(x)**2 for x in a)**0.5
+        norm_b = sum(float(y)**2 for y in b)**0.5
         denom = (norm_a * norm_b) or 1.0
         return float(dot / denom)
 

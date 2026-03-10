@@ -205,8 +205,6 @@ class MemoryStore:
 
             self._fts_enabled = True
         except sqlite3.OperationalError as e:
-            from loguru import logger
-
             logger.error(f"FTS init failed: {e}")
             self._fts_enabled = False
 
@@ -897,7 +895,7 @@ class MemoryStore:
 
     def init_db(self) -> None:
         with self._connect_for_compat() as conn:
-            cur = conn.cursor()
+            _cur = conn.cursor()
             # run the same schema setup here if needed
             # or simply no-op since _ensure_schema already covers this
             conn.commit()

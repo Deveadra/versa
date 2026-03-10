@@ -61,8 +61,6 @@ class Scheduler:
 
         # Lazy-import HabitMiner only if we actually need it
         if miner is None:
-            from base.learning.habit_miner import HabitMiner  # local import to keep tests light
-
             miner = HabitMiner(memory=memory, store=store, db=db)
 
         self.miner = miner

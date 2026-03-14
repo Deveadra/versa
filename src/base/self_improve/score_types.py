@@ -81,6 +81,33 @@ class ScoreboardRun:
             - 0.5 * total_sec
         )
 
+    def deterministic_score(self) -> float:
+        """
+        Stable score used for comparisons across runs.
+        Purpose: avoid "score drift" from runtime/latency/caches.
+
+        - 1000 baseline
+        - penalize failing gates / failing tools only (deterministic)
+        """
+        base = 1000.0
+        gates = int(self.gates_failing or 0)
+        base -= 100.0 * gates
+
+        tool_results = self.tool_results or {}
+        failing_tools = sum(
+            1 for tr in tool_results.values() if int(getattr(tr, "exit_code", 0) or 0) != 0
+        )
+        base -= 10.0 * failing_tools
+
+        # failing_tools = 0
+        # for tr in tool_results.values():
+        #     exit_code = int(getattr(tr, "exit_code", 0) or 0)
+        #     if exit_code != 0:
+        #         failing_tools += 1
+
+        # base -= 10.0 * failing_tools
+        return float(base)
+
     def gating_summary(self) -> dict[str, object]:
         return {
             "gates_failing": int(self.gates_failing),
@@ -91,6 +118,7 @@ class ScoreboardRun:
 
     def to_dict(self) -> dict[str, object]:
         return {
+            "deterministic_score": float(self.deterministic_score()),
             "mode": self.mode,
             "fix_enabled": bool(self.fix_enabled),
             "total_duration_ms": float(self.total_duration_ms),

@@ -326,14 +326,26 @@ class RepoJanitorIterationController:
             name for name, tr in run.tool_results.items() if int(getattr(tr, "exit_code", 1)) != 0
         )
 
+    def _score_value(self, run) -> float:
+        ds = getattr(run, "deterministic_score", None)
+        if callable(ds):
+            return float(ds())
+        s = getattr(run, "score", None)
+        if callable(s):
+            return float(s())
+        return float(getattr(run, "score_value", 0.0) or 0.0)
+
     def _score_delta_summary(self, before, after) -> dict[str, Any]:
         before_failing = set(self._failing_tools(before))
         after_failing = set(self._failing_tools(after))
 
+        before_score = self._score_value(before)
+        after_score = self._score_value(after)
+
         return {
-            "before_score": float(before.score()),
-            "after_score": float(after.score()),
-            "score_delta": float(after.score() - before.score()),
+            "before_score": before_score,
+            "after_score": after_score,
+            "score_delta": float(after_score - before_score),
             "before_gates": int(before.gates_failing),
             "after_gates": int(after.gates_failing),
             "gates_delta": int(after.gates_failing) - int(before.gates_failing),
@@ -783,9 +795,9 @@ class RepoJanitorIterationController:
 
                 best_gates = int(getattr(best, "gates_failing", 0))
                 after_gates = int(getattr(after, "gates_failing", 0))
-                best_score = float(best.score())
-                after_score = float(after.score())
-                eps = 1e-6
+                best_score = self._score_value(best)
+                after_score = self._score_value(after)
+                eps = SCORE_EPS
                 worktree_changed = self._worktree_dirty()
 
                 if after_gates < best_gates:
@@ -807,18 +819,22 @@ class RepoJanitorIterationController:
                     verify_message = "Safe autofix improved the scoreboard"
                     verify_outcome = "improved"
                     summary_error = None
+                    proposal_outcome = None
+                    proposal_note = None
                 elif health_improved:
                     verify_message = (
                         "Safe autofix improved scoring, but produced no persistent worktree changes"
                     )
                     verify_outcome = "transient_improvement"
-                    summary_error = (
-                        "safe autofix improved scoring but produced no persistent worktree changes"
-                    )
+                    summary_error = None
+                    proposal_outcome = "no_changes"
+                    proposal_note = verify_message
                 else:
                     verify_message = "Safe autofix made no measurable improvement"
                     verify_outcome = "no_change"
-                    summary_error = "safe autofix made no measurable improvement"
+                    summary_error = "Safe autofix made no measurable improvement"
+                    proposal_outcome = None
+                    proposal_note = None
 
                 self._status_finish(
                     status_callback,
@@ -843,6 +859,8 @@ class RepoJanitorIterationController:
                         "diff_summary": diff_summary,
                         "health_improved": bool(health_improved),
                         "worktree_changed": bool(worktree_changed),
+                        "proposal_outcome": proposal_outcome,
+                        "proposal_note": proposal_note,
                     },
                 )
 
@@ -943,32 +961,38 @@ class RepoJanitorIterationController:
                     if budget.stop_on_first_improvement:
                         break
 
-                insert_improvement_attempt(
-                    self.conn,
-                    iteration=i,
-                    baseline_run_id=baseline_id,
-                    before_run_id=before_id,
-                    after_run_id=after_id,
-                    branch=branch,
-                    proposal_title="Repo Janitor: safe autofix",
-                    proposal_json={
+                else:
+                    proposal_json = {
                         "mode": "safe_autofix",
                         "description": "Applied Black formatting and Ruff safe fixes.",
                         "artifacts": attempt_artifacts,
                         "diff_summary": diff_summary,
                         "health_improved": bool(health_improved),
                         "worktree_changed": bool(worktree_changed),
-                    },
-                    pr_url=None,
-                    improved=False,
-                    error_text=summary_error,
-                )
-                self._rollback_to_base(base_branch)
+                    }
 
-                if safe_autofix_only and not allow_llm_autonomous:
-                    break
+                    if proposal_outcome is not None:
+                        proposal_json = {
+                            **proposal_json,
+                            "outcome": proposal_outcome,
+                            "note": proposal_note,
+                        }
 
-                continue
+                    insert_improvement_attempt(
+                        self.conn,
+                        iteration=i,
+                        baseline_run_id=baseline_id,
+                        before_run_id=before_id,
+                        after_run_id=after_id,
+                        branch=branch,
+                        proposal_title="Repo Janitor: safe autofix",
+                        proposal_json=proposal_json,
+                        pr_url=None,
+                        improved=False,
+                        error_text=summary_error,
+                    )
+
+                    self._rollback_to_base(base_branch)
 
                 if safe_autofix_only and not allow_llm_autonomous:
                     break
@@ -1399,9 +1423,9 @@ class RepoJanitorIterationController:
 
             best_gates = int(getattr(best, "gates_failing", 0))
             after_gates = int(getattr(after, "gates_failing", 0))
-            best_score = float(best.score())
-            after_score = float(after.score())
-            eps = 1e-6
+            best_score = self._score_value(best)
+            after_score = self._score_value(after)
+            eps = SCORE_EPS
 
             if after_gates < best_gates:
                 is_improved = True
@@ -1609,8 +1633,16 @@ class RepoJanitorIterationController:
 
         return {
             "goal": computed_goal,
-            "baseline": {"score": float(baseline.score()), "gates": int(baseline.gates_failing)},
-            "best": {"score": float(best.score()), "gates": int(best.gates_failing)},
+            "baseline": {
+                "score": float(baseline.score()),
+                "comparison_score": float(self._score_value(baseline)),
+                "gates": int(baseline.gates_failing),
+            },
+            "best": {
+                "score": float(best.score()),
+                "comparison_score": float(self._score_value(best)),
+                "gates": int(best.gates_failing),
+            },
             "attempts": attempts,
             "improved": bool(improved_any),
             "pr_url": pr_url,

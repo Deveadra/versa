@@ -47,6 +47,7 @@ from base.self_improve.diagnostic_engine import DiagnosticEngine
 from base.self_improve.models import Proposal, ProposedChange
 from base.self_improve.pr_manager import PRManager
 from base.self_improve.proposal_engine import ProposalEngine
+from base.self_improve.self_improve_db import ensure_self_improve_schema, fetch_open_gaps
 from base.self_improve.service import SelfImproveRunConfig, SelfImproveService
 from base.utils.embeddings import get_embedder
 from base.utils.status import AerithStatus, AerithStatusConfig, CognitiveStatus
@@ -1304,6 +1305,121 @@ class Orchestrator:
     # High-level user flow with composer
     # ------------------------------------
 
+    def _handle_dream_command(self, msg: str) -> str | None:
+        """
+        Hard command routing for self-improve status that must NOT go through the LLM.
+        Returns a string response if handled, otherwise None.
+        """
+        lower = msg.strip().lower()
+        tokens = lower.split()
+        if not tokens:
+            return None
+
+        # Accept both 'dream' and your accidental 'dreams'
+        if tokens[0] not in {"dream", "dreams"}:
+            return None
+
+        if len(tokens) < 2:
+            return "Usage: dream status | dream gaps [limit]"
+
+        sub = tokens[1].lower()
+
+        try:
+            ensure_self_improve_schema(self.db.conn)
+        except Exception as e:
+            return f"Self-improve schema check failed: {e}"
+
+        if sub == "status":
+            conn = self.db.conn
+
+            r = conn.execute("""
+              SELECT id, created_at, run_type, mode, fix_enabled, git_branch, git_sha, score, passed
+              FROM repo_score_runs
+              ORDER BY id DESC
+              LIMIT 1
+              """).fetchone()
+
+            if not r:
+                return "No self-improve runs recorded yet."
+
+            # sqlite Row supports index access reliably
+            run_id = int(r[0])
+            created_at = str(r[1])
+            run_type = str(r[2])
+            mode = str(r[3])
+            fix_enabled = bool(r[4])
+            git_branch = r[5] or "—"
+            git_sha = r[6] or "—"
+            git_sha = git_sha[:10] if git_sha != "—" else "—"
+            score = float(r[7] or 0.0)
+            passed = bool(r[8])
+
+            a = conn.execute("""
+              SELECT id, created_at, iteration, branch, proposal_title, pr_url, improved, error_text
+              FROM repo_improvement_attempts
+              ORDER BY id DESC
+              LIMIT 1
+              """).fetchone()
+
+            open_gaps = int(conn.execute("""
+                  SELECT COUNT(*)
+                  FROM capability_gaps
+                  WHERE status IN ('queued','in_progress','new')
+                  """).fetchone()[0])
+
+            lines: list[str] = []
+            lines.append("Self-improve status:")
+            lines.append(
+                f"- Last score run: id={run_id} at {created_at} | type={run_type} mode={mode} "
+                f"fix={'on' if fix_enabled else 'off'} passed={'yes' if passed else 'no'} "
+                f"score={score:.3f} branch={git_branch} sha={git_sha}"
+            )
+
+            if a:
+                attempt_id = int(a[0])
+                attempt_at = str(a[1])
+                iteration = int(a[2])
+                branch = str(a[3])
+                title = a[4] or "—"
+                pr_url = a[5] or "—"
+                improved = bool(a[6])
+                error_text = (a[7] or "").strip()
+
+                lines.append(
+                    f"- Last attempt: id={attempt_id} at {attempt_at} | it={iteration} "
+                    f"improved={'yes' if improved else 'no'} branch={branch} title={title}"
+                )
+                if pr_url != "—":
+                    lines.append(f"  PR: {pr_url}")
+                if error_text:
+                    lines.append(f"  Error: {error_text}")
+            else:
+                lines.append("- Last attempt: —")
+
+            lines.append(f"- Open gaps: {open_gaps} (run `dream gaps` to list)")
+            return "\n".join(lines)
+
+        if sub == "gaps":
+            limit = 5
+            if len(tokens) >= 3 and tokens[2].isdigit():
+                limit = max(1, min(50, int(tokens[2])))
+
+            gaps = fetch_open_gaps(self.db.conn, limit=limit)
+            if not gaps:
+                return "No open gaps (queued/in_progress/new)."
+
+            lines = [f"Open gaps (top {len(gaps)}):"]
+            for g in gaps:
+                lines.append(
+                    f"- [#{g['id']}] prio={g['priority']} status={g['status']} "
+                    f"source={g['source']} capability={g['requested_capability']}"
+                )
+                if g.get("observed_failure"):
+                    lines.append(f"  failure: {g['observed_failure']}")
+            return "\n".join(lines)
+
+        return "Usage: dream status | dream gaps [limit]"
+
     def _job_self_improvement(self) -> None:
         cfg = SelfImproveRunConfig(status_callback=self._self_improve_status_callback)
         try:
@@ -1324,6 +1440,10 @@ class Orchestrator:
 
         try:
             lower = msg.strip().lower()
+            # --- Hard command routing: must bypass LLM/status UI ---
+            dream_resp = self._handle_dream_command(msg)
+            if dream_resp is not None:
+                return dream_resp
             self.status.begin("analyze", "Understanding request")
             self.status.stage("analyze", "Parsing intent", pct=10)
 

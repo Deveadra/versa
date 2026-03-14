@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import time
 from typing import Any, Protocol
+from urllib.parse import urlparse
 
 from loguru import logger
 
@@ -69,18 +70,27 @@ class _QdrantMemoryBackendImpl:
         self.dim = dim
         self.collection_name = collection_name
 
+        effective_url = url or "http://localhost:6333"
+        parsed = urlparse(effective_url)
+        is_insecure_local = parsed.scheme == "http" and parsed.hostname in {
+            "localhost",
+            "127.0.0.1",
+        }
+
+        api_key_to_use = api_key
+        if api_key and is_insecure_local:
+            logger.info(
+                "Qdrant: api_key provided for insecure local HTTP; omitting api_key to avoid warning."
+            )
+            api_key_to_use = None
+
         if url:
             logger.info(f"QdrantMemoryBackend: Connecting to Qdrant at {url}")
-            if api_key:
-                self.client = QdrantClient(url=url, api_key=api_key)
-            else:
-                self.client = QdrantClient(url=url)
         else:
             logger.info("QdrantMemoryBackend: Connecting to local Qdrant (localhost:6333)")
-            if api_key:
-                self.client = QdrantClient(host="localhost", port=6333, api_key=api_key)
-            else:
-                self.client = QdrantClient(host="localhost", port=6333)
+
+        self.client = QdrantClient(url=effective_url, api_key=api_key_to_use)
+
         # Ensure collection exists (DO NOT recreate: that can wipe data)
         try:
             self.client.get_collection(collection_name=self.collection_name)

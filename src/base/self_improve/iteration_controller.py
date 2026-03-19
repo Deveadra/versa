@@ -829,6 +829,24 @@ class RepoJanitorIterationController:
                     summary_error = None
                     proposal_outcome = "no_changes"
                     proposal_note = verify_message
+
+                    # Ensure proposal_json is a dict and attach outcome/note for downstream persistence.
+                    pj = proposal_json if isinstance(proposal_json, dict) else {}
+                    proposal_json = {**pj, "outcome": "no_changes", "note": verify_message}
+
+                    # insert_improvement_attempt(
+                    #     conn,
+                    #     iteration=iteration,
+                    #     baseline_run_id=baseline_run_id,
+                    #     before_run_id=before_run_id,
+                    #     after_run_id=after_run_id,
+                    #     branch=branch,
+                    #     proposal_title=proposal_title,
+                    #     proposal_json=pj,
+                    #     pr_url=pr_url,
+                    #     improved=False,
+                    #     error_text=None,  # <- critical
+                    # )
                 else:
                     verify_message = "Safe autofix made no measurable improvement"
                     verify_outcome = "no_change"

@@ -1320,7 +1320,7 @@ class Orchestrator:
             return None
 
         if len(tokens) < 2:
-            return "Usage: dream status | dream gaps [limit]"
+            return "Usage: dream status | dream gaps|gap [limit]"
 
         sub = tokens[1].lower()
 
@@ -1332,6 +1332,7 @@ class Orchestrator:
         if sub == "status":
             conn = self.db.conn
 
+            # Last score run (correct table/columns)
             r = conn.execute("""
               SELECT id, created_at, run_type, mode, fix_enabled, git_branch, git_sha, score, passed
               FROM repo_score_runs
@@ -1342,7 +1343,6 @@ class Orchestrator:
             if not r:
                 return "No self-improve runs recorded yet."
 
-            # sqlite Row supports index access reliably
             run_id = int(r[0])
             created_at = str(r[1])
             run_type = str(r[2])
@@ -1354,8 +1354,9 @@ class Orchestrator:
             score = float(r[7] or 0.0)
             passed = bool(r[8])
 
+            # Last improvement attempt
             a = conn.execute("""
-              SELECT id, created_at, iteration, branch, proposal_title, pr_url, improved, error_text
+              SELECT id, created_at, iteration, branch, proposal_title, pr_url, improved, error_text, proposal_json
               FROM repo_improvement_attempts
               ORDER BY id DESC
               LIMIT 1
@@ -1375,31 +1376,51 @@ class Orchestrator:
                 f"score={score:.3f} branch={git_branch} sha={git_sha}"
             )
 
-            if a:
-                attempt_id = int(a[0])
-                attempt_at = str(a[1])
-                iteration = int(a[2])
-                branch = str(a[3])
-                title = a[4] or "—"
-                pr_url = a[5] or "—"
-                improved = bool(a[6])
-                error_text = (a[7] or "").strip()
-
-                lines.append(
-                    f"- Last attempt: id={attempt_id} at {attempt_at} | it={iteration} "
-                    f"improved={'yes' if improved else 'no'} branch={branch} title={title}"
-                )
-                if pr_url != "—":
-                    lines.append(f"  PR: {pr_url}")
-                if error_text:
-                    lines.append(f"  Error: {error_text}")
-            else:
+            if not a:
                 lines.append("- Last attempt: —")
+                lines.append(f"- Open gaps: {open_gaps} (run `dream gaps` to list)")
+                return "\n".join(lines)
+
+            attempt_id = int(a[0])
+            attempt_at = str(a[1])
+            iteration = int(a[2])
+            branch = str(a[3])
+            title = a[4] or "—"
+            pr_url = a[5] or "—"
+            improved = bool(a[6])
+
+            error_text = (a[7] or "").strip()
+            proposal_json_raw = a[8]
+            note = ""
+
+            try:
+                if proposal_json_raw:
+                    pj = json.loads(proposal_json_raw)
+                    if isinstance(pj, dict):
+                        note = (pj.get("note") or "").strip()
+            except Exception:
+                note = ""
+
+            # Backward-compat: treat this specific historical message as a Note, not Error.
+            if error_text and "produced no persistent worktree changes" in error_text.lower():
+                note = note or error_text
+                error_text = ""
+
+            lines.append(
+                f"- Last attempt: id={attempt_id} at {attempt_at} | it={iteration} "
+                f"improved={'yes' if improved else 'no'} branch={branch} title={title}"
+            )
+            if pr_url != "—":
+                lines.append(f"  PR: {pr_url}")
+            if error_text:
+                lines.append(f"  Error: {error_text}")
+            if note:
+                lines.append(f"  Note: {note}")
 
             lines.append(f"- Open gaps: {open_gaps} (run `dream gaps` to list)")
             return "\n".join(lines)
 
-        if sub == "gaps":
+        if sub in {"gaps", "gap"}:
             limit = 5
             if len(tokens) >= 3 and tokens[2].isdigit():
                 limit = max(1, min(50, int(tokens[2])))
@@ -1418,7 +1439,7 @@ class Orchestrator:
                     lines.append(f"  failure: {g['observed_failure']}")
             return "\n".join(lines)
 
-        return "Usage: dream status | dream gaps [limit]"
+        return "Usage: dream status | dream gaps|gap [limit]"
 
     def _job_self_improvement(self) -> None:
         cfg = SelfImproveRunConfig(status_callback=self._self_improve_status_callback)

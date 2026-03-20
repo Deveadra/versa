@@ -325,6 +325,13 @@ class Orchestrator:
 
         message = str(event.get("message") or phase.replace("_", " ").title())
 
+        if state == "error":
+            self.status.stage(phase, message, pct=pct)
+            try:
+                self.status.stop()
+            except Exception:
+                pass
+            return
         if iteration is not None:
             message = f"[it {iteration}] {message}"
         if branch:
@@ -1320,7 +1327,7 @@ class Orchestrator:
             return None
 
         if len(tokens) < 2:
-            return "Usage: dream status | dream gaps|gap [limit]"
+            return "Usage: dream status | dream last | dream attempts [n] | dream run | dream gaps|gap [limit]"
 
         sub = tokens[1].lower()
 
@@ -1420,6 +1427,164 @@ class Orchestrator:
             lines.append(f"- Open gaps: {open_gaps} (run `dream gaps` to list)")
             return "\n".join(lines)
 
+        if sub == "last":
+            conn = self.db.conn
+
+            a = conn.execute("""
+              SELECT id, created_at, iteration, branch, proposal_title, pr_url, improved, error_text, proposal_json
+              FROM repo_improvement_attempts
+              ORDER BY id DESC
+              LIMIT 1
+              """).fetchone()
+
+            if not a:
+                return "No self-improve attempts recorded yet."
+
+            attempt_id = int(a[0])
+            attempt_at = str(a[1])
+            iteration = int(a[2])
+            branch = str(a[3])
+            title = a[4] or "—"
+            pr_url = a[5] or "—"
+            improved = bool(a[6])
+            error_text = (a[7] or "").strip()
+            proposal_json_raw = a[8]
+
+            outcome = ""
+            note = ""
+            try:
+                if proposal_json_raw:
+                    pj = json.loads(proposal_json_raw)
+                    if isinstance(pj, dict):
+                        outcome = (pj.get("outcome") or "").strip()
+                        note = (pj.get("note") or "").strip()
+            except Exception:
+                outcome = ""
+                note = ""
+
+            # Backward-compat note mapping
+            if error_text and "produced no persistent worktree changes" in error_text.lower():
+                note = note or error_text
+                error_text = ""
+                outcome = outcome or "no_changes"
+
+            lines: list[str] = []
+            lines.append("Last self-improve attempt:")
+            lines.append(
+                f"- id={attempt_id} at {attempt_at} | it={iteration} "
+                f"improved={'yes' if improved else 'no'} branch={branch} title={title}"
+            )
+            if outcome:
+                lines.append(f"- Outcome: {outcome}")
+            if pr_url != "—":
+                lines.append(f"- PR: {pr_url}")
+            if error_text:
+                lines.append(f"- Error: {error_text}")
+            if note:
+                lines.append(f"- Note: {note}")
+            return "\n".join(lines)
+
+        if sub == "attempts":
+            n = 10
+            if len(tokens) >= 3 and tokens[2].isdigit():
+                n = max(1, min(50, int(tokens[2])))
+
+            conn = self.db.conn
+            rows = conn.execute(
+                """
+              SELECT id, created_at, iteration, branch, proposal_title, improved, error_text, proposal_json
+              FROM repo_improvement_attempts
+              ORDER BY id DESC
+              LIMIT ?
+              """,
+                (n,),
+            ).fetchall()
+
+            if not rows:
+                return "No self-improve attempts recorded yet."
+
+            lines = [f"Last {len(rows)} self-improve attempts:"]
+            for r in rows:
+                attempt_id = int(r[0])
+                attempt_at = str(r[1])
+                iteration = int(r[2])
+                branch = str(r[3])
+                title = r[4] or "—"
+                improved = bool(r[5])
+                error_text = (r[6] or "").strip()
+                proposal_json_raw = r[7]
+
+                outcome = ""
+                try:
+                    if proposal_json_raw:
+                        pj = json.loads(proposal_json_raw)
+                        if isinstance(pj, dict):
+                            outcome = (pj.get("outcome") or "").strip()
+                except Exception:
+                    outcome = ""
+
+                # Backward-compat note mapping: do not show as "error"
+                if error_text and "produced no persistent worktree changes" in error_text.lower():
+                    outcome = outcome or "no_changes"
+                    error_text = ""
+
+                tail = []
+                if outcome:
+                    tail.append(outcome)
+                if error_text:
+                    tail.append("error")
+                suffix = f" ({', '.join(tail)})" if tail else ""
+
+                lines.append(
+                    f"- id={attempt_id} {attempt_at} | it={iteration} "
+                    f"improved={'yes' if improved else 'no'} branch={branch} title={title}{suffix}"
+                )
+            return "\n".join(lines)
+
+        if sub == "run":
+            # Bounded defaults
+            include_dream = False  # keep fast/controlled by default
+            # max_iters = 1
+
+            # Optional flags: "dream run dream" or "dream run full"
+            if any(t in tokens[2:] for t in ("dream", "full")):
+                include_dream = True
+
+            cfg = SelfImproveRunConfig(status_callback=self._self_improve_status_callback)
+
+            try:
+                result = self.self_improve.run_manual(cfg=cfg, include_dream=include_dream)
+            except Exception as e:
+                try:
+                    self.status.stop()
+                except Exception:
+                    pass
+                return f"Self-improve run failed: {e}"
+
+            # Try to surface report dir (your dry run shows result['artifacts']['run_dir'])
+            run_dir = None
+            try:
+                artifacts = result.get("artifacts") if isinstance(result, dict) else None
+                if isinstance(artifacts, dict):
+                    run_dir = artifacts.get("run_dir")
+            except Exception:
+                run_dir = None
+
+            lines = ["Self-improve run complete."]
+            if run_dir:
+                lines.append(f"- Report dir: {run_dir}")
+            # Surface PR URL if any
+            try:
+                pr_url = result.get("pr_url") if isinstance(result, dict) else None
+                if pr_url:
+                    lines.append(f"- PR: {pr_url}")
+            except Exception:
+                pass
+
+            # Also recommend follow-ups
+            lines.append("Try: `dream status` or `dream last`")
+            return "\n".join(lines)
+
         if sub in {"gaps", "gap"}:
             limit = 5
             if len(tokens) >= 3 and tokens[2].isdigit():
@@ -1439,7 +1604,7 @@ class Orchestrator:
                     lines.append(f"  failure: {g['observed_failure']}")
             return "\n".join(lines)
 
-        return "Usage: dream status | dream gaps|gap [limit]"
+        return "Usage: dream status | dream last | dream attempts [n] | dream run | dream gaps|gap [limit]"
 
     def _job_self_improvement(self) -> None:
         cfg = SelfImproveRunConfig(status_callback=self._self_improve_status_callback)

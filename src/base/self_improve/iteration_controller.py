@@ -829,11 +829,6 @@ class RepoJanitorIterationController:
                     summary_error = None
                     proposal_outcome = "no_changes"
                     proposal_note = verify_message
-
-                    # Ensure proposal_json is a dict and attach outcome/note for downstream persistence.
-                    pj = proposal_json if isinstance(proposal_json, dict) else {}
-                    proposal_json = {**pj, "outcome": "no_changes", "note": verify_message}
-
                     # insert_improvement_attempt(
                     #     conn,
                     #     iteration=iteration,
@@ -847,57 +842,51 @@ class RepoJanitorIterationController:
                     #     improved=False,
                     #     error_text=None,  # <- critical
                     # )
-                else:
-                    verify_message = "Safe autofix made no measurable improvement"
-                    verify_outcome = "no_change"
-                    summary_error = "Safe autofix made no measurable improvement"
-                    proposal_outcome = None
-                    proposal_note = None
 
-                self._status_finish(
-                    status_callback,
-                    status_timers,
-                    phase="verify",
-                    message=verify_message,
-                    pct=80,
-                    iteration=i,
-                    branch=branch,
-                    outcome=verify_outcome,
-                )
+                    self._status_finish(
+                        status_callback,
+                        status_timers,
+                        phase="verify",
+                        message=verify_message,
+                        pct=80,
+                        iteration=i,
+                        branch=branch,
+                        outcome=verify_outcome,
+                    )
 
-                attempt_artifacts["summary"] = self._write_attempt_summary_artifact(
-                    run_artifact_dir=run_artifact_dir,
-                    iteration=i,
-                    branch=branch,
-                    stage="safe_autofix_scored",
-                    improved=bool(durable_improvement),
-                    error=summary_error,
-                    attempt_artifacts=attempt_artifacts,
-                    extra={
-                        "diff_summary": diff_summary,
+                    attempt_artifacts["summary"] = self._write_attempt_summary_artifact(
+                        run_artifact_dir=run_artifact_dir,
+                        iteration=i,
+                        branch=branch,
+                        stage="safe_autofix_scored",
+                        improved=bool(durable_improvement),
+                        error=summary_error,
+                        attempt_artifacts=attempt_artifacts,
+                        extra={
+                            "diff_summary": diff_summary,
+                            "health_improved": bool(health_improved),
+                            "worktree_changed": bool(worktree_changed),
+                            "proposal_outcome": proposal_outcome,
+                            "proposal_note": proposal_note,
+                        },
+                    )
+
+                    attempt_row = {
+                        "iteration": i,
+                        "branch": branch,
+                        "before_score": float(before.score()),
+                        "after_score": float(after.score()),
+                        "before_gates": int(before.gates_failing),
+                        "after_gates": int(after.gates_failing),
+                        "improved": bool(durable_improvement),
                         "health_improved": bool(health_improved),
                         "worktree_changed": bool(worktree_changed),
-                        "proposal_outcome": proposal_outcome,
-                        "proposal_note": proposal_note,
-                    },
-                )
-
-                attempt_row = {
-                    "iteration": i,
-                    "branch": branch,
-                    "before_score": float(before.score()),
-                    "after_score": float(after.score()),
-                    "before_gates": int(before.gates_failing),
-                    "after_gates": int(after.gates_failing),
-                    "improved": bool(durable_improvement),
-                    "health_improved": bool(health_improved),
-                    "worktree_changed": bool(worktree_changed),
-                    "mode": "safe_autofix",
-                    "artifacts": attempt_artifacts,
-                    "diff_summary": diff_summary,
-                }
-                attempts.append(attempt_row)
-                artifacts["attempts"].append(attempt_artifacts)
+                        "mode": "safe_autofix",
+                        "artifacts": attempt_artifacts,
+                        "diff_summary": diff_summary,
+                    }
+                    attempts.append(attempt_row)
+                    artifacts["attempts"].append(attempt_artifacts)
 
                 if durable_improvement:
                     improved_any = True

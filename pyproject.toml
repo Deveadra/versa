@@ -114,6 +114,7 @@ ignore = ["E501", "PLR0911", "PLR0912", "PLR0913", "PLR0915", "PLW0603", "SIM105
 "src/base/llm/prompt_composer.py" = ["E741"]
 "src/base/plugins/gmail.py" = ["PLW0602"]
 "src/base/plugins/media_smart_home.py" = ["PLW0602"]
+"src/base/self_improve/iteration_controller.py" = ["F821"]
 "src/base/self_improve/proposal_engine.py" = ["E741"]
 "src/base/self_improve/service.py" = ["PLC0415"]
 

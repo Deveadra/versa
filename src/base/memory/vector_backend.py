@@ -89,7 +89,20 @@ class _QdrantMemoryBackendImpl:
         else:
             logger.info("QdrantMemoryBackend: Connecting to local Qdrant (localhost:6333)")
 
-        self.client = QdrantClient(url=effective_url, api_key=api_key_to_use)
+        parsed = urlparse(url)
+        is_insecure_local = parsed.scheme == "http" and parsed.hostname in {
+            "localhost",
+            "127.0.0.1",
+        }
+
+        # api_key_to_use = api_key
+        # if api_key and is_insecure_local:
+        #     logger.info(
+        #         "Qdrant: api_key provided for insecure local HTTP; omitting api_key to avoid warning."
+        #     )
+        #     api_key_to_use = None
+
+        self.client = QdrantClient(url=url, api_key=api_key_to_use)
 
         # Ensure collection exists (DO NOT recreate: that can wipe data)
         try:

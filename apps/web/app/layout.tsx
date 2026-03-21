@@ -1,5 +1,7 @@
 import Link from 'next/link';
 
+const navStyle = { listStyle: 'none', padding: 0, display: 'grid', gap: 8 } as const;
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
@@ -7,6 +9,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', minHeight: '100vh' }}>
           <nav style={{ padding: 16, borderRight: '1px solid #334155' }}>
             <h3>Versa</h3>
+            <ul style={navStyle}>
+              <li><Link href="/today">Command Deck</Link></li>
+              <li><Link href="/tasks">Tasks</Link></li>
+              <li><Link href="/goals">Goals</Link></li>
+              <li><Link href="/schedule">Schedule</Link></li>
+              <li><Link href="/study">Study</Link></li>
+              <li><Link href="/jobs">Job Hub</Link></li>
             <ul style={{ listStyle: 'none', padding: 0 }}>
               <li><Link href="/today">Today</Link></li>
               <li><Link href="/tasks">Tasks</Link></li>

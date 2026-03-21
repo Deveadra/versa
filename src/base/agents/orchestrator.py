@@ -325,13 +325,6 @@ class Orchestrator:
 
         message = str(event.get("message") or phase.replace("_", " ").title())
 
-        if state == "error":
-            self.status.stage(phase, message, pct=pct)
-            try:
-                self.status.stop()
-            except Exception:
-                pass
-            return
         if iteration is not None:
             message = f"[it {iteration}] {message}"
         if branch:
@@ -355,10 +348,18 @@ class Orchestrator:
             self.status.complete(message)
             return
 
-        if state == "error" and phase == "summarize":
+        if state == "error":
             self.status.stage(phase, message, pct=pct)
-            self.status.stop()
+            try:
+                self.status.stop()
+            except Exception:
+                pass
             return
+
+        # if state == "error" and phase == "summarize":
+        #     self.status.stage(phase, message, pct=pct)
+        #     self.status.stop()
+        #     return
 
         self.status.stage(phase, message, pct=pct)
 

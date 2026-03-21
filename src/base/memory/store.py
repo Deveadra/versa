@@ -334,6 +334,10 @@ class MemoryStore:
         - "sync": shutdown-safe write for short-lived scripts/system events
         - "off": skip vector storage entirely
         """
+
+        # self._bg_threads.append(thread)
+        # self._pending_futures.append(future)
+
         if vector_write not in {"async", "sync", "off"}:
             raise ValueError(f"Invalid vector_write mode: {vector_write!r}")
 
@@ -486,7 +490,7 @@ class MemoryStore:
 
     #     return int(rowid)
 
-    def wait_for_background_tasks(self, timeout: float = 5.0) -> None:
+    def wait_for_background_tasks(self, timeout: float = 10.0) -> None:
         """
         Best-effort join of in-flight background embedding threads.
         Useful for short-lived scripts/tests so Python doesn't exit mid-embed.
@@ -509,6 +513,24 @@ class MemoryStore:
             per_thread = min(0.25, remaining)
             for t in threads:
                 t.join(timeout=per_thread)
+        # pending = list(self._pending_futures)
+        # if not pending:
+        #     return
+
+        # done, not_done = wait(pending, timeout=timeout)
+        # self._pending_futures = [f for f in not_done if not f.done()]
+
+        # remaining = timeout
+        # threads = list(self._bg_threads)
+        # self._bg_threads = []
+
+        # start = time.monotonic()
+        # for t in threads:
+        #     if remaining <= 0:
+        #         break
+        #     t.join(remaining)
+        #     elapsed = time.monotonic() - start
+        #     remaining = timeout - elapsed
 
     def list_events(self, type_: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
         """

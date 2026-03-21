@@ -566,8 +566,45 @@ class SelfImproveService:
         result["branch"] = result.get("branch") or promotion_branch
 
         self._record_dream_summary_event(result=result, goal=result.get("goal", ""))
+        self._flush_store_background_work(timeout=10.0)
 
         return result
+
+    def _flush_store_background_work(self, *, timeout: float = 10.0) -> None:
+        """
+        Best-effort drain of any pending background memory/vector work so
+        short-lived runs do not die during interpreter shutdown.
+        """
+        if self.store is None:
+            return
+
+        for method_name in (
+            "wait_for_background_tasks",
+            "wait_for_pending_writes",
+            "flush",
+            "close",
+        ):
+            fn = getattr(self.store, method_name, None)
+            if not callable(fn):
+                continue
+
+            try:
+                params = inspect.signature(fn).parameters
+                if "timeout" in params:
+                    fn(timeout=timeout)
+                else:
+                    fn()
+                logger.debug(f"[self-improve] store background work flushed via {method_name}")
+                return
+            except TypeError:
+                try:
+                    fn()
+                    logger.debug(f"[self-improve] store background work flushed via {method_name}")
+                    return
+                except Exception as e:
+                    logger.debug(f"[self-improve] flush via {method_name} failed: {e}")
+            except Exception as e:
+                logger.debug(f"[self-improve] flush via {method_name} failed: {e}")
 
     def _record_dream_summary_event(self, *, result: dict[str, Any], goal: str) -> None:
         """

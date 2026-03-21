@@ -326,14 +326,62 @@ class RepoJanitorIterationController:
             name for name, tr in run.tool_results.items() if int(getattr(tr, "exit_code", 1)) != 0
         )
 
-    def _score_value(self, run) -> float:
-        ds = getattr(run, "deterministic_score", None)
-        if callable(ds):
-            return float(ds())
-        s = getattr(run, "score", None)
-        if callable(s):
-            return float(s())
-        return float(getattr(run, "score_value", 0.0) or 0.0)
+    def _score_value(self, res: Any) -> float:
+        """Deterministic score used for comparisons (prefers comparison_score)."""
+        cs = getattr(res, "comparison_score", None)
+        if cs is not None:
+            return float(cs)
+        score_fn = getattr(res, "score", None)
+        if callable(score_fn):
+            return float(score_fn())
+        return float(getattr(res, "score_value", 0.0) or 0.0)
+
+    # def _score_value(self, run) -> float:
+    #     ds = getattr(run, "deterministic_score", None)
+    #     if callable(ds):
+    #         return float(ds())
+    #     s = getattr(run, "score", None)
+    #     if callable(s):
+    #         return float(s())
+    #     return float(getattr(run, "score_value", 0.0) or 0.0)
+
+    def _raw_score(self, run: Any) -> float:
+        """
+        Raw/observed score from a scoreboard run.
+        Supports both a callable .score() and attribute-like .score.
+        """
+        if run is None:
+            return 0.0
+        try:
+            s = getattr(run, "score", None)
+            if callable(s):
+                return float(s())
+            if s is not None:
+                return float(s)
+        except Exception:
+            pass
+        return 0.0
+
+    def _passed(self, run: Any) -> bool:
+        """
+        Supports both callable .passed() and attribute-like .passed.
+        Falls back to gates_failing == 0 when needed.
+        """
+        if run is None:
+            return False
+        try:
+            p = getattr(run, "passed", None)
+            if callable(p):
+                return bool(p())
+            if p is not None:
+                return bool(p)
+        except Exception:
+            pass
+
+        try:
+            return int(getattr(run, "gates_failing", 1) or 1) == 0
+        except Exception:
+            return False
 
     def _score_delta_summary(self, before, after) -> dict[str, Any]:
         before_failing = set(self._failing_tools(before))
@@ -570,8 +618,8 @@ class RepoJanitorIterationController:
             fix_enabled=False,
             git_branch=base_branch,
             git_sha=self._current_sha(),
-            score=float(baseline.score()),
-            passed=bool(baseline.passed()),
+            score=self._raw_score(baseline),
+            passed=self._passed(baseline),
             metrics=baseline.to_dict(),
         )
 
@@ -590,7 +638,8 @@ class RepoJanitorIterationController:
             message="Baseline scoreboard recorded",
             pct=15,
             branch=base_branch,
-            outcome=f"gates={int(baseline.gates_failing)} score={float(baseline.score()):.2f}",
+            outcome=f"gates={int(baseline.gates_failing)} score={self._raw_score(baseline):.2f}",
+            # outcome=f"gates={int(baseline.gates_failing)} score={float(baseline.score()):.2f}",
         )
 
         self._status_start(
@@ -715,8 +764,10 @@ class RepoJanitorIterationController:
                     fix_enabled=False,
                     git_branch=branch,
                     git_sha=self._current_sha(),
-                    score=float(before.score()),
-                    passed=bool(before.passed()),
+                    score=self._raw_score(before),
+                    passed=self._passed(before),
+                    # score=float(before.score()),
+                    # passed=bool(before.passed()),
                     metrics=before.to_dict(),
                 )
 
@@ -744,8 +795,10 @@ class RepoJanitorIterationController:
                     fix_enabled=True,
                     git_branch=branch,
                     git_sha=self._current_sha(),
-                    score=float(after.score()),
-                    passed=bool(after.passed()),
+                    score=self._raw_score(after),
+                    passed=self._passed(after),
+                    # score=float(after.score()),
+                    # passed=bool(after.passed()),
                     metrics=after.to_dict(),
                 )
                 self._log_gaps_from_scoreboard(after, source="scoreboard")
@@ -799,6 +852,9 @@ class RepoJanitorIterationController:
                 after_score = self._score_value(after)
                 eps = SCORE_EPS
                 worktree_changed = self._worktree_dirty()
+                summary_error: str | None = None
+                proposal_outcome: str | None = "no_change"
+                proposal_note: str | None = "Safe autofix made no measurable improvement"
 
                 if after_gates < best_gates:
                     health_improved = True
@@ -808,6 +864,18 @@ class RepoJanitorIterationController:
                     health_improved = after_score > (best_score + eps)
 
                 durable_improvement = bool(health_improved and worktree_changed)
+
+                if durable_improvement:
+                    proposal_outcome = "improved"
+                    proposal_note = None
+                elif health_improved:
+                    proposal_outcome = "transient_improvement"
+                    proposal_note = (
+                        "Safe autofix improved scoring, but produced no persistent worktree changes"
+                    )
+                else:
+                    proposal_outcome = "no_change"
+                    proposal_note = "Safe autofix made no measurable improvement"
 
                 # Always track the best observed repo health, even if no files changed.
                 if health_improved:
@@ -874,8 +942,10 @@ class RepoJanitorIterationController:
                     attempt_row = {
                         "iteration": i,
                         "branch": branch,
-                        "before_score": float(before.score()),
-                        "after_score": float(after.score()),
+                        "before_score": self._raw_score(before),
+                        "after_score": self._raw_score(after),
+                        # "before_score": float(before.score()),
+                        # "after_score": float(after.score()),
                         "before_gates": int(before.gates_failing),
                         "after_gates": int(after.gates_failing),
                         "improved": bool(durable_improvement),
@@ -1255,8 +1325,10 @@ class RepoJanitorIterationController:
                 fix_enabled=False,
                 git_branch=branch,
                 git_sha=self._current_sha(),
-                score=float(before.score()),
-                passed=bool(before.passed()),
+                score=self._raw_score(before),
+                passed=self._passed(before),
+                # score=float(before.score()),
+                # passed=bool(before.passed()),
                 metrics=before.to_dict(),
             )
 
@@ -1359,6 +1431,8 @@ class RepoJanitorIterationController:
                 )
                 continue
 
+            # LLM Proposal lanes are allowed to make no changes, but if they do change the worktree, we want to track that as an outcome separate from "improved scoreboard" vs "did not improve scoreboard". This is because sometimes the LLM may make changes that don't end up improving the scoreboard, but we still want to allow that and track it as a distinct outcome from "proposal failed to apply any changes".
+
             self._status_finish(
                 status_callback,
                 status_timers,
@@ -1404,8 +1478,10 @@ class RepoJanitorIterationController:
                 fix_enabled=False,
                 git_branch=branch,
                 git_sha=self._current_sha(),
-                score=float(after.score()),
-                passed=bool(after.passed()),
+                score=self._raw_score(after),
+                passed=self._passed(after),
+                # score=float(after.score()),
+                # passed=bool(after.passed()),
                 metrics=after.to_dict(),
             )
             self._log_gaps_from_scoreboard(after, source="scoreboard")
@@ -1470,8 +1546,10 @@ class RepoJanitorIterationController:
             attempt_row = {
                 "iteration": i,
                 "branch": branch,
-                "before_score": float(before.score()),
-                "after_score": float(after.score()),
+                "before_score": self._raw_score(before),
+                "after_score": self._raw_score(after),
+                # "before_score": float(before.score()),
+                # "after_score": float(after.score()),
                 "before_gates": int(before.gates_failing),
                 "after_gates": int(after.gates_failing),
                 "improved": bool(is_improved),
@@ -1641,12 +1719,12 @@ class RepoJanitorIterationController:
         return {
             "goal": computed_goal,
             "baseline": {
-                "score": float(baseline.score()),
+                "score": self._raw_score(baseline),
                 "comparison_score": float(self._score_value(baseline)),
                 "gates": int(baseline.gates_failing),
             },
             "best": {
-                "score": float(best.score()),
+                "score": self._raw_score(best),
                 "comparison_score": float(self._score_value(best)),
                 "gates": int(best.gates_failing),
             },

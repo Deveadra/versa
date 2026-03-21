@@ -130,4 +130,8 @@ markers = [
 ]
 filterwarnings = [
   "ignore:Api key is used with an insecure connection\\.:UserWarning:base\\.memory\\.vector_backend",
+  "ignore:Importing 'parser.split_arg_string' is deprecated:DeprecationWarning",
+  "ignore:builtin type SwigPyPacked has no __module__ attribute:DeprecationWarning",
+  "ignore:builtin type SwigPyObject has no __module__ attribute:DeprecationWarning",
+  "ignore:builtin type swigvarlink has no __module__ attribute:DeprecationWarning",
 ]

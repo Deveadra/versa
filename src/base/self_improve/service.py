@@ -11,6 +11,8 @@ from typing import Any
 
 from loguru import logger
 
+from base.quality.policy import RepairPolicy
+from base.quality.repair_service import QualityRepairService
 from base.self_improve.iteration_controller import (
     IterationBudget,
     LeashPolicy,
@@ -83,6 +85,7 @@ class SelfImproveService:
 
         ensure_self_improve_schema(self.conn)
         self.scoreboard = ScoreboardRunner(self.repo)
+        self.quality_service = QualityRepairService(self.repo)
 
     # -------------------------
     # git helpers
@@ -239,6 +242,63 @@ class SelfImproveService:
 
     def _default_policy(self) -> LeashPolicy:
         return self.policy
+
+    def _run_quality_gate(
+        self,
+        *,
+        scope: str,
+        status_callback: Callable[[dict[str, Any]], None] | None = None,
+        base_ref: str | None = None,
+    ) -> dict[str, Any]:
+        if scope == "changed_files":
+            policy = RepairPolicy.for_changed_files()
+        elif scope == "branch_delta":
+            policy = RepairPolicy.for_branch_delta(
+                base_ref=(base_ref or (settings.github_default_branch or "main").strip()),
+                head_ref="HEAD",
+            )
+        elif scope == "full_repo":
+            policy = RepairPolicy.for_full_repo()
+        else:
+            raise ValueError(f"Unsupported quality gate scope: {scope}")
+
+        policy.run_typecheck = True
+        policy.run_tests = False
+
+        self._emit_status(
+            status_callback,
+            phase="quality_gate",
+            state="start",
+            message=f"Running quality repair gate ({scope})",
+            pct=78,
+            branch=self._current_branch(),
+        )
+
+        report = self.quality_service.repair(policy=policy)
+        report_dict = report.to_dict()
+        report_dir = report.report_dir.as_posix() if report.report_dir is not None else ""
+        report_dict["report_dir"] = report_dir
+
+        outcome = "clean" if self._quality_gate_passed(report_dict) else "blocked"
+        self._emit_status(
+            status_callback,
+            phase="quality_gate",
+            state="complete",
+            message="Quality repair gate finished",
+            pct=82,
+            branch=self._current_branch(),
+            outcome=outcome,
+            extra={
+                "blocked_count": len(report.blocked),
+                "report_dir": report_dir,
+            },
+        )
+        return report_dict
+
+    @staticmethod
+    def _quality_gate_passed(report: dict[str, Any]) -> bool:
+        final_snapshot = report.get("final_snapshot") or {}
+        return int(final_snapshot.get("total_diagnostics", 0)) == 0
 
     def _changed_files_since_base(self, base: str) -> list[str]:
         out = self._git(["diff", "--name-only", f"{base}..HEAD"], check=False).stdout or ""
@@ -404,6 +464,7 @@ class SelfImproveService:
         Unifies the old propose_code_change pathway behind the service:
           - build index
           - propose patch
+          - run the quality repair gate
           - open PR
           - run tests and update PR body
         """
@@ -417,6 +478,26 @@ class SelfImproveService:
         results = self.proposal_engine.apply_proposal(proposal)
         failed = [f"- {c.path}: {msg}" for (c, ok, msg) in results if not ok]
 
+        if not any(ok for (_, ok, _) in results):
+            try:
+                self.pr_manager.restore_original_branch()
+            except Exception:
+                pass
+            return "Proposal aborted — no changes could be safely applied."
+
+        quality_report = self._run_quality_gate(scope="changed_files")
+        if not self._quality_gate_passed(quality_report):
+            try:
+                self.pr_manager.restore_original_branch()
+            except Exception:
+                pass
+
+            report_dir = quality_report.get("report_dir") or "(unknown)"
+            return (
+                "Proposal aborted — quality repair gate could not fully clean the changed files.\n\n"
+                f"Repair report: {report_dir}"
+            )
+
         run = self.scoreboard.run(mode="all", fix=False)
         self._insert_score_run_compat(
             run_type="interactive_propose",
@@ -425,13 +506,6 @@ class SelfImproveService:
             git_sha=self._current_sha(),
         )
         self.log_gaps_from_scoreboard(run, source="diagnostic")
-
-        if not any(ok for (_, ok, _) in results):
-            try:
-                self.pr_manager.restore_original_branch()
-            except Exception:
-                pass
-            return "Proposal aborted — no changes could be safely applied."
 
         self.pr_manager.commit_and_push(branch, proposal.title)
         pr_url = self.pr_manager.open_pr(branch=branch, proposal=proposal)
@@ -446,11 +520,66 @@ class SelfImproveService:
         except Exception:
             pass
 
-        report = []
+        report_parts = [f"Quality repair report: {quality_report.get('report_dir') or '(unknown)'}"]
         if failed:
-            report.append("⚠️ Some changes could not be applied:\n" + "\n".join(failed))
-        report_text = "\n\n".join(report) if report else "✅ All changes applied successfully."
-        return f"Proposal opened: {pr_url}\n\n{report_text}"
+            report_parts.append("⚠️ Some changes could not be applied:\n" + "\n".join(failed))
+        else:
+            report_parts.append("✅ All applied changes passed the quality repair gate.")
+
+        return f"Proposal opened: {pr_url}\n\n" + "\n\n".join(report_parts)
+
+    # def run_interactive_proposal(self, *, instruction: str) -> str:
+    #     """
+    #     Unifies the old propose_code_change pathway behind the service:
+    #       - build index
+    #       - propose patch
+    #       - open PR
+    #       - run tests and update PR body
+    #     """
+    #     base = (settings.github_default_branch or "main").strip()
+    #     index_md = self._index_md()
+    #     proposal = self.proposal_engine.propose(instruction, index_md=index_md)
+
+    #     suffix = self._sanitize_suffix(proposal.title)
+    #     branch = self.pr_manager.prepare_branch(suffix, base=base)
+
+    #     results = self.proposal_engine.apply_proposal(proposal)
+    #     failed = [f"- {c.path}: {msg}" for (c, ok, msg) in results if not ok]
+
+    #     run = self.scoreboard.run(mode="all", fix=False)
+    #     self._insert_score_run_compat(
+    #         run_type="interactive_propose",
+    #         run=run,
+    #         git_branch=branch,
+    #         git_sha=self._current_sha(),
+    #     )
+    #     self.log_gaps_from_scoreboard(run, source="diagnostic")
+
+    #     if not any(ok for (_, ok, _) in results):
+    #         try:
+    #             self.pr_manager.restore_original_branch()
+    #         except Exception:
+    #             pass
+    #         return "Proposal aborted — no changes could be safely applied."
+
+    #     self.pr_manager.commit_and_push(branch, proposal.title)
+    #     pr_url = self.pr_manager.open_pr(branch=branch, proposal=proposal)
+
+    #     try:
+    #         self.pr_manager.run_tests_and_update_pr(branch)
+    #     except Exception:
+    #         pass
+
+    #     try:
+    #         self.pr_manager.restore_original_branch()
+    #     except Exception:
+    #         pass
+
+    #     report = []
+    #     if failed:
+    #         report.append("⚠️ Some changes could not be applied:\n" + "\n".join(failed))
+    #     report_text = "\n\n".join(report) if report else "✅ All changes applied successfully."
+    #     return f"Proposal opened: {pr_url}\n\n{report_text}"
 
     # -------------------------
     # unified engine
@@ -496,6 +625,22 @@ class SelfImproveService:
                 budget=cfg.budget,
                 status_callback=cfg.status_callback,
             )
+
+        quality_report: dict[str, Any] | None = None
+        if result.get("improved"):
+            quality_report = self._run_quality_gate(
+                scope="changed_files",
+                status_callback=cfg.status_callback,
+            )
+            result["quality_report"] = quality_report
+
+            if not self._quality_gate_passed(quality_report):
+                result["quality_gate_failed"] = True
+                result["quality_report_dir"] = quality_report.get("report_dir")
+                result["improved"] = False
+                logger.warning(
+                    "[self-improve] quality repair gate blocked promotion; changed files remain dirty"
+                )
 
         pr_url = result.get("pr_url")
         promotion_branch = str(result.get("branch") or branch)

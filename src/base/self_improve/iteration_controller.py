@@ -12,6 +12,8 @@ from typing import Any
 
 from loguru import logger
 
+from base.quality.policy import RepairPolicy
+from base.quality.repair_service import QualityRepairService
 from base.self_improve.models import Proposal
 from base.self_improve.scoreboard import ScoreboardRunner
 from base.self_improve.self_improve_db import (
@@ -115,6 +117,7 @@ class RepoJanitorIterationController:
         self.pr_manager = pr_manager
         self.policy = policy
         self.scoreboard = ScoreboardRunner(self.repo)
+        self.quality_service = QualityRepairService(self.repo)
 
     # ---------------- git helpers ----------------
 
@@ -401,6 +404,80 @@ class RepoJanitorIterationController:
             "resolved_tools": sorted(before_failing - after_failing),
             "still_failing_tools": sorted(before_failing & after_failing),
         }
+
+    def _quality_gate_policy(self) -> RepairPolicy:
+        policy = RepairPolicy.for_changed_files()
+        policy.run_typecheck = True
+        policy.run_tests = False
+        return policy
+
+    @staticmethod
+    def _quality_gate_passed(report: dict[str, Any]) -> bool:
+        final_snapshot = report.get("final_snapshot") or {}
+        return int(final_snapshot.get("total_diagnostics", 0)) == 0
+
+    def _run_quality_gate(
+        self,
+        *,
+        status_callback: Callable[[dict[str, Any]], None] | None,
+        status_timers: dict[str, float],
+        iteration: int,
+        branch: str,
+    ) -> dict[str, Any]:
+        self._status_start(
+            status_callback,
+            status_timers,
+            phase="quality_gate",
+            message="Running quality repair gate",
+            pct=70,
+            iteration=iteration,
+            branch=branch,
+        )
+
+        try:
+            report = self.quality_service.repair(policy=self._quality_gate_policy())
+        except Exception as e:
+            error = str(e)
+            self._status_finish(
+                status_callback,
+                status_timers,
+                phase="quality_gate",
+                message="Quality repair gate failed",
+                pct=75,
+                iteration=iteration,
+                branch=branch,
+                error=error,
+            )
+            return {
+                "success": False,
+                "blocked": [{"code": "QUALITY_GATE_EXCEPTION", "message": error}],
+                "final_snapshot": {"total_diagnostics": 1},
+                "report_dir": None,
+            }
+
+        report_dict = report.to_dict()
+        report_dir = report.report_dir.as_posix() if report.report_dir is not None else None
+        report_dict["report_dir"] = report_dir
+
+        blocked_count = len(report.blocked)
+        final_total = report.final_snapshot.total_diagnostics
+
+        self._status_finish(
+            status_callback,
+            status_timers,
+            phase="quality_gate",
+            message="Quality repair gate finished",
+            pct=75,
+            iteration=iteration,
+            branch=branch,
+            outcome="clean" if final_total == 0 else "blocked",
+            extra={
+                "blocked_count": blocked_count,
+                "final_total": final_total,
+                "report_dir": report_dir,
+            },
+        )
+        return report_dict
 
     def _write_attempt_summary_artifact(
         self,
@@ -959,6 +1036,73 @@ class RepoJanitorIterationController:
                     artifacts["attempts"].append(attempt_artifacts)
 
                 if durable_improvement:
+                    quality_report = self._run_quality_gate(
+                        status_callback=status_callback,
+                        status_timers=status_timers,
+                        iteration=i,
+                        branch=branch,
+                    )
+                    attempt_artifacts["quality_report"] = {
+                        "report_dir": quality_report.get("report_dir"),
+                        "final_total": int(
+                            (quality_report.get("final_snapshot") or {}).get(
+                                "total_diagnostics",
+                                0,
+                            )
+                        ),
+                        "blocked_count": len(quality_report.get("blocked", [])),
+                    }
+
+                    if not self._quality_gate_passed(quality_report):
+                        msg = "quality repair gate blocked safe autofix promotion"
+                        attempts.append(
+                            {
+                                "iteration": i,
+                                "error": msg,
+                                "mode": "safe_autofix",
+                                "quality_report_dir": quality_report.get("report_dir"),
+                            }
+                        )
+                        attempt_artifacts["summary"] = self._write_attempt_summary_artifact(
+                            run_artifact_dir=run_artifact_dir,
+                            iteration=i,
+                            branch=branch,
+                            stage="quality_gate_blocked",
+                            improved=False,
+                            error=msg,
+                            attempt_artifacts=attempt_artifacts,
+                            extra={"quality_report": quality_report},
+                        )
+                        artifacts["attempts"].append(attempt_artifacts)
+
+                        insert_improvement_attempt(
+                            self.conn,
+                            iteration=i,
+                            baseline_run_id=baseline_id,
+                            before_run_id=before_id,
+                            after_run_id=after_id,
+                            branch=branch,
+                            proposal_title="Repo Janitor: safe autofix",
+                            proposal_json={
+                                "mode": "safe_autofix",
+                                "description": "Applied Black formatting and Ruff safe fixes.",
+                                "artifacts": attempt_artifacts,
+                                "diff_summary": diff_summary,
+                                "health_improved": bool(health_improved),
+                                "worktree_changed": bool(worktree_changed),
+                                "quality_report": quality_report,
+                            },
+                            pr_url=None,
+                            improved=False,
+                            error_text=msg,
+                        )
+
+                        self._rollback_to_base(base_branch)
+
+                        if safe_autofix_only and not allow_llm_autonomous:
+                            break
+                        continue
+
                     improved_any = True
 
                     safe_autofix_proposal = Proposal(
@@ -1039,14 +1183,25 @@ class RepoJanitorIterationController:
                         break
 
                 else:
-                    proposal_json = {
-                        "mode": "safe_autofix",
-                        "description": "Applied Black formatting and Ruff safe fixes.",
-                        "artifacts": attempt_artifacts,
-                        "diff_summary": diff_summary,
-                        "health_improved": bool(health_improved),
-                        "worktree_changed": bool(worktree_changed),
-                    }
+                    # proposal_json = {
+                    #     "mode": "safe_autofix",
+                    #     "description": "Applied Black formatting and Ruff safe fixes.",
+                    #     "artifacts": attempt_artifacts,
+                    #     "diff_summary": diff_summary,
+                    #     "health_improved": bool(health_improved),
+                    #     "worktree_changed": bool(worktree_changed),
+                    # }
+                    proposal_json = (
+                        {
+                            "mode": "safe_autofix",
+                            "description": safe_autofix_proposal.description,
+                            "artifacts": attempt_artifacts,
+                            "diff_summary": diff_summary,
+                            "health_improved": bool(health_improved),
+                            "worktree_changed": bool(worktree_changed),
+                            "quality_report": quality_report,
+                        },
+                    )
 
                     if proposal_outcome is not None:
                         proposal_json = {
@@ -1431,6 +1586,77 @@ class RepoJanitorIterationController:
                 )
                 continue
 
+            quality_report = self._run_quality_gate(
+                status_callback=status_callback,
+                status_timers=status_timers,
+                iteration=i,
+                branch=branch,
+            )
+            attempt_artifacts["quality_report"] = {
+                "report_dir": quality_report.get("report_dir"),
+                "final_total": int(
+                    (quality_report.get("final_snapshot") or {}).get(
+                        "total_diagnostics",
+                        0,
+                    )
+                ),
+                "blocked_count": len(quality_report.get("blocked", [])),
+            }
+
+            if not self._quality_gate_passed(quality_report):
+                msg = "quality repair gate blocked proposal promotion"
+                self._rollback_to_base(base_branch)
+                attempts.append(
+                    {
+                        "iteration": i,
+                        "error": msg,
+                        "quality_report_dir": quality_report.get("report_dir"),
+                    }
+                )
+                self._status_finish(
+                    status_callback,
+                    status_timers,
+                    phase="patch",
+                    message="Proposal failed quality repair gate",
+                    pct=60,
+                    iteration=i,
+                    branch=branch,
+                    error=msg,
+                )
+                attempt_artifacts["summary"] = self._write_attempt_summary_artifact(
+                    run_artifact_dir=run_artifact_dir,
+                    iteration=i,
+                    branch=branch,
+                    stage="quality_gate_blocked",
+                    improved=False,
+                    error=msg,
+                    attempt_artifacts=attempt_artifacts,
+                    extra={
+                        "proposal_title": getattr(proposal, "title", None),
+                        "quality_report": quality_report,
+                    },
+                )
+                artifacts["attempts"].append(attempt_artifacts)
+                insert_improvement_attempt(
+                    self.conn,
+                    iteration=i,
+                    baseline_run_id=baseline_id,
+                    before_run_id=before_id,
+                    after_run_id=None,
+                    branch=branch,
+                    proposal_title=getattr(proposal, "title", None),
+                    proposal_json={
+                        "title": getattr(proposal, "title", ""),
+                        "description": getattr(proposal, "description", ""),
+                        "quality_report": quality_report,
+                        "artifacts": attempt_artifacts,
+                    },
+                    pr_url=None,
+                    improved=False,
+                    error_text=msg,
+                )
+                continue
+
             # LLM Proposal lanes are allowed to make no changes, but if they do change the worktree, we want to track that as an outcome separate from "improved scoreboard" vs "did not improve scoreboard". This is because sometimes the LLM may make changes that don't end up improving the scoreboard, but we still want to allow that and track it as a distinct outcome from "proposal failed to apply any changes".
 
             self._status_finish(
@@ -1624,6 +1850,7 @@ class RepoJanitorIterationController:
                         "description": getattr(proposal, "description", ""),
                         "artifacts": attempt_artifacts,
                         "diff_summary": diff_summary,
+                        "quality_report": quality_report,
                     },
                     pr_url=pr_url,
                     improved=True,
@@ -1646,6 +1873,7 @@ class RepoJanitorIterationController:
                         "description": getattr(proposal, "description", ""),
                         "artifacts": attempt_artifacts,
                         "diff_summary": diff_summary,
+                        "quality_report": quality_report,
                     },
                     pr_url=None,
                     improved=False,

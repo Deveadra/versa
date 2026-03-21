@@ -28,7 +28,7 @@ _service = None
 
 def init_google_calendar_service():
     """Authenticate and build Google Calendar service."""
-    global _service
+    global _service  # noqa: PLW0603
     token_path = "token.google.pickle"
     if not GAPI_AVAILABLE:
         return None
@@ -108,7 +108,6 @@ def _extract_summary(natural_text: str) -> str:
 
 def add_event(natural_text: str, calendar_id: str = "primary") -> str:
     """Parse a natural language request and add an event."""
-    global _pending
 
     parsed_time = dateparser.parse(natural_text, settings={"PREFER_DATES_FROM": "future"})
     summary = _extract_summary(natural_text)

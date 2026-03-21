@@ -61,8 +61,6 @@ class Scheduler:
 
         # Lazy-import HabitMiner only if we actually need it
         if miner is None:
-            from base.learning.habit_miner import HabitMiner  # local import to keep tests light
-
             miner = HabitMiner(memory=memory, store=store, db=db)
 
         self.miner = miner
@@ -151,12 +149,31 @@ class Scheduler:
             self._sleep(self._loop_sleep_sec)
 
     def stop(self) -> None:
+        """Stop the scheduler (idempotent) and always shutdown APScheduler if present."""
+        was_running = bool(getattr(self, "running", False))
         self.running = False
 
-        # Do not hang on shutdown; thread is daemon anyway
-        try:
-            self.scheduler.shutdown(wait=False)
-        except Exception as e:
-            logger.warning(f"[Scheduler] shutdown() raised: {e}")
+        # Be tolerant to attribute naming differences across versions/refactors
+        aps = (
+            getattr(self, "apscheduler", None)
+            or getattr(self, "_apscheduler", None)
+            or getattr(self, "scheduler", None)
+            or getattr(self, "_scheduler", None)
+        )
+
+        if aps is not None and hasattr(aps, "shutdown"):
+            try:
+                # Prefer non-blocking if supported
+                aps.shutdown(wait=False)
+            except TypeError:
+                # SpyAps / minimal stubs often don't accept kwargs
+                aps.shutdown()
+            except Exception:
+                logger.exception("Scheduler shutdown failed.")
+        else:
+            logger.info("Scheduler already stopped.")
+
+        if not was_running:
+            logger.info("Scheduler already stopped.")
 
         logger.info("Scheduler stopped.")

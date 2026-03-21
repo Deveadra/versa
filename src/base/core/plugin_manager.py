@@ -34,7 +34,7 @@ class PluginManager:
         """
         text_lower = text.lower()
 
-        for name, plugin in plugins.items():
+        for _name, plugin in plugins.items():
             for keyword in plugin["keywords"]:
                 # if re.search(rf'\b{re.escape(keyword)}\b', text.lower()):
                 if re.search(rf"\b{re.escape(keyword)}\b", text_lower):

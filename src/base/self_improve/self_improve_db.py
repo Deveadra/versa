@@ -254,7 +254,7 @@ def fetch_open_gaps(conn, *, limit: int = 5) -> list[dict[str, Any]]:
     cols = [d[0] for d in (cur.description or [])]
     if not cols:
         return []
-    return [dict(zip(cols, row)) for row in rows]
+    return [dict(zip(cols, row, strict=True)) for row in rows]
 
 
 def mark_gap_status(conn, gap_id: int, status: str) -> None:

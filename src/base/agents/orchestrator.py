@@ -47,6 +47,7 @@ from base.self_improve.diagnostic_engine import DiagnosticEngine
 from base.self_improve.models import Proposal, ProposedChange
 from base.self_improve.pr_manager import PRManager
 from base.self_improve.proposal_engine import ProposalEngine
+from base.self_improve.self_improve_db import ensure_self_improve_schema, fetch_open_gaps
 from base.self_improve.service import SelfImproveRunConfig, SelfImproveService
 from base.utils.embeddings import get_embedder
 from base.utils.status import AerithStatus, AerithStatusConfig, CognitiveStatus
@@ -101,6 +102,31 @@ Respond ONLY in this JSON schema:
 }
 """
 
+# ------------------------------
+# Constants
+# ------------------------------
+STATUS_TIMEOUT_S = 15
+STALL_WARN_SEC = 8.0
+
+SELF_IMPROVE_HOUR = 3
+SELF_IMPROVE_MINUTE = 15
+
+DIAG_LAG_THRESHOLD_MS = 300
+RETRIEVER_SEARCH_K = 5
+PROMPT_TOP_K_MEMORIES = 3
+
+UPCOMING_EVENTS_WINDOW_DAYS = 14
+CONFIRMATION_THRESHOLD = 0.60
+QUERY_MEMORY_MATCH_THRESHOLD = 0.75
+
+SENTIMENT_POS_THRESHOLD = 0.2
+SENTIMENT_NEG_THRESHOLD = -0.2
+
+COSINE_EPS = 1e-12
+BOOTSTRAP_INGEST_LIMIT = 500
+MINING_THRESHOLD = 25
+ISSUES_PREVIEW_COUNT = 3
+
 
 class FAISSBackendCompat(FAISSBackend):
     """
@@ -124,49 +150,6 @@ class ConsoleNotifier:
     def notify(self, title: str, message: str):
         print(f"\n[NOTIFY] {title}: {message}\n")
 
-    def _self_improve_status_callback(self, event: dict[str, Any]) -> None:
-        phase = str(event.get("phase") or "self_improve")
-        state = str(event.get("state") or "update")
-        pct_raw = event.get("pct")
-        pct = int(pct_raw) if isinstance(pct_raw, (int, float)) else None
-        iteration = event.get("iteration")
-        branch = event.get("branch")
-        duration_ms = event.get("duration_ms")
-        outcome = event.get("outcome")
-        error = event.get("error")
-
-        message = str(event.get("message") or phase.replace("_", " ").title())
-
-        if iteration is not None:
-            message = f"[it {iteration}] {message}"
-        if branch:
-            message = f"{message} ({branch})"
-        if outcome:
-            message = f"{message} — {outcome}"
-        if error:
-            message = f"{message} — {error}"
-        if duration_ms is not None and state in {"complete", "error"}:
-            message = f"{message} [{int(duration_ms)} ms]"
-
-        logger.info(
-            f"[self-improve-status] phase={phase} state={state} pct={pct} message={message}"
-        )
-
-        if state == "start" and phase == "diagnose":
-            self.status.begin(phase, message)
-            return
-
-        if state == "complete" and phase == "summarize":
-            self.status.complete(message)
-            return
-
-        if state == "error" and phase == "summarize":
-            self.status.stage(phase, message, pct=pct)
-            self.status.stop()
-            return
-
-        self.status.stage(phase, message, pct=pct)
-
 
 class Orchestrator:
     def __init__(
@@ -179,8 +162,7 @@ class Orchestrator:
         # --- LLM & consolidation
         self.brain = Brain()
         self.notifier = ConsoleNotifier()
-        self.voice = Voice.get_instance()
-        self.voice = NullVoice()
+        self.voice = Voice.get_instance() if getattr(settings, "auto_speak", False) else NullVoice()
 
         # --- DB / stores
         self.db: SQLiteConn = db or SQLiteConn(settings.db_path)
@@ -198,13 +180,13 @@ class Orchestrator:
         )
 
         # --- UX/UI components
-        self.status_display = CognitiveStatus(immersive=True, timeout=15)
+        self.status_display = CognitiveStatus(immersive=True, timeout=STATUS_TIMEOUT_S)
 
         # Status / terminal UX
         self.status = AerithStatus(
             AerithStatusConfig(
                 immersive=True,  # enable immersive animation
-                stall_warn_sec=8.0,  # narrate if a step runs long
+                stall_warn_sec=STALL_WARN_SEC,  # narrate if a step runs long
                 stall_bell=False,  # flip to True if you want a soft bell on stalls
                 dual_output=False,  # voice and terminal output
             )
@@ -238,20 +220,6 @@ class Orchestrator:
             proposal_engine=self.proposal_engine,
             pr_manager=self.pr_manager,
         )
-        # learning & feedback components (inserted)
-        try:
-            self.feedback = Feedback(self.db)
-        except Exception:
-            self.feedback = None
-        try:
-            profile = {}
-        except Exception:
-            profile = {}
-        try:
-            self.tone_adapter = ToneAdapter(profile)
-        except Exception:
-            self.tone_adapter = None
-        self.policy_by_usage_id = {}
 
         self.consolidator = Consolidator(self.store, self.brain)
 
@@ -259,7 +227,7 @@ class Orchestrator:
         self.decider = Decider()
         self.miner: HabitMiner = HabitMiner(db=self.db, memory=self.store, store=self.store)
         self.interaction_count = 0
-        self.mining_threshold = 25
+        self.mining_threshold = MINING_THRESHOLD
 
         # --- Calendar
         self.calendar = CalendarStore(self.db)
@@ -318,8 +286,8 @@ class Orchestrator:
         if settings.self_improve_enabled:
             self.scheduler.add_daily(
                 self._job_self_improvement,
-                hour=3,
-                minute=15,
+                hour=SELF_IMPROVE_HOUR,
+                minute=SELF_IMPROVE_MINUTE,
             )  # runs daily at 3:15am
 
         self.scheduler.start()
@@ -344,6 +312,57 @@ class Orchestrator:
         except Exception:
             print(f"\n[NOTIFY] {title}: {message}\n")
 
+    def _self_improve_status_callback(self, event: dict[str, Any]) -> None:
+        phase = str(event.get("phase") or "self_improve")
+        state = str(event.get("state") or "update")
+        pct_raw = event.get("pct")
+        pct = int(pct_raw) if isinstance(pct_raw, (int, float)) else None
+        iteration = event.get("iteration")
+        branch = event.get("branch")
+        duration_ms = event.get("duration_ms")
+        outcome = event.get("outcome")
+        error = event.get("error")
+
+        message = str(event.get("message") or phase.replace("_", " ").title())
+
+        if iteration is not None:
+            message = f"[it {iteration}] {message}"
+        if branch:
+            message = f"{message} ({branch})"
+        if outcome:
+            message = f"{message} — {outcome}"
+        if error:
+            message = f"{message} — {error}"
+        if duration_ms is not None and state in {"complete", "error"}:
+            message = f"{message} [{int(duration_ms)} ms]"
+
+        logger.info(
+            f"[self-improve-status] phase={phase} state={state} pct={pct} message={message}"
+        )
+
+        if state == "start" and phase == "diagnose":
+            self.status.begin(phase, message)
+            return
+
+        if state == "complete" and phase == "summarize":
+            self.status.complete(message)
+            return
+
+        if state == "error":
+            self.status.stage(phase, message, pct=pct)
+            try:
+                self.status.stop()
+            except Exception:
+                pass
+            return
+
+        # if state == "error" and phase == "summarize":
+        #     self.status.stage(phase, message, pct=pct)
+        #     self.status.stop()
+        #     return
+
+        self.status.stage(phase, message, pct=pct)
+
     def _dispatch(self, action: str, params: dict) -> Any:
         # TODO: integrate with PluginManager if you have one
         if hasattr(self, "plugin_manager"):
@@ -351,22 +370,18 @@ class Orchestrator:
         logger.warning(f"No dispatcher implemented for {action}")
         return None
 
-    def benchmark_action(self, label: str, func, *args, **kwargs):
-        """Measure latency for any action (ms)."""
-
+    def benchmark_action(self, label: str, func, *args, **kwargs) -> dict[str, Any]:
+        """Measure latency for any action (ms). Runs the function exactly once."""
         start = time.perf_counter()
-        result = func(*args, **kwargs)
-        elapsed = (time.perf_counter() - start) * 1000
-        logger.info(f"[benchmark] {label} took {elapsed:.1f} ms")
         try:
             func(*args, **kwargs)
             ok = True
             msg = None
-        except Exception as e:
+        except Exception as exc:
             ok = False
-            msg = str(e)
+            msg = str(exc)
         latency = (time.perf_counter() - start) * 1000.0
-        # return result, elapsed
+        logger.info(f"[benchmark] {label} took {latency:.1f} ms")
         return {"label": label, "latency_ms": latency, "ok": ok, "msg": msg}
 
     def _now_iso_utc(self) -> str:
@@ -599,7 +614,6 @@ class Orchestrator:
 
     def _git_changed_paths(self) -> list[str]:
         # Keep this helper in Orchestrator; used to list changed files before commit
-        import subprocess
 
         p = subprocess.run(
             ["git", "status", "--porcelain"],
@@ -832,16 +846,15 @@ class Orchestrator:
         """
 
         fast = (mode == "changed") and (not fix)
-        # started_at = datetime.now(timezone.utc)
-        started_at_iso = self._now_iso_utc()
+
         t0 = time.perf_counter()
-        steps = [
-            "Running performance benchmarks",
-            "Static code scan",
-            "Indexing repository",
-            "LLM-assisted scan",
-            "Merging results",
-        ]
+        # steps = [
+        #     "Running performance benchmarks",
+        #     "Static code scan",
+        #     "Indexing repository",
+        #     "LLM-assisted scan",
+        #     "Merging results",
+        # ]
 
         # Prepare holders so they exist even if an early exception happens
         structured: dict[str, list] = {"issues": []}
@@ -909,7 +922,7 @@ class Orchestrator:
                 )
             except Exception as e:
                 logger.error(f"Benchmarking failed: {e}")
-            laggy = any(b["latency_ms"] > 300 for b in benchmarks)
+            laggy = any(b["latency_ms"] > DIAG_LAG_THRESHOLD_MS for b in benchmarks)
             if laggy:
                 structured["issues"].append(
                     {
@@ -1121,9 +1134,14 @@ class Orchestrator:
         # # ===== End feedback loop =====
 
         preview = "; ".join(
-            f"{i['file']}: {i.get('summary', i.get('issue','?'))}" for i in issues[:3]
+            f"{i['file']}: {i.get('summary', i.get('issue','?'))}"
+            for i in issues[:ISSUES_PREVIEW_COUNT]
         )
-        more = "" if len(issues) <= 3 else f" …and {len(issues)-3} more."
+        more = (
+            ""
+            if len(issues) <= ISSUES_PREVIEW_COUNT
+            else f" …and {len(issues) - ISSUES_PREVIEW_COUNT} more."
+        )
         return diag_output + f"\nDiagnostic complete. \nI found: {preview}{more}"
 
     def speak_progress(self, percent: int, desc: str):
@@ -1155,7 +1173,7 @@ class Orchestrator:
     # -------------------------
     @staticmethod
     def _cosine(a: np.ndarray, b: np.ndarray) -> float:
-        denom = float(np.linalg.norm(a) * np.linalg.norm(b)) or 1e-12
+        denom = float(np.linalg.norm(a) * np.linalg.norm(b)) or COSINE_EPS
         return float(np.dot(a, b) / denom)
 
     def add_fact(self, key: str, value: str, threshold: float = 0.85) -> str:
@@ -1238,7 +1256,7 @@ class Orchestrator:
     # --------------------------
     # Bootstrap vector retriever
     # --------------------------
-    def ingest_bootstrap(self, limit: int = 500) -> None:
+    def ingest_bootstrap(self, limit: int = BOOTSTRAP_INGEST_LIMIT) -> None:
         """
         Index recent events for the semantic retriever.
         """
@@ -1271,16 +1289,6 @@ class Orchestrator:
     def _retrieve_context(self, user_text: str, k: int = 4) -> list[str]:
         try:
             hits = self.store.keyword_search(user_text, limit=k) or []
-            # Convert dict rows to strings (prefer content/text fields)
-            # if hits and isinstance(hits[0], dict):
-            #     return [
-            #         h.get("content")
-            #         or h.get("text")
-            #         or json.dumps(h, ensure_ascii=False)
-            #         for h in hits
-            #     ]
-            return [str(h) for h in hits]
-            # If store returns strings, pass them through
             return [str(h) for h in hits]
         except Exception:
             return []
@@ -1305,6 +1313,300 @@ class Orchestrator:
     # High-level user flow with composer
     # ------------------------------------
 
+    def _handle_dream_command(self, msg: str) -> str | None:
+        """
+        Hard command routing for self-improve status that must NOT go through the LLM.
+        Returns a string response if handled, otherwise None.
+        """
+        lower = msg.strip().lower()
+        tokens = lower.split()
+        if not tokens:
+            return None
+
+        # Accept both 'dream' and your accidental 'dreams'
+        if tokens[0] not in {"dream", "dreams"}:
+            return None
+
+        if len(tokens) < 2:
+            return "Usage: dream status | dream last | dream attempts [n] | dream run | dream gaps|gap [limit]"
+
+        sub = tokens[1].lower()
+
+        try:
+            ensure_self_improve_schema(self.db.conn)
+        except Exception as e:
+            return f"Self-improve schema check failed: {e}"
+
+        if sub == "status":
+            conn = self.db.conn
+
+            # Last score run (correct table/columns)
+            r = conn.execute("""
+              SELECT id, created_at, run_type, mode, fix_enabled, git_branch, git_sha, score, passed
+              FROM repo_score_runs
+              ORDER BY id DESC
+              LIMIT 1
+              """).fetchone()
+
+            if not r:
+                return "No self-improve runs recorded yet."
+
+            run_id = int(r[0])
+            created_at = str(r[1])
+            run_type = str(r[2])
+            mode = str(r[3])
+            fix_enabled = bool(r[4])
+            git_branch = r[5] or "—"
+            git_sha = r[6] or "—"
+            git_sha = git_sha[:10] if git_sha != "—" else "—"
+            score = float(r[7] or 0.0)
+            passed = bool(r[8])
+
+            # Last improvement attempt
+            a = conn.execute("""
+              SELECT id, created_at, iteration, branch, proposal_title, pr_url, improved, error_text, proposal_json
+              FROM repo_improvement_attempts
+              ORDER BY id DESC
+              LIMIT 1
+              """).fetchone()
+
+            open_gaps = int(conn.execute("""
+                  SELECT COUNT(*)
+                  FROM capability_gaps
+                  WHERE status IN ('queued','in_progress','new')
+                  """).fetchone()[0])
+
+            lines: list[str] = []
+            lines.append("Self-improve status:")
+            lines.append(
+                f"- Last score run: id={run_id} at {created_at} | type={run_type} mode={mode} "
+                f"fix={'on' if fix_enabled else 'off'} passed={'yes' if passed else 'no'} "
+                f"score={score:.3f} branch={git_branch} sha={git_sha}"
+            )
+
+            if not a:
+                lines.append("- Last attempt: —")
+                lines.append(f"- Open gaps: {open_gaps} (run `dream gaps` to list)")
+                return "\n".join(lines)
+
+            attempt_id = int(a[0])
+            attempt_at = str(a[1])
+            iteration = int(a[2])
+            branch = str(a[3])
+            title = a[4] or "—"
+            pr_url = a[5] or "—"
+            improved = bool(a[6])
+
+            error_text = (a[7] or "").strip()
+            proposal_json_raw = a[8]
+            note = ""
+
+            try:
+                if proposal_json_raw:
+                    pj = json.loads(proposal_json_raw)
+                    if isinstance(pj, dict):
+                        note = (pj.get("note") or "").strip()
+            except Exception:
+                note = ""
+
+            # Backward-compat: treat this specific historical message as a Note, not Error.
+            if error_text and "produced no persistent worktree changes" in error_text.lower():
+                note = note or error_text
+                error_text = ""
+
+            lines.append(
+                f"- Last attempt: id={attempt_id} at {attempt_at} | it={iteration} "
+                f"improved={'yes' if improved else 'no'} branch={branch} title={title}"
+            )
+            if pr_url != "—":
+                lines.append(f"  PR: {pr_url}")
+            if error_text:
+                lines.append(f"  Error: {error_text}")
+            if note:
+                lines.append(f"  Note: {note}")
+
+            lines.append(f"- Open gaps: {open_gaps} (run `dream gaps` to list)")
+            return "\n".join(lines)
+
+        if sub == "last":
+            conn = self.db.conn
+
+            a = conn.execute("""
+              SELECT id, created_at, iteration, branch, proposal_title, pr_url, improved, error_text, proposal_json
+              FROM repo_improvement_attempts
+              ORDER BY id DESC
+              LIMIT 1
+              """).fetchone()
+
+            if not a:
+                return "No self-improve attempts recorded yet."
+
+            attempt_id = int(a[0])
+            attempt_at = str(a[1])
+            iteration = int(a[2])
+            branch = str(a[3])
+            title = a[4] or "—"
+            pr_url = a[5] or "—"
+            improved = bool(a[6])
+            error_text = (a[7] or "").strip()
+            proposal_json_raw = a[8]
+
+            outcome = ""
+            note = ""
+            try:
+                if proposal_json_raw:
+                    pj = json.loads(proposal_json_raw)
+                    if isinstance(pj, dict):
+                        outcome = (pj.get("outcome") or "").strip()
+                        note = (pj.get("note") or "").strip()
+            except Exception:
+                outcome = ""
+                note = ""
+
+            # Backward-compat note mapping
+            if error_text and "produced no persistent worktree changes" in error_text.lower():
+                note = note or error_text
+                error_text = ""
+                outcome = outcome or "no_changes"
+
+            lines: list[str] = []
+            lines.append("Last self-improve attempt:")
+            lines.append(
+                f"- id={attempt_id} at {attempt_at} | it={iteration} "
+                f"improved={'yes' if improved else 'no'} branch={branch} title={title}"
+            )
+            if outcome:
+                lines.append(f"- Outcome: {outcome}")
+            if pr_url != "—":
+                lines.append(f"- PR: {pr_url}")
+            if error_text:
+                lines.append(f"- Error: {error_text}")
+            if note:
+                lines.append(f"- Note: {note}")
+            return "\n".join(lines)
+
+        if sub == "attempts":
+            n = 10
+            if len(tokens) >= 3 and tokens[2].isdigit():
+                n = max(1, min(50, int(tokens[2])))
+
+            conn = self.db.conn
+            rows = conn.execute(
+                """
+              SELECT id, created_at, iteration, branch, proposal_title, improved, error_text, proposal_json
+              FROM repo_improvement_attempts
+              ORDER BY id DESC
+              LIMIT ?
+              """,
+                (n,),
+            ).fetchall()
+
+            if not rows:
+                return "No self-improve attempts recorded yet."
+
+            lines = [f"Last {len(rows)} self-improve attempts:"]
+            for r in rows:
+                attempt_id = int(r[0])
+                attempt_at = str(r[1])
+                iteration = int(r[2])
+                branch = str(r[3])
+                title = r[4] or "—"
+                improved = bool(r[5])
+                error_text = (r[6] or "").strip()
+                proposal_json_raw = r[7]
+
+                outcome = ""
+                try:
+                    if proposal_json_raw:
+                        pj = json.loads(proposal_json_raw)
+                        if isinstance(pj, dict):
+                            outcome = (pj.get("outcome") or "").strip()
+                except Exception:
+                    outcome = ""
+
+                # Backward-compat note mapping: do not show as "error"
+                if error_text and "produced no persistent worktree changes" in error_text.lower():
+                    outcome = outcome or "no_changes"
+                    error_text = ""
+
+                tail = []
+                if outcome:
+                    tail.append(outcome)
+                if error_text:
+                    tail.append("error")
+                suffix = f" ({', '.join(tail)})" if tail else ""
+
+                lines.append(
+                    f"- id={attempt_id} {attempt_at} | it={iteration} "
+                    f"improved={'yes' if improved else 'no'} branch={branch} title={title}{suffix}"
+                )
+            return "\n".join(lines)
+
+        if sub == "run":
+            # Bounded defaults
+            include_dream = False  # keep fast/controlled by default
+            # max_iters = 1
+
+            # Optional flags: "dream run dream" or "dream run full"
+            if any(t in tokens[2:] for t in ("dream", "full")):
+                include_dream = True
+
+            cfg = SelfImproveRunConfig(status_callback=self._self_improve_status_callback)
+
+            try:
+                result = self.self_improve.run_manual(cfg=cfg, include_dream=include_dream)
+            except Exception as e:
+                try:
+                    self.status.stop()
+                except Exception:
+                    pass
+                return f"Self-improve run failed: {e}"
+
+            # Try to surface report dir (your dry run shows result['artifacts']['run_dir'])
+            run_dir = None
+            try:
+                artifacts = result.get("artifacts") if isinstance(result, dict) else None
+                if isinstance(artifacts, dict):
+                    run_dir = artifacts.get("run_dir")
+            except Exception:
+                run_dir = None
+
+            lines = ["Self-improve run complete."]
+            if run_dir:
+                lines.append(f"- Report dir: {run_dir}")
+            # Surface PR URL if any
+            try:
+                pr_url = result.get("pr_url") if isinstance(result, dict) else None
+                if pr_url:
+                    lines.append(f"- PR: {pr_url}")
+            except Exception:
+                pass
+
+            # Also recommend follow-ups
+            lines.append("Try: `dream status` or `dream last`")
+            return "\n".join(lines)
+
+        if sub in {"gaps", "gap"}:
+            limit = 5
+            if len(tokens) >= 3 and tokens[2].isdigit():
+                limit = max(1, min(50, int(tokens[2])))
+
+            gaps = fetch_open_gaps(self.db.conn, limit=limit)
+            if not gaps:
+                return "No open gaps (queued/in_progress/new)."
+
+            lines = [f"Open gaps (top {len(gaps)}):"]
+            for g in gaps:
+                lines.append(
+                    f"- [#{g['id']}] prio={g['priority']} status={g['status']} "
+                    f"source={g['source']} capability={g['requested_capability']}"
+                )
+                if g.get("observed_failure"):
+                    lines.append(f"  failure: {g['observed_failure']}")
+            return "\n".join(lines)
+
+        return "Usage: dream status | dream last | dream attempts [n] | dream run | dream gaps|gap [limit]"
+
     def _job_self_improvement(self) -> None:
         cfg = SelfImproveRunConfig(status_callback=self._self_improve_status_callback)
         try:
@@ -1325,6 +1627,10 @@ class Orchestrator:
 
         try:
             lower = msg.strip().lower()
+            # --- Hard command routing: must bypass LLM/status UI ---
+            dream_resp = self._handle_dream_command(msg)
+            if dream_resp is not None:
+                return dream_resp
             self.status.begin("analyze", "Understanding request")
             self.status.stage("analyze", "Parsing intent", pct=10)
 
@@ -1370,7 +1676,7 @@ class Orchestrator:
 
             # --- Retrieve memories ---
             try:
-                memories = self.retriever.search(msg, k=5)
+                memories = self.retriever.search(msg, k=RETRIEVER_SEARCH_K)
             except Exception:
                 memories = []
 
@@ -1408,7 +1714,7 @@ class Orchestrator:
                 persona_text=persona_text,
                 memories=[{"summary": m} if isinstance(m, str) else m for m in (memories or [])],
                 extra_context=kg_context,
-                top_k_memories=3,
+                top_k_memories=PROMPT_TOP_K_MEMORIES,
                 channel="text",
             )
 
@@ -1425,8 +1731,6 @@ class Orchestrator:
             self.status.stage("synthesis", "Forming reply", pct=85)
 
             try:
-                from config.config import settings
-
                 if getattr(settings, "auto_speak", False):
                     self.status.update(90, "Speech queued")
             except Exception:
@@ -1464,7 +1768,7 @@ class Orchestrator:
                     best = r
                     best_score = score
 
-            if best and best_score > 0.75:
+            if best and best_score > QUERY_MEMORY_MATCH_THRESHOLD:
                 return f"I remember: {best['key']} → {best['value']} (last updated {best['last_updated']})"
             return "I couldn’t find anything in memory that matches."
         except Exception:
@@ -1551,7 +1855,7 @@ class Orchestrator:
                 events = (
                     self.calendar.expand(time_start, time_end)
                     if (time_start and time_end)
-                    else self.query_upcoming_events(14)
+                    else self.query_upcoming_events(UPCOMING_EVENTS_WINDOW_DAYS)
                 )
                 if events:
                     lines = []
@@ -1574,7 +1878,7 @@ class Orchestrator:
                 rels = self.kg_store.query_future_relations(entity) or []
                 if rels:
                     facts: list[str] = []
-                    for src, rel, tgt, conf, vfrom, vto in rels:
+                    for src, rel, tgt, _conf, vfrom, vto in rels:
                         facts.append(
                             f"{src} will {rel.replace('_',' ')} {tgt} (starting {vfrom}{' until ' + vto if vto else ''})"
                         )
@@ -1587,7 +1891,7 @@ class Orchestrator:
                     facts: list[str] = []
                     ts = self._parse_dt_or_none(time_start)
                     te = self._parse_dt_or_none(time_end)
-                    for src, rel, tgt, conf, vfrom, vto in rels:
+                    for src, rel, tgt, _conf, vfrom, vto in rels:
                         vf = self._parse_dt_or_none(vfrom)
                         vt = self._parse_dt_or_none(vto)
                         if ts is not None and te is not None:
@@ -1614,7 +1918,7 @@ class Orchestrator:
                 now_dt = utc_now()
                 for path in paths:
                     pieces = []
-                    for src, rel, tgt, conf, vfrom, vto in path:
+                    for src, rel, tgt, _conf, _vfrom, vto in path:
                         vt = self._parse_dt_or_none(vto)
                         is_active = (vto is None) or (vt and vt >= now_dt)
                         tense = "is" if is_active else "was"
@@ -1636,7 +1940,7 @@ class Orchestrator:
         try:
             if confidence is None:
                 return None
-            THRESH = 0.60
+            THRESH = CONFIRMATION_THRESHOLD
             if confidence < THRESH:
                 q = f"I can {suggestion}. Did I get that right?"
                 return {"ask_user": q, "usage_id": usage_id}
@@ -1645,26 +1949,8 @@ class Orchestrator:
             logger.exception("ask_confirmation_if_unsure")
             return None
 
-    # def record_user_feedback(self, usage_id: int, text: str) -> None:
-    #     """
-    #     Very light sentiment → feedback mapping. Safe even if Feedback is unavailable.
-    #     """
-    #     if not self.feedback:
-    #         return
-    #     try:
-    #         s = quick_polarity(text)
-    #         kind = "confirm" if s > 0.2 else "dislike" if s < -0.2 else "note"
-    #         self.feedback.record(usage_id, kind, text)
-    #         # If you wire ToneAdapter.update(reward), you could add:
-    #         # pid = self.policy_by_usage_id.get(usage_id)
-    #         # if pid and self.tone_adapter:
-    #         #     reward = 1.0 if kind == "confirm" else -1.0 if kind == "dislike" else 0.0
-    #         #     self.tone_adapter.update(pid, reward)
-    #     except Exception:
-    #         logger.exception("record_user_feedback failed")
-
-    # def record_user_feedback(self, usage_id: int | None, text: str):
     def record_user_feedback(self, usage_id: int | None, text: str) -> None:
+        # Record feedback, update events, reward the tone bandit, and optionally reinforce habits/facts.
         pid = None
         if (
             usage_id is not None
@@ -1682,12 +1968,15 @@ class Orchestrator:
         if pid is None:
             pid = getattr(self, "last_policy_id", None)
 
-        """Record feedback, update events, reward the tone bandit, and optionally reinforce habits/facts."""
         try:
             # 1) polarity
             try:
                 score = quick_polarity(text)  # [-1, 1]
-                kind = "confirm" if score > 0.2 else "dislike" if score < -0.2 else "note"
+                kind = (
+                    "confirm"
+                    if score > SENTIMENT_POS_THRESHOLD
+                    else "dislike" if score < SENTIMENT_NEG_THRESHOLD else "note"
+                )
             except Exception:
                 score = 0.0
                 kind = "note"
@@ -1882,9 +2171,8 @@ class Orchestrator:
 
     def cmd_self_improve(self, *args):
         try:
-            from base.agents.dream import DreamCycle  # lazy import to avoid circular
 
-            dc = DreamCycle()
+            # dc = DreamCycle()
             cfg = SelfImproveRunConfig(status_callback=self._self_improve_status_callback)
             result = self.self_improve.run_manual(cfg=cfg, include_dream=True)
             self.notify(f"Manual self-improve complete: {result.get('pr_url') or 'no PR opened'}")

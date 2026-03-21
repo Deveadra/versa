@@ -16,7 +16,7 @@ def detect_topics_with_llm(user_text: str, known_topics: list[str]) -> list[str]
     prompt = f"""
     User said: "{user_text}"
     Known topics: {", ".join(known_topics)}
-    Which of these topics are relevant to the user's statement? 
+    Which of these topics are relevant to the user's statement?
     Respond with a JSON list of topic ids (from the known topics) that apply.
     """
     reply = ask_brain(prompt)  # wrapper around GPT call
@@ -87,6 +87,6 @@ def format_memories(memories):
     if not memories:
         return None
     lines = []
-    for ts, mtype, content, response in memories:
+    for ts, _mtype, content, response in memories:
         lines.append(f"[{ts}] You said: '{content}' | Aerith replied: '{response}'")
     return "\n".join(lines)

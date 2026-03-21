@@ -5,8 +5,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from models import Gap, GapStatus, GapType
-
 GapType = Literal[
     "unhandled_tool", "tool_error", "missing_capability", "test_failure", "lint_failure"
 ]

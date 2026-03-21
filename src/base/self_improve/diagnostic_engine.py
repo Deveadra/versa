@@ -132,7 +132,6 @@ class DiagnosticEngine:
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / f"diagnostic_{utc_compact_stamp()}.json"
         out_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
-        from loguru import logger
 
         logger.info(f"[diagnostics] wrote report → {out_path}")
         return str(out_path)

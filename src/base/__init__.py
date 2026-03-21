@@ -1,4 +1,10 @@
 # src/base/__init__.py
+
+# from __future__ import annotations
+
+# from .core import audio, core
+# from .llm import brain
+
 """
 Aerith MVP package.
 
@@ -11,21 +17,15 @@ __version__ = "0.1.0"
 __all__: list[str] = ["__version__"]
 
 
-def __getattr__(name: str):
-    # Lazy imports so tests and non-voice installs don't explode.
-    if name == "brain":
-        from .llm import brain
+# def __getattr__(name: str):
+#     # Lazy imports so tests and non-voice installs don't explode.
+#     if name == "brain":
+#         return brain
 
-        return brain
+#     if name == "core":
+#         return core
 
-    if name == "core":
-        from .core import core
+#     if name == "audio":
+#         return audio
 
-        return core
-
-    if name == "audio":
-        from .core import audio
-
-        return audio
-
-    raise AttributeError(name)
+#     raise AttributeError(name)

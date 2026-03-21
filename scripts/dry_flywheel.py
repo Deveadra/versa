@@ -1,6 +1,5 @@
 import os
 from pathlib import Path
-from pprint import pprint
 from typing import Any
 
 os.environ.setdefault("GITHUB_DEFAULT_BRANCH", "feature/flywheel")
@@ -83,10 +82,12 @@ def main() -> None:
         open_pr=False,
         status_callback=_status_callback,
     )
-
-    result = service.run_manual(cfg=cfg, include_dream=False)
-    print("=== DRY RUN RESULT ===")
-    pprint(result)
+    try:
+        result = service.run_manual(cfg=cfg, include_dream=False)
+        print("=== DRY RUN RESULT ===")
+        print(result)
+    finally:
+        store.wait_for_background_tasks(timeout=10.0)
 
 
 if __name__ == "__main__":

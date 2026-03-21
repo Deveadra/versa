@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import datetime
 from datetime import datetime
 from typing import Any
 
@@ -192,7 +191,7 @@ def compose_style_plan(
 
     if not isinstance(profile, dict):
         profile = {}
-    polarity = quick_polarity(user_text)
+    _polarity = quick_polarity(user_text)
 
     # basic time-of-day vibe
     hour = datetime.now().hour

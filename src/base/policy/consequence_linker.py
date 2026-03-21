@@ -53,7 +53,7 @@ def detect_consequence(conn, user_text: str):
                 examples.append(user_text)
                 cur.execute(
                     """
-                    UPDATE complaint_clusters 
+                    UPDATE complaint_clusters
                     SET examples=?, last_example=?, last_updated=datetime('now')
                     WHERE cluster=? AND topic_id=?
                     """,

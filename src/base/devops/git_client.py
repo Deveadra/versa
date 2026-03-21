@@ -44,11 +44,7 @@ class GitClient:
         return self._run(args, check=check)
 
     def run_rc(self, args: Sequence[str] | str) -> tuple[int, str, str]:
-        if isinstance(args, str):
-            parts = args.split()
-        else:
-            parts = list(args)
-
+        parts = args.split() if isinstance(args, str) else list(args)
         # Strip accidental leading "git"
         if parts and str(parts[0]).lower() == "git":
             parts = parts[1:]
@@ -387,7 +383,7 @@ class GitClient:
             self._run(["commit", "-m", message])
         except GitError as e:
             if "nothing to commit" in str(e):
-                raise GitError("Nothing to commit")
+                raise GitError("Nothing to commit") from e
             raise
 
     def push(self, branch: str, set_upstream: bool = True) -> None:

@@ -1,1 +1,1 @@
-from .lines import AERITH_PERSONALITY
+from .lines import AERITH_PERSONALITY as AERITH_PERSONALITY

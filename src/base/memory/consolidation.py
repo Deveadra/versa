@@ -28,7 +28,12 @@ class Consolidator:
         prompt = f"Summarize these past events into a concise knowledge note:\n{joined}"
         summary = self.brain.ask_brain("System: consolidation", prompt, max_tokens=200)
         if summary:
-            self.store.add_event(summary, importance=40, type_="summary")
+            self.store.add_event(
+                summary,
+                importance=40,
+                type_="summary",
+                vector_write="sync",
+            )
             ids = [r["id"] for r in rows]
             self.store.db.conn.executemany("DELETE FROM events WHERE id=?", [(i,) for i in ids])
             self.store.db.conn.commit()

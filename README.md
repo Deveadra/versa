@@ -212,4 +212,27 @@ Note:
 
 # Troubleshooting
 
+---
 
+## Phase 0 monorepo additions (non-destructive)
+
+This repository now also includes a TypeScript monorepo foundation under:
+
+- `apps/web` (Next.js shell)
+- `apps/core` (core API)
+- `apps/ai` (AI adapter boundary)
+- `packages/*` shared packages (`shared`, `database`, `config`, `security`, etc.)
+
+Use these root workspace commands for the new stack:
+
+```bash
+pnpm install
+pnpm db:reset
+pnpm db:migrate
+pnpm db:seed
+pnpm lint
+pnpm typecheck
+pnpm test
+```
+
+The existing Aerith/Ultron project structure and workflows remain intact.

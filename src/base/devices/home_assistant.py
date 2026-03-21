@@ -38,7 +38,7 @@ class HomeAssistant:
             r.raise_for_status()
             return "API" in r.text
         except Exception as e:
-            raise HomeAssistantError(f"Failed to connect to Home Assistant: {e}")
+            raise HomeAssistantError(f"Failed to connect to Home Assistant: {e}") from e
 
     async def call_service(
         self, domain: str, service: str, data: dict[str, Any] | None = None
@@ -53,7 +53,7 @@ class HomeAssistant:
             r.raise_for_status()
             return r.json() if r.content else {}
         except Exception as e:
-            raise HomeAssistantError(f"Service call {domain}.{service} failed: {e}")
+            raise HomeAssistantError(f"Service call {domain}.{service} failed: {e}") from e
 
     async def get_state(self, entity_id: str) -> dict[str, Any]:
         """Fetch the current state of an entity."""
@@ -63,7 +63,7 @@ class HomeAssistant:
             r.raise_for_status()
             return r.json()
         except Exception as e:
-            raise HomeAssistantError(f"Failed to get state for {entity_id}: {e}")
+            raise HomeAssistantError(f"Failed to get state for {entity_id}: {e}") from e
 
     async def set_state(
         self, entity_id: str, state: str, attributes: dict[str, Any] | None = None
@@ -76,7 +76,7 @@ class HomeAssistant:
             r.raise_for_status()
             return r.json()
         except Exception as e:
-            raise HomeAssistantError(f"Failed to set state for {entity_id}: {e}")
+            raise HomeAssistantError(f"Failed to set state for {entity_id}: {e}") from e
 
     async def close(self):
         """Cleanly close the HTTP session."""

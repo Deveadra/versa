@@ -265,7 +265,7 @@ def run_unified_night_cycle(auto_insert: bool = False):
 
     # ---- 1. Persona update ----
     habit_miner = HabitMiner(db, memory_store, memory_store)
-    profile = habit_miner.mine()
+    _profile = habit_miner.mine()
     logger.info("HabitMiner refreshed persona before nightly rules.")
 
     # ---- 2. Heuristic proposals ----

@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+OPEN_GAP_STATUSES = ("queued", "in_progress", "new")
+
 
 def make_gap_fingerprint(*parts: str) -> str:
     h = hashlib.sha256()
@@ -178,6 +180,64 @@ def upsert_gap(
     conn.commit()
 
 
+def reconcile_gap_states_for_source(
+    conn,
+    *,
+    source: str,
+    active_fingerprints: set[str] | list[str] | tuple[str, ...],
+    active_status: str = "queued",
+) -> None:
+    """
+    Make capability_gaps truthful for one source based on the CURRENT observed fingerprints.
+
+    Rules:
+    - fingerprints currently observed -> active_status
+    - open gaps from this source that are NOT currently observed -> fixed
+    - if nothing is currently observed for this source, all open gaps for this source become fixed
+    """
+    if active_status not in OPEN_GAP_STATUSES:
+        raise ValueError(f"active_status must be one of {OPEN_GAP_STATUSES}, got {active_status!r}")
+
+    active = sorted({fp for fp in active_fingerprints if fp})
+
+    if active:
+        placeholders = ", ".join("?" for _ in active)
+
+        conn.execute(
+            f"""
+            UPDATE capability_gaps
+            SET status='fixed'
+            WHERE source=?
+              AND status IN ('queued', 'in_progress', 'new')
+              AND fingerprint NOT IN ({placeholders})
+            """,
+            (source, *active),
+        )
+
+        conn.execute(
+            f"""
+            UPDATE capability_gaps
+            SET status=?
+            WHERE source=?
+              AND fingerprint IN ({placeholders})
+              AND status != ?
+            """,
+            (active_status, source, *active, active_status),
+        )
+    else:
+        conn.execute(
+            """
+            UPDATE capability_gaps
+            SET status='fixed'
+            WHERE source=?
+              AND status IN ('queued', 'in_progress', 'new')
+            """,
+            (source,),
+        )
+
+    conn.commit()
+
+
 def fetch_open_gaps(conn, *, limit: int = 5) -> list[dict[str, Any]]:
     cur = conn.execute(
         """
@@ -194,7 +254,7 @@ def fetch_open_gaps(conn, *, limit: int = 5) -> list[dict[str, Any]]:
     cols = [d[0] for d in (cur.description or [])]
     if not cols:
         return []
-    return [dict(zip(cols, row)) for row in rows]
+    return [dict(zip(cols, row, strict=True)) for row in rows]
 
 
 def mark_gap_status(conn, gap_id: int, status: str) -> None:

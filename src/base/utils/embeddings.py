@@ -5,6 +5,8 @@ from collections.abc import Sequence
 from typing import Protocol
 
 import numpy as np
+from openai import OpenAI
+from sentence_transformers import SentenceTransformer
 
 from config.config import settings
 
@@ -28,8 +30,6 @@ def get_embedder() -> tuple[Embedder, int]:
     provider = (settings.embeddings_provider or "sentence_transformers").lower()
 
     if provider == "openai":
-        from openai import OpenAI
-
         api_key = settings.openai_api_key or ""
         model = settings.embeddings_model or "text-embedding-3-small"
         cache_key = (provider, model, api_key)
@@ -51,8 +51,6 @@ def get_embedder() -> tuple[Embedder, int]:
         return out
 
     # default: sentence-transformers (local)
-    from sentence_transformers import SentenceTransformer
-
     st_model_name = settings.embeddings_model or "all-MiniLM-L6-v2"
     cache_key = (provider, st_model_name, "")
 

@@ -1,7 +1,6 @@
 # base/learning/habit_miner.py
 from __future__ import annotations
 
-import datetime
 import json
 import math
 from collections import Counter, defaultdict
@@ -17,6 +16,23 @@ from base.utils.time import ensure_utc, parse_iso_utc, utc_now
 
 PROFILE_PATH = Path("config/user_profile.json")
 
+# ------------------------------
+# Constants
+# ------------------------------
+MORNING_START_HOUR = 5
+AFTERNOON_START_HOUR = 12
+EVENING_START_HOUR = 17
+NIGHT_START_HOUR = 22
+
+HABIT_MIN_OCCURRENCES = 3  # count >= 3
+FAVORITE_MUSIC_MIN_FREQ = 3
+PREFERRED_GREETING_MIN_FREQ = 2
+EVENING_ACTIVITY_MIN_COUNT = 10
+
+HABIT_STRONG_MIN_COUNT = 3
+RECENT_EVENTS_LIMIT = 1000
+MOST_USED_COMMANDS_TOP_K = 5
+
 
 def _time_bucket(ts: str) -> str:
     """Map ISO timestamp to a simple day-part bucket."""
@@ -26,14 +42,13 @@ def _time_bucket(ts: str) -> str:
         return "at unknown times"
 
     hour = dt.hour
-    if 5 <= hour < 12:
+    if MORNING_START_HOUR <= hour < AFTERNOON_START_HOUR:
         return "in the morning"
-    elif 12 <= hour < 17:
+    if AFTERNOON_START_HOUR <= hour < EVENING_START_HOUR:
         return "in the afternoon"
-    elif 17 <= hour < 22:
+    if EVENING_START_HOUR <= hour < NIGHT_START_HOUR:
         return "in the evening"
-    else:
-        return "late at night"
+    return "late at night"
 
 
 class HabitMiner:
@@ -82,7 +97,7 @@ class HabitMiner:
 
         summaries = []
         for (content, bucket), count in counter.most_common(top_k):
-            if count > 2:  # only habits, not one-offs
+            if count >= HABIT_MIN_OCCURRENCES:  # only habits, not one-offs
                 summaries.append(f'User often says: "{content}" {bucket} (seen {count} times)')
         # Ensure at least one stable, human-readable summary exists
         if candidates and not any("User often says" in s for s in summaries):
@@ -120,6 +135,115 @@ class HabitMiner:
         if upcoming:
             logger.info(f"HabitMiner.check_upcoming: {len(upcoming)} habit(s) due soon.")
         return upcoming
+
+    def _fetch_recent_events(self, limit: int = RECENT_EVENTS_LIMIT) -> list[tuple[str, str]]:
+        cur = self.db.conn.execute(
+            "SELECT content, ts FROM events ORDER BY id DESC LIMIT ?", (limit,)
+        )
+        rows = cur.fetchall()
+        out: list[tuple[str, str]] = []
+        for r in rows:
+            content = r[0] or ""
+            ts = r[1] or ""
+            out.append((content, ts))
+        return out
+
+    def _extract_commands_and_tod(
+        self, rows: list[tuple[str, str]]
+    ) -> tuple[list[str], dict[int, int], list[str]]:
+        commands: list[str] = []
+        tod_hist: dict[int, int] = defaultdict(int)
+        phrases: list[str] = []
+
+        for content, ts in rows:
+            if isinstance(content, str):
+                phrases.append(content)
+
+            text = (content or "").lower()
+
+            try:
+                hr = parse_iso_utc(ts).hour
+            except Exception:
+                hr = None
+            if hr is not None:
+                tod_hist[hr] += 1
+
+            if text.startswith("play ") or "spotify" in text or "music" in text:
+                commands.append("music")
+            if "turn on light" in text or "lights" in text:
+                commands.append("lights")
+            if "calendar" in text or "schedule" in text or "meeting" in text:
+                commands.append("calendar")
+
+        return commands, tod_hist, phrases
+
+    def _update_most_used_commands(self, profile: dict, commands: list[str]) -> None:
+        if not commands:
+            return
+        c = Counter(commands)
+        profile["most_used_commands"] = [k for k, _ in c.most_common(MOST_USED_COMMANDS_TOP_K)]
+
+    def _update_favorite_music(self, profile: dict, phrases: list[str]) -> None:
+        cleaned = []
+        for p in phrases:
+            if not isinstance(p, str):
+                continue
+            s = p.lower().replace("play", "").strip()
+            if s:
+                cleaned.append(s)
+
+        if not cleaned:
+            return
+
+        common = Counter(cleaned)
+        top, freq = common.most_common(1)[0]
+        if freq >= FAVORITE_MUSIC_MIN_FREQ:
+            profile["favorite_music"] = top
+            logger.info(f"HabitMiner: favorite_music → {top}")
+
+    def _update_tone_adjustments(self, profile: dict, phrases: list[str]) -> None:
+        tone_adj = profile.get("tone_adjustments", {"casual": 0.5, "formal": 0.5})
+        if not isinstance(tone_adj, dict):
+            tone_adj = {"casual": 0.5, "formal": 0.5}
+
+        for phrase in phrases:
+            if not isinstance(phrase, str):
+                continue
+            low = phrase.lower()
+            if "sarcasm" in low or "joke" in low:
+                tone_adj["playful"] = min(float(tone_adj.get("playful", 0.0)) + 0.05, 1.0)
+
+        profile["tone_adjustments"] = tone_adj
+
+    def _update_preferred_greeting(self, profile: dict) -> None:
+        cur = self.db.conn.execute(
+            "SELECT content FROM events WHERE content LIKE '%hello%' OR content LIKE '%hi %'"
+        )
+        greetings = [r[0] for r in cur.fetchall() if r and r[0]]
+        if not greetings:
+            return
+        common = Counter(greetings)
+        top, freq = common.most_common(1)[0]
+        if freq >= PREFERRED_GREETING_MIN_FREQ:
+            profile["preferred_greeting"] = top.strip()
+            logger.info(f"HabitMiner: preferred_greeting → {top.strip()}")
+
+    def _update_routines(
+        self, profile: dict, commands: list[str], tod_hist: dict[int, int]
+    ) -> None:
+        if "music" not in commands:
+            return
+
+        buckets = {
+            "evening": range(18, 23),
+        }
+        total_evening = sum(tod_hist.get(h, 0) for h in buckets["evening"])
+        if total_evening < EVENING_ACTIVITY_MIN_COUNT:
+            return
+
+        rout = profile.get("routines") if isinstance(profile.get("routines"), dict) else {}
+        rout["evening_music"] = "lo-fi"
+        profile["routines"] = rout
 
     def mine(self) -> dict:
         """
@@ -329,8 +453,8 @@ class HabitMiner:
         adj = {k: v - 1 for k, v in adj.items() if v > 1}
 
         # Keep only strong habits
-        reinf = {k: v for k, v in reinf.items() if v >= 3}
-        adj = {k: v for k, v in adj.items() if v >= 3}
+        reinf = {k: v for k, v in reinf.items() if v >= HABIT_STRONG_MIN_COUNT}
+        adj = {k: v for k, v in adj.items() if v >= HABIT_STRONG_MIN_COUNT}
 
         profile["reinforcements"] = reinf
         profile["adjustments"] = adj

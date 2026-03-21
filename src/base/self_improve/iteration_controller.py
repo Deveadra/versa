@@ -4,6 +4,7 @@ import json
 import shutil
 import subprocess
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from fnmatch import fnmatch
 from pathlib import Path
@@ -11,6 +12,8 @@ from typing import Any
 
 from loguru import logger
 
+from base.quality.policy import RepairPolicy
+from base.quality.repair_service import QualityRepairService
 from base.self_improve.models import Proposal
 from base.self_improve.scoreboard import ScoreboardRunner
 from base.self_improve.self_improve_db import (
@@ -19,9 +22,28 @@ from base.self_improve.self_improve_db import (
     insert_score_run,
     make_gap_fingerprint,
     mark_gap_status,
+    reconcile_gap_states_for_source,
     upsert_gap,
 )
 from config.config import settings
+
+# ------------------------------
+# Constants
+# ------------------------------
+EXIT_OK = 0
+STATUS_PORCELAIN_PATH_OFFSET = 3  # "XY " prefix length in `git status --porcelain`
+RUN_TOKEN_MS_PER_SEC = 1000
+
+FAILURE_TAIL_MAX_CHARS = 4000
+FAILURE_TAIL_LINES = 10
+FAILURE_TAIL_JOIN_MAX_CHARS = 400
+DETAILS_MAX_CHARS = 800
+
+PRIORITY_HIGH = 50
+PRIORITY_NORMAL = 25
+
+FIRST_ITERATION = 1
+SCORE_EPS = 1e-6
 
 
 @dataclass(frozen=True)
@@ -95,15 +117,13 @@ class RepoJanitorIterationController:
         self.pr_manager = pr_manager
         self.policy = policy
         self.scoreboard = ScoreboardRunner(self.repo)
+        self.quality_service = QualityRepairService(self.repo)
 
     # ---------------- git helpers ----------------
 
     def _git(self, args: list[str], check: bool = True) -> subprocess.CompletedProcess:
         p = subprocess.run(
-            ["git", *args],
-            cwd=str(self.repo),
-            text=True,
-            capture_output=True,
+            ["git", *args], cwd=str(self.repo), text=True, capture_output=True, check=False
         )
         if check and p.returncode != 0:
             raise RuntimeError(
@@ -130,7 +150,7 @@ class RepoJanitorIterationController:
             if not ln.strip():
                 continue
             # format: XY <path> or ?? <path>
-            paths.append(ln[3:].strip())
+            paths.append(ln[STATUS_PORCELAIN_PATH_OFFSET:].strip())
         return paths
 
     def _untracked_paths(self) -> list[str]:
@@ -138,7 +158,7 @@ class RepoJanitorIterationController:
         items: list[str] = []
         for ln in out.splitlines():
             if ln.startswith("?? "):
-                items.append(ln[3:].strip())
+                items.append(ln[STATUS_PORCELAIN_PATH_OFFSET:].strip())
         return items
 
     def _safe_remove_path(self, relpath: str) -> None:
@@ -215,13 +235,16 @@ class RepoJanitorIterationController:
 
     # ---------------- gaps ----------------
 
-    def _log_gaps_from_scoreboard(self, run, source: str = "scoreboard") -> None:
+    def _log_gaps_from_scoreboard(self, run, source: str = "scoreboard") -> set[str]:
+        active_fingerprints: set[str] = set()
+
         for name, tr in run.tool_results.items():
             if tr.exit_code == 0:
                 continue
 
-            tail = (tr.stderr_tail or tr.stdout_tail or "")[:4000]
+            tail = (tr.stderr_tail or tr.stdout_tail or "")[:FAILURE_TAIL_MAX_CHARS]
             fingerprint = make_gap_fingerprint(source, name, str(tr.exit_code), tail)
+            active_fingerprints.add(fingerprint)
 
             upsert_gap(
                 self.conn,
@@ -231,28 +254,36 @@ class RepoJanitorIterationController:
                 observed_failure=tail,
                 classification="quality_gate",
                 repro_steps=f"Scoreboard tool '{name}' failed (exit={tr.exit_code}).",
-                priority=50 if name in ("pytest", "compile") else 25,
+                priority=PRIORITY_HIGH if name in ("pytest", "compile") else PRIORITY_NORMAL,
                 metadata={"tool": name, "exit_code": tr.exit_code},
             )
 
-    def _goal_from_gaps(self, limit: int) -> tuple[str, list[int]]:
+        return active_fingerprints
+
+    def _goal_from_gaps(self, limit: int) -> tuple[str, list[dict[str, Any]]]:
         gaps = fetch_open_gaps(self.conn, limit=limit)
         if not gaps:
             return "Reduce failing gates and improve repository hygiene.", []
 
         lines = ["Fix the highest priority open capability gaps:"]
-        ids: list[int] = []
+        selected_gaps: list[dict[str, Any]] = []
 
         for gap in gaps:
-            ids.append(int(gap["id"]))
+            selected_gaps.append(
+                {
+                    "id": int(gap["id"]),
+                    "source": str(gap.get("source") or ""),
+                    "fingerprint": str(gap.get("fingerprint") or ""),
+                }
+            )
             lines.append(
                 f"- [{gap['classification']}] {gap['requested_capability']} (priority={gap['priority']})"
             )
             if gap.get("observed_failure"):
-                tail = (gap["observed_failure"] or "").splitlines()[-10:]
-                lines.append("  - failure_tail: " + " | ".join(tail)[:400])
+                tail = (gap["observed_failure"] or "").splitlines()[-FAILURE_TAIL_LINES:]
+                lines.append("  - failure_tail: " + " | ".join(tail)[:FAILURE_TAIL_JOIN_MAX_CHARS])
 
-        return "\n".join(lines), ids
+        return "\n".join(lines), selected_gaps
 
     # ---------------- leash ----------------
 
@@ -298,14 +329,74 @@ class RepoJanitorIterationController:
             name for name, tr in run.tool_results.items() if int(getattr(tr, "exit_code", 1)) != 0
         )
 
+    def _score_value(self, res: Any) -> float:
+        """Deterministic score used for comparisons (prefers comparison_score)."""
+        cs = getattr(res, "comparison_score", None)
+        if cs is not None:
+            return float(cs)
+        score_fn = getattr(res, "score", None)
+        if callable(score_fn):
+            return float(score_fn())
+        return float(getattr(res, "score_value", 0.0) or 0.0)
+
+    # def _score_value(self, run) -> float:
+    #     ds = getattr(run, "deterministic_score", None)
+    #     if callable(ds):
+    #         return float(ds())
+    #     s = getattr(run, "score", None)
+    #     if callable(s):
+    #         return float(s())
+    #     return float(getattr(run, "score_value", 0.0) or 0.0)
+
+    def _raw_score(self, run: Any) -> float:
+        """
+        Raw/observed score from a scoreboard run.
+        Supports both a callable .score() and attribute-like .score.
+        """
+        if run is None:
+            return 0.0
+        try:
+            s = getattr(run, "score", None)
+            if callable(s):
+                return float(s())
+            if s is not None:
+                return float(s)
+        except Exception:
+            pass
+        return 0.0
+
+    def _passed(self, run: Any) -> bool:
+        """
+        Supports both callable .passed() and attribute-like .passed.
+        Falls back to gates_failing == 0 when needed.
+        """
+        if run is None:
+            return False
+        try:
+            p = getattr(run, "passed", None)
+            if callable(p):
+                return bool(p())
+            if p is not None:
+                return bool(p)
+        except Exception:
+            pass
+
+        try:
+            return int(getattr(run, "gates_failing", 1) or 1) == 0
+        except Exception:
+            return False
+
     def _score_delta_summary(self, before, after) -> dict[str, Any]:
         before_failing = set(self._failing_tools(before))
         after_failing = set(self._failing_tools(after))
 
+        before_score = self._score_value(before)
+        after_score = self._score_value(after)
+
         return {
-            "before_score": float(before.score()),
-            "after_score": float(after.score()),
-            "score_delta": float(after.score() - before.score()),
+            "before_score": before_score,
+            "after_score": after_score,
+            "score_delta": float(after_score - before_score),
             "before_gates": int(before.gates_failing),
             "after_gates": int(after.gates_failing),
             "gates_delta": int(after.gates_failing) - int(before.gates_failing),
@@ -313,6 +404,80 @@ class RepoJanitorIterationController:
             "resolved_tools": sorted(before_failing - after_failing),
             "still_failing_tools": sorted(before_failing & after_failing),
         }
+
+    def _quality_gate_policy(self) -> RepairPolicy:
+        policy = RepairPolicy.for_changed_files()
+        policy.run_typecheck = True
+        policy.run_tests = False
+        return policy
+
+    @staticmethod
+    def _quality_gate_passed(report: dict[str, Any]) -> bool:
+        final_snapshot = report.get("final_snapshot") or {}
+        return int(final_snapshot.get("total_diagnostics", 0)) == 0
+
+    def _run_quality_gate(
+        self,
+        *,
+        status_callback: Callable[[dict[str, Any]], None] | None,
+        status_timers: dict[str, float],
+        iteration: int,
+        branch: str,
+    ) -> dict[str, Any]:
+        self._status_start(
+            status_callback,
+            status_timers,
+            phase="quality_gate",
+            message="Running quality repair gate",
+            pct=70,
+            iteration=iteration,
+            branch=branch,
+        )
+
+        try:
+            report = self.quality_service.repair(policy=self._quality_gate_policy())
+        except Exception as e:
+            error = str(e)
+            self._status_finish(
+                status_callback,
+                status_timers,
+                phase="quality_gate",
+                message="Quality repair gate failed",
+                pct=75,
+                iteration=iteration,
+                branch=branch,
+                error=error,
+            )
+            return {
+                "success": False,
+                "blocked": [{"code": "QUALITY_GATE_EXCEPTION", "message": error}],
+                "final_snapshot": {"total_diagnostics": 1},
+                "report_dir": None,
+            }
+
+        report_dict = report.to_dict()
+        report_dir = report.report_dir.as_posix() if report.report_dir is not None else None
+        report_dict["report_dir"] = report_dir
+
+        blocked_count = len(report.blocked)
+        final_total = report.final_snapshot.total_diagnostics
+
+        self._status_finish(
+            status_callback,
+            status_timers,
+            phase="quality_gate",
+            message="Quality repair gate finished",
+            pct=75,
+            iteration=iteration,
+            branch=branch,
+            outcome="clean" if final_total == 0 else "blocked",
+            extra={
+                "blocked_count": blocked_count,
+                "final_total": final_total,
+                "report_dir": report_dir,
+            },
+        )
+        return report_dict
 
     def _write_attempt_summary_artifact(
         self,
@@ -345,11 +510,115 @@ class RepoJanitorIterationController:
             "relative_path": self._artifact_relpath(path),
         }
 
+    def _emit_status(
+        self,
+        callback: Callable[[dict[str, Any]], None] | None,
+        *,
+        phase: str,
+        state: str,
+        message: str,
+        pct: int | None = None,
+        iteration: int | None = None,
+        branch: str | None = None,
+        duration_ms: float | None = None,
+        outcome: str | None = None,
+        error: str | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        if callback is None:
+            return
+
+        payload: dict[str, Any] = {
+            "phase": phase,
+            "state": state,
+            "message": message,
+            "pct": pct,
+            "iteration": iteration,
+            "branch": branch,
+            "duration_ms": duration_ms,
+            "outcome": outcome,
+            "error": error,
+        }
+        if extra:
+            payload["extra"] = extra
+
+        try:
+            callback(payload)
+        except Exception as e:
+            logger.debug(f"[self-improve] status callback failed: {e}")
+
+    def _status_start(
+        self,
+        callback: Callable[[dict[str, Any]], None] | None,
+        timers: dict[str, float],
+        *,
+        phase: str,
+        message: str,
+        pct: int | None = None,
+        iteration: int | None = None,
+        branch: str | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        key = f"{phase}:{iteration if iteration is not None else 0}"
+        timers[key] = time.perf_counter()
+        self._emit_status(
+            callback,
+            phase=phase,
+            state="start",
+            message=message,
+            pct=pct,
+            iteration=iteration,
+            branch=branch,
+            extra=extra,
+        )
+
+    def _status_finish(
+        self,
+        callback: Callable[[dict[str, Any]], None] | None,
+        timers: dict[str, float],
+        *,
+        phase: str,
+        message: str,
+        pct: int | None = None,
+        iteration: int | None = None,
+        branch: str | None = None,
+        outcome: str | None = None,
+        error: str | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        key = f"{phase}:{iteration if iteration is not None else 0}"
+        started_at = timers.pop(key, None)
+
+        duration_ms: float | None = None
+        if started_at is not None:
+            duration_ms = round((time.perf_counter() - started_at) * 1000.0, 2)
+
+        self._emit_status(
+            callback,
+            phase=phase,
+            state="error" if error else "complete",
+            message=message,
+            pct=pct,
+            iteration=iteration,
+            branch=branch,
+            duration_ms=duration_ms,
+            outcome=outcome,
+            error=error,
+            extra=extra,
+        )
+
     # ---------------- run ----------------
 
-    def run(self, *, goal: str, budget: IterationBudget) -> dict[str, Any]:
+    def run(
+        self,
+        *,
+        goal: str,
+        budget: IterationBudget,
+        status_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
         started = time.perf_counter()
-        run_token = f"run-{int(time.time() * 1000)}"
+        status_timers: dict[str, float] = {}
+        run_token = f"run-{int(time.time() * RUN_TOKEN_MS_PER_SEC)}"
         run_artifact_dir = self.repo / "reports" / "self_improve" / run_token
         artifacts: dict[str, Any] = {
             "run_dir": self._artifact_relpath(run_artifact_dir),
@@ -361,7 +630,6 @@ class RepoJanitorIterationController:
         base_branch = self._current_branch()
         logger.info(f"[self-improve] base_branch={base_branch}")
 
-        # Normalize run base: work from the PR base branch so scoring + diffs match what will be merged.
         user_branch = base_branch
         base_for_branches = (settings.github_default_branch or base_branch or "main").strip()
 
@@ -375,6 +643,15 @@ class RepoJanitorIterationController:
         if self._worktree_dirty():
             msg = "Working tree is not clean; commit/stash changes before self-improve."
             logger.error(f"[self-improve] {msg}")
+            self._emit_status(
+                status_callback,
+                phase="summarize",
+                state="error",
+                message="Self-improve run aborted",
+                pct=100,
+                branch=base_branch,
+                error=msg,
+            )
             return {
                 "goal": goal,
                 "baseline": {"score": 0.0, "gates": 0},
@@ -385,6 +662,15 @@ class RepoJanitorIterationController:
                 "branch": base_branch,
                 "artifacts": artifacts,
             }
+
+        self._status_start(
+            status_callback,
+            status_timers,
+            phase="diagnose",
+            message="Running baseline scoreboard",
+            pct=5,
+            branch=base_branch,
+        )
 
         baseline_artifact = run_artifact_dir / "baseline_scoreboard.json"
         baseline = self.scoreboard.run(
@@ -409,19 +695,55 @@ class RepoJanitorIterationController:
             fix_enabled=False,
             git_branch=base_branch,
             git_sha=self._current_sha(),
-            score=float(baseline.score()),
-            passed=bool(baseline.passed()),
+            score=self._raw_score(baseline),
+            passed=self._passed(baseline),
             metrics=baseline.to_dict(),
         )
 
-        self._log_gaps_from_scoreboard(baseline, source="scoreboard")
+        baseline_fingerprints = self._log_gaps_from_scoreboard(baseline, source="scoreboard")
+        reconcile_gap_states_for_source(
+            self.conn,
+            source="scoreboard",
+            active_fingerprints=baseline_fingerprints,
+            active_status="queued",
+        )
 
-        computed_goal, gap_ids = self._goal_from_gaps(limit=budget.gap_limit)
+        self._status_finish(
+            status_callback,
+            status_timers,
+            phase="diagnose",
+            message="Baseline scoreboard recorded",
+            pct=15,
+            branch=base_branch,
+            outcome=f"gates={int(baseline.gates_failing)} score={self._raw_score(baseline):.2f}",
+            # outcome=f"gates={int(baseline.gates_failing)} score={float(baseline.score()):.2f}",
+        )
+
+        self._status_start(
+            status_callback,
+            status_timers,
+            phase="hypothesize",
+            message="Building goal from open gaps",
+            pct=20,
+            branch=base_branch,
+        )
+
+        computed_goal, selected_gaps = self._goal_from_gaps(limit=budget.gap_limit)
         if goal.strip():
             computed_goal = goal.strip() + "\n\n" + computed_goal
 
-        for gid in gap_ids:
-            mark_gap_status(self.conn, gid, "in_progress")
+        for gap in selected_gaps:
+            mark_gap_status(self.conn, int(gap["id"]), "in_progress")
+
+        self._status_finish(
+            status_callback,
+            status_timers,
+            phase="hypothesize",
+            message="Improvement goal prepared",
+            pct=30,
+            branch=base_branch,
+            outcome=f"{len(selected_gaps)} tracked gaps",
+        )
 
         best = baseline
         best_id = baseline_id
@@ -469,11 +791,31 @@ class RepoJanitorIterationController:
                     improved=False,
                     error_text="budget timeout",
                 )
+                self._emit_status(
+                    status_callback,
+                    phase="summarize",
+                    state="error",
+                    message="Self-improve run timed out",
+                    pct=100,
+                    iteration=i,
+                    branch=base_branch,
+                    error="budget timeout",
+                )
                 break
 
             if i == 1:
                 branch_name = f"repo-janitor-autofix-{int(time.time())}-it{i}"
                 branch = self.pr_manager.prepare_branch(branch_name, base=base_for_branches)
+
+                self._status_start(
+                    status_callback,
+                    status_timers,
+                    phase="patch",
+                    message="Running safe autofix lane",
+                    pct=45,
+                    iteration=i,
+                    branch=branch,
+                )
 
                 before_artifact = run_artifact_dir / f"iteration_{i:02d}_before_scoreboard.json"
                 before = self.scoreboard.run(
@@ -499,8 +841,10 @@ class RepoJanitorIterationController:
                     fix_enabled=False,
                     git_branch=branch,
                     git_sha=self._current_sha(),
-                    score=float(before.score()),
-                    passed=bool(before.passed()),
+                    score=self._raw_score(before),
+                    passed=self._passed(before),
+                    # score=float(before.score()),
+                    # passed=bool(before.passed()),
                     metrics=before.to_dict(),
                 )
 
@@ -528,11 +872,37 @@ class RepoJanitorIterationController:
                     fix_enabled=True,
                     git_branch=branch,
                     git_sha=self._current_sha(),
-                    score=float(after.score()),
-                    passed=bool(after.passed()),
+                    score=self._raw_score(after),
+                    passed=self._passed(after),
+                    # score=float(after.score()),
+                    # passed=bool(after.passed()),
                     metrics=after.to_dict(),
                 )
                 self._log_gaps_from_scoreboard(after, source="scoreboard")
+
+                patch_outcome = (
+                    "changes_detected" if self._worktree_dirty() else "no_worktree_changes"
+                )
+                self._status_finish(
+                    status_callback,
+                    status_timers,
+                    phase="patch",
+                    message="Safe autofix lane finished",
+                    pct=60,
+                    iteration=i,
+                    branch=branch,
+                    outcome=patch_outcome,
+                )
+
+                self._status_start(
+                    status_callback,
+                    status_timers,
+                    phase="verify",
+                    message="Comparing safe autofix results",
+                    pct=65,
+                    iteration=i,
+                    branch=branch,
+                )
 
                 diff_summary = self._score_delta_summary(before, after)
                 diff_summary.update(
@@ -555,50 +925,185 @@ class RepoJanitorIterationController:
 
                 best_gates = int(getattr(best, "gates_failing", 0))
                 after_gates = int(getattr(after, "gates_failing", 0))
-                best_score = float(best.score())
-                after_score = float(after.score())
-                eps = 1e-6
+                best_score = self._score_value(best)
+                after_score = self._score_value(after)
+                eps = SCORE_EPS
+                worktree_changed = self._worktree_dirty()
+                summary_error: str | None = None
+                proposal_outcome: str | None = "no_change"
+                proposal_note: str | None = "Safe autofix made no measurable improvement"
 
                 if after_gates < best_gates:
-                    is_improved = True
+                    health_improved = True
                 elif after_gates > best_gates:
-                    is_improved = False
+                    health_improved = False
                 else:
-                    is_improved = after_score > (best_score + eps)
+                    health_improved = after_score > (best_score + eps)
 
-                is_improved = bool(is_improved and self._worktree_dirty())
+                durable_improvement = bool(health_improved and worktree_changed)
 
-                attempt_artifacts["summary"] = self._write_attempt_summary_artifact(
-                    run_artifact_dir=run_artifact_dir,
-                    iteration=i,
-                    branch=branch,
-                    stage="safe_autofix_scored",
-                    improved=bool(is_improved),
-                    error=None if is_improved else "safe autofix made no measurable improvement",
-                    attempt_artifacts=attempt_artifacts,
-                    extra={"diff_summary": diff_summary},
-                )
+                if durable_improvement:
+                    proposal_outcome = "improved"
+                    proposal_note = None
+                elif health_improved:
+                    proposal_outcome = "transient_improvement"
+                    proposal_note = (
+                        "Safe autofix improved scoring, but produced no persistent worktree changes"
+                    )
+                else:
+                    proposal_outcome = "no_change"
+                    proposal_note = "Safe autofix made no measurable improvement"
 
-                attempt_row = {
-                    "iteration": i,
-                    "branch": branch,
-                    "before_score": float(before.score()),
-                    "after_score": float(after.score()),
-                    "before_gates": int(before.gates_failing),
-                    "after_gates": int(after.gates_failing),
-                    "improved": bool(is_improved),
-                    "mode": "safe_autofix",
-                    "artifacts": attempt_artifacts,
-                    "diff_summary": diff_summary,
-                }
-                attempts.append(attempt_row)
-                artifacts["attempts"].append(attempt_artifacts)
-
-                if is_improved:
-                    improved_any = True
+                # Always track the best observed repo health, even if no files changed.
+                if health_improved:
                     best = after
                     best_id = after_id
-                    best_branch = branch
+                    best_branch = branch if worktree_changed else base_branch
+
+                if durable_improvement:
+                    verify_message = "Safe autofix improved the scoreboard"
+                    verify_outcome = "improved"
+                    summary_error = None
+                    proposal_outcome = None
+                    proposal_note = None
+                elif health_improved:
+                    verify_message = (
+                        "Safe autofix improved scoring, but produced no persistent worktree changes"
+                    )
+                    verify_outcome = "transient_improvement"
+                    summary_error = None
+                    proposal_outcome = "no_changes"
+                    proposal_note = verify_message
+                    # insert_improvement_attempt(
+                    #     conn,
+                    #     iteration=iteration,
+                    #     baseline_run_id=baseline_run_id,
+                    #     before_run_id=before_run_id,
+                    #     after_run_id=after_run_id,
+                    #     branch=branch,
+                    #     proposal_title=proposal_title,
+                    #     proposal_json=pj,
+                    #     pr_url=pr_url,
+                    #     improved=False,
+                    #     error_text=None,  # <- critical
+                    # )
+
+                    self._status_finish(
+                        status_callback,
+                        status_timers,
+                        phase="verify",
+                        message=verify_message,
+                        pct=80,
+                        iteration=i,
+                        branch=branch,
+                        outcome=verify_outcome,
+                    )
+
+                    attempt_artifacts["summary"] = self._write_attempt_summary_artifact(
+                        run_artifact_dir=run_artifact_dir,
+                        iteration=i,
+                        branch=branch,
+                        stage="safe_autofix_scored",
+                        improved=bool(durable_improvement),
+                        error=summary_error,
+                        attempt_artifacts=attempt_artifacts,
+                        extra={
+                            "diff_summary": diff_summary,
+                            "health_improved": bool(health_improved),
+                            "worktree_changed": bool(worktree_changed),
+                            "proposal_outcome": proposal_outcome,
+                            "proposal_note": proposal_note,
+                        },
+                    )
+
+                    attempt_row = {
+                        "iteration": i,
+                        "branch": branch,
+                        "before_score": self._raw_score(before),
+                        "after_score": self._raw_score(after),
+                        # "before_score": float(before.score()),
+                        # "after_score": float(after.score()),
+                        "before_gates": int(before.gates_failing),
+                        "after_gates": int(after.gates_failing),
+                        "improved": bool(durable_improvement),
+                        "health_improved": bool(health_improved),
+                        "worktree_changed": bool(worktree_changed),
+                        "mode": "safe_autofix",
+                        "artifacts": attempt_artifacts,
+                        "diff_summary": diff_summary,
+                    }
+                    attempts.append(attempt_row)
+                    artifacts["attempts"].append(attempt_artifacts)
+
+                if durable_improvement:
+                    quality_report = self._run_quality_gate(
+                        status_callback=status_callback,
+                        status_timers=status_timers,
+                        iteration=i,
+                        branch=branch,
+                    )
+                    attempt_artifacts["quality_report"] = {
+                        "report_dir": quality_report.get("report_dir"),
+                        "final_total": int(
+                            (quality_report.get("final_snapshot") or {}).get(
+                                "total_diagnostics",
+                                0,
+                            )
+                        ),
+                        "blocked_count": len(quality_report.get("blocked", [])),
+                    }
+
+                    if not self._quality_gate_passed(quality_report):
+                        msg = "quality repair gate blocked safe autofix promotion"
+                        attempts.append(
+                            {
+                                "iteration": i,
+                                "error": msg,
+                                "mode": "safe_autofix",
+                                "quality_report_dir": quality_report.get("report_dir"),
+                            }
+                        )
+                        attempt_artifacts["summary"] = self._write_attempt_summary_artifact(
+                            run_artifact_dir=run_artifact_dir,
+                            iteration=i,
+                            branch=branch,
+                            stage="quality_gate_blocked",
+                            improved=False,
+                            error=msg,
+                            attempt_artifacts=attempt_artifacts,
+                            extra={"quality_report": quality_report},
+                        )
+                        artifacts["attempts"].append(attempt_artifacts)
+
+                        insert_improvement_attempt(
+                            self.conn,
+                            iteration=i,
+                            baseline_run_id=baseline_id,
+                            before_run_id=before_id,
+                            after_run_id=after_id,
+                            branch=branch,
+                            proposal_title="Repo Janitor: safe autofix",
+                            proposal_json={
+                                "mode": "safe_autofix",
+                                "description": "Applied Black formatting and Ruff safe fixes.",
+                                "artifacts": attempt_artifacts,
+                                "diff_summary": diff_summary,
+                                "health_improved": bool(health_improved),
+                                "worktree_changed": bool(worktree_changed),
+                                "quality_report": quality_report,
+                            },
+                            pr_url=None,
+                            improved=False,
+                            error_text=msg,
+                        )
+
+                        self._rollback_to_base(base_branch)
+
+                        if safe_autofix_only and not allow_llm_autonomous:
+                            break
+                        continue
+
+                    improved_any = True
 
                     safe_autofix_proposal = Proposal(
                         title="Repo Janitor: safe autofix",
@@ -606,17 +1111,52 @@ class RepoJanitorIterationController:
                         changes=[],
                     )
 
+                    pr_error: str | None = None
                     pr_url = None
+
                     if budget.open_pr_on_improvement:
-                        self.pr_manager.commit_and_push(branch, safe_autofix_proposal.title)
-                        pr_url = self.pr_manager.open_pr(
-                            branch=branch, proposal=safe_autofix_proposal
+                        self._status_start(
+                            status_callback,
+                            status_timers,
+                            phase="propose_pr",
+                            message="Opening improvement PR",
+                            pct=85,
+                            iteration=i,
+                            branch=branch,
                         )
-                        if pr_url:
-                            try:
-                                self.pr_manager.run_tests_and_update_pr(branch)
-                            except Exception:
-                                pass
+                        try:
+                            self.pr_manager.commit_and_push(branch, safe_autofix_proposal.title)
+                            pr_url = self.pr_manager.open_pr(
+                                branch=branch, proposal=safe_autofix_proposal
+                            )
+                            if pr_url:
+                                try:
+                                    self.pr_manager.run_tests_and_update_pr(branch)
+                                except Exception:
+                                    pass
+
+                            self._status_finish(
+                                status_callback,
+                                status_timers,
+                                phase="propose_pr",
+                                message="Improvement PR ready",
+                                pct=95,
+                                iteration=i,
+                                branch=branch,
+                                outcome=pr_url or "branch_pushed",
+                            )
+                        except Exception as e:
+                            pr_error = str(e)
+                            self._status_finish(
+                                status_callback,
+                                status_timers,
+                                phase="propose_pr",
+                                message="Improvement PR failed",
+                                pct=95,
+                                iteration=i,
+                                branch=branch,
+                                error=pr_error,
+                            )
 
                     insert_improvement_attempt(
                         self.conn,
@@ -631,32 +1171,60 @@ class RepoJanitorIterationController:
                             "description": safe_autofix_proposal.description,
                             "artifacts": attempt_artifacts,
                             "diff_summary": diff_summary,
+                            "health_improved": bool(health_improved),
+                            "worktree_changed": bool(worktree_changed),
                         },
                         pr_url=pr_url,
                         improved=True,
-                        error_text=None,
+                        error_text=pr_error,
                     )
-                    break
 
-                insert_improvement_attempt(
-                    self.conn,
-                    iteration=i,
-                    baseline_run_id=baseline_id,
-                    before_run_id=before_id,
-                    after_run_id=after_id,
-                    branch=branch,
-                    proposal_title="Repo Janitor: safe autofix",
-                    proposal_json={
-                        "mode": "safe_autofix",
-                        "description": "Applied Black formatting and Ruff safe fixes.",
-                        "artifacts": attempt_artifacts,
-                        "diff_summary": diff_summary,
-                    },
-                    pr_url=None,
-                    improved=False,
-                    error_text="safe autofix made no measurable improvement",
-                )
-                self._rollback_to_base(base_branch)
+                    if budget.stop_on_first_improvement:
+                        break
+
+                else:
+                    # proposal_json = {
+                    #     "mode": "safe_autofix",
+                    #     "description": "Applied Black formatting and Ruff safe fixes.",
+                    #     "artifacts": attempt_artifacts,
+                    #     "diff_summary": diff_summary,
+                    #     "health_improved": bool(health_improved),
+                    #     "worktree_changed": bool(worktree_changed),
+                    # }
+                    proposal_json = (
+                        {
+                            "mode": "safe_autofix",
+                            "description": safe_autofix_proposal.description,
+                            "artifacts": attempt_artifacts,
+                            "diff_summary": diff_summary,
+                            "health_improved": bool(health_improved),
+                            "worktree_changed": bool(worktree_changed),
+                            "quality_report": quality_report,
+                        },
+                    )
+
+                    if proposal_outcome is not None:
+                        proposal_json = {
+                            **proposal_json,
+                            "outcome": proposal_outcome,
+                            "note": proposal_note,
+                        }
+
+                    insert_improvement_attempt(
+                        self.conn,
+                        iteration=i,
+                        baseline_run_id=baseline_id,
+                        before_run_id=before_id,
+                        after_run_id=after_id,
+                        branch=branch,
+                        proposal_title="Repo Janitor: safe autofix",
+                        proposal_json=proposal_json,
+                        pr_url=None,
+                        improved=False,
+                        error_text=summary_error,
+                    )
+
+                    self._rollback_to_base(base_branch)
 
                 if safe_autofix_only and not allow_llm_autonomous:
                     break
@@ -664,10 +1232,11 @@ class RepoJanitorIterationController:
                 continue
 
             if safe_autofix_only and not allow_llm_autonomous:
+                msg = "LLM autonomous changes disabled by policy after safe autofix lane"
                 attempts.append(
                     {
                         "iteration": i,
-                        "error": "LLM autonomous changes disabled by policy after safe autofix lane",
+                        "error": msg,
                         "mode": "policy_stop",
                     }
                 )
@@ -677,7 +1246,7 @@ class RepoJanitorIterationController:
                     branch=base_branch,
                     stage="policy_stop",
                     improved=False,
-                    error="LLM autonomous changes disabled by policy after safe autofix lane",
+                    error=msg,
                     attempt_artifacts=attempt_artifacts,
                     extra={"safe_autofix_only": True, "allow_llm_autonomous": False},
                 )
@@ -696,9 +1265,29 @@ class RepoJanitorIterationController:
                     },
                     pr_url=None,
                     improved=False,
-                    error_text="LLM autonomous changes disabled by policy after safe autofix lane",
+                    error_text=msg,
+                )
+                self._emit_status(
+                    status_callback,
+                    phase="hypothesize",
+                    state="error",
+                    message="LLM autonomous changes disabled",
+                    pct=40,
+                    iteration=i,
+                    branch=base_branch,
+                    error=msg,
                 )
                 break
+
+            self._status_start(
+                status_callback,
+                status_timers,
+                phase="hypothesize",
+                message="Generating proposal from repository gaps",
+                pct=35,
+                iteration=i,
+                branch=base_branch,
+            )
 
             idx = self.code_indexer.scan(incremental=True)  # type: ignore[call-arg]
             index_md = self._index_to_markdown(idx)
@@ -708,6 +1297,16 @@ class RepoJanitorIterationController:
             ok, msg = self._enforce_leash_on_proposal(proposal)
             if not ok:
                 attempts.append({"iteration": i, "error": msg})
+                self._status_finish(
+                    status_callback,
+                    status_timers,
+                    phase="hypothesize",
+                    message="Proposal rejected by leash policy",
+                    pct=40,
+                    iteration=i,
+                    branch=base_branch,
+                    error=msg,
+                )
                 attempt_artifacts["summary"] = self._write_attempt_summary_artifact(
                     run_artifact_dir=run_artifact_dir,
                     iteration=i,
@@ -739,14 +1338,25 @@ class RepoJanitorIterationController:
                 continue
 
             if not getattr(proposal, "changes", None):
-                attempts.append({"iteration": i, "error": "empty proposal (no changes)"})
+                msg = "empty proposal (no changes)"
+                attempts.append({"iteration": i, "error": msg})
+                self._status_finish(
+                    status_callback,
+                    status_timers,
+                    phase="hypothesize",
+                    message="Proposal contained no changes",
+                    pct=40,
+                    iteration=i,
+                    branch=base_branch,
+                    error=msg,
+                )
                 attempt_artifacts["summary"] = self._write_attempt_summary_artifact(
                     run_artifact_dir=run_artifact_dir,
                     iteration=i,
                     branch=base_branch,
                     stage="empty_proposal",
                     improved=False,
-                    error="empty proposal (no changes)",
+                    error=msg,
                     attempt_artifacts=attempt_artifacts,
                     extra={"proposal_title": getattr(proposal, "title", None)},
                 )
@@ -766,7 +1376,7 @@ class RepoJanitorIterationController:
                     },
                     pr_url=None,
                     improved=False,
-                    error_text="empty proposal (no changes)",
+                    error_text=msg,
                 )
                 continue
 
@@ -775,6 +1385,17 @@ class RepoJanitorIterationController:
             if not applicable:
                 msg = "proposal has no applicable changes under current safety policy"
                 attempts.append({"iteration": i, "error": msg, "refusals": refusals[:5]})
+                self._status_finish(
+                    status_callback,
+                    status_timers,
+                    phase="hypothesize",
+                    message="Proposal failed preflight checks",
+                    pct=40,
+                    iteration=i,
+                    branch=base_branch,
+                    error=msg,
+                    extra={"refusals": refusals[:5]},
+                )
                 attempt_artifacts["summary"] = self._write_attempt_summary_artifact(
                     run_artifact_dir=run_artifact_dir,
                     iteration=i,
@@ -811,8 +1432,29 @@ class RepoJanitorIterationController:
 
             proposal.changes = applicable
 
+            self._status_finish(
+                status_callback,
+                status_timers,
+                phase="hypothesize",
+                message="Proposal accepted for application",
+                pct=40,
+                iteration=i,
+                branch=base_branch,
+                outcome=getattr(proposal, "title", "proposal"),
+            )
+
             branch_name = f"repo-janitor-{int(time.time())}-it{i}"
             branch = self.pr_manager.prepare_branch(branch_name, base=base_for_branches)
+
+            self._status_start(
+                status_callback,
+                status_timers,
+                phase="patch",
+                message="Applying proposal changes",
+                pct=45,
+                iteration=i,
+                branch=branch,
+            )
 
             before_artifact = run_artifact_dir / f"iteration_{i:02d}_before_scoreboard.json"
             before = self.scoreboard.run(
@@ -838,8 +1480,10 @@ class RepoJanitorIterationController:
                 fix_enabled=False,
                 git_branch=branch,
                 git_sha=self._current_sha(),
-                score=float(before.score()),
-                passed=bool(before.passed()),
+                score=self._raw_score(before),
+                passed=self._passed(before),
+                # score=float(before.score()),
+                # passed=bool(before.passed()),
                 metrics=before.to_dict(),
             )
 
@@ -849,11 +1493,20 @@ class RepoJanitorIterationController:
             if not applied_ok:
                 details = "; ".join(
                     f"{getattr(c, 'path', '?')}: {msg}" for (c, ok, msg) in applied if not ok
-                )[:800]
+                )[:DETAILS_MAX_CHARS]
 
                 self._rollback_to_base(base_branch)
-                attempts.append(
-                    {"iteration": i, "error": f"proposal applied no changes ({details})"}
+                msg = f"proposal applied no changes ({details})"
+                attempts.append({"iteration": i, "error": msg})
+                self._status_finish(
+                    status_callback,
+                    status_timers,
+                    phase="patch",
+                    message="Proposal application failed",
+                    pct=60,
+                    iteration=i,
+                    branch=branch,
+                    error=msg,
                 )
                 attempt_artifacts["summary"] = self._write_attempt_summary_artifact(
                     run_artifact_dir=run_artifact_dir,
@@ -861,7 +1514,7 @@ class RepoJanitorIterationController:
                     branch=branch,
                     stage="apply_no_changes",
                     improved=False,
-                    error=f"proposal applied no changes ({details})",
+                    error=msg,
                     attempt_artifacts=attempt_artifacts,
                     extra={
                         "proposal_title": getattr(proposal, "title", None),
@@ -885,7 +1538,7 @@ class RepoJanitorIterationController:
                     },
                     pr_url=None,
                     improved=False,
-                    error_text=f"proposal applied no changes ({details})",
+                    error_text=msg,
                 )
                 continue
 
@@ -893,6 +1546,16 @@ class RepoJanitorIterationController:
             if not ok2:
                 self._rollback_to_base(base_branch)
                 attempts.append({"iteration": i, "error": msg2})
+                self._status_finish(
+                    status_callback,
+                    status_timers,
+                    phase="patch",
+                    message="Proposal violated worktree leash",
+                    pct=60,
+                    iteration=i,
+                    branch=branch,
+                    error=msg2,
+                )
                 attempt_artifacts["summary"] = self._write_attempt_summary_artifact(
                     run_artifact_dir=run_artifact_dir,
                     iteration=i,
@@ -923,6 +1586,100 @@ class RepoJanitorIterationController:
                 )
                 continue
 
+            quality_report = self._run_quality_gate(
+                status_callback=status_callback,
+                status_timers=status_timers,
+                iteration=i,
+                branch=branch,
+            )
+            attempt_artifacts["quality_report"] = {
+                "report_dir": quality_report.get("report_dir"),
+                "final_total": int(
+                    (quality_report.get("final_snapshot") or {}).get(
+                        "total_diagnostics",
+                        0,
+                    )
+                ),
+                "blocked_count": len(quality_report.get("blocked", [])),
+            }
+
+            if not self._quality_gate_passed(quality_report):
+                msg = "quality repair gate blocked proposal promotion"
+                self._rollback_to_base(base_branch)
+                attempts.append(
+                    {
+                        "iteration": i,
+                        "error": msg,
+                        "quality_report_dir": quality_report.get("report_dir"),
+                    }
+                )
+                self._status_finish(
+                    status_callback,
+                    status_timers,
+                    phase="patch",
+                    message="Proposal failed quality repair gate",
+                    pct=60,
+                    iteration=i,
+                    branch=branch,
+                    error=msg,
+                )
+                attempt_artifacts["summary"] = self._write_attempt_summary_artifact(
+                    run_artifact_dir=run_artifact_dir,
+                    iteration=i,
+                    branch=branch,
+                    stage="quality_gate_blocked",
+                    improved=False,
+                    error=msg,
+                    attempt_artifacts=attempt_artifacts,
+                    extra={
+                        "proposal_title": getattr(proposal, "title", None),
+                        "quality_report": quality_report,
+                    },
+                )
+                artifacts["attempts"].append(attempt_artifacts)
+                insert_improvement_attempt(
+                    self.conn,
+                    iteration=i,
+                    baseline_run_id=baseline_id,
+                    before_run_id=before_id,
+                    after_run_id=None,
+                    branch=branch,
+                    proposal_title=getattr(proposal, "title", None),
+                    proposal_json={
+                        "title": getattr(proposal, "title", ""),
+                        "description": getattr(proposal, "description", ""),
+                        "quality_report": quality_report,
+                        "artifacts": attempt_artifacts,
+                    },
+                    pr_url=None,
+                    improved=False,
+                    error_text=msg,
+                )
+                continue
+
+            # LLM Proposal lanes are allowed to make no changes, but if they do change the worktree, we want to track that as an outcome separate from "improved scoreboard" vs "did not improve scoreboard". This is because sometimes the LLM may make changes that don't end up improving the scoreboard, but we still want to allow that and track it as a distinct outcome from "proposal failed to apply any changes".
+
+            self._status_finish(
+                status_callback,
+                status_timers,
+                phase="patch",
+                message="Proposal applied to worktree",
+                pct=60,
+                iteration=i,
+                branch=branch,
+                outcome=getattr(proposal, "title", "proposal"),
+            )
+
+            self._status_start(
+                status_callback,
+                status_timers,
+                phase="verify",
+                message="Verifying proposal results",
+                pct=65,
+                iteration=i,
+                branch=branch,
+            )
+
             after_artifact = run_artifact_dir / f"iteration_{i:02d}_after_scoreboard.json"
             after = self.scoreboard.run(
                 mode="all",
@@ -947,8 +1704,10 @@ class RepoJanitorIterationController:
                 fix_enabled=False,
                 git_branch=branch,
                 git_sha=self._current_sha(),
-                score=float(after.score()),
-                passed=bool(after.passed()),
+                score=self._raw_score(after),
+                passed=self._passed(after),
+                # score=float(after.score()),
+                # passed=bool(after.passed()),
                 metrics=after.to_dict(),
             )
             self._log_gaps_from_scoreboard(after, source="scoreboard")
@@ -973,11 +1732,9 @@ class RepoJanitorIterationController:
 
             best_gates = int(getattr(best, "gates_failing", 0))
             after_gates = int(getattr(after, "gates_failing", 0))
-
-            best_score = float(best.score())
-            after_score = float(after.score())
-
-            eps = 1e-6
+            best_score = self._score_value(best)
+            after_score = self._score_value(after)
+            eps = SCORE_EPS
 
             if after_gates < best_gates:
                 is_improved = True
@@ -985,6 +1742,21 @@ class RepoJanitorIterationController:
                 is_improved = False
             else:
                 is_improved = after_score > (best_score + eps)
+
+            self._status_finish(
+                status_callback,
+                status_timers,
+                phase="verify",
+                message=(
+                    "Proposal improved the scoreboard"
+                    if is_improved
+                    else "Proposal did not improve the scoreboard"
+                ),
+                pct=80,
+                iteration=i,
+                branch=branch,
+                outcome="improved" if is_improved else "no_change",
+            )
 
             attempt_artifacts["summary"] = self._write_attempt_summary_artifact(
                 run_artifact_dir=run_artifact_dir,
@@ -1000,8 +1772,10 @@ class RepoJanitorIterationController:
             attempt_row = {
                 "iteration": i,
                 "branch": branch,
-                "before_score": float(before.score()),
-                "after_score": float(after.score()),
+                "before_score": self._raw_score(before),
+                "after_score": self._raw_score(after),
+                # "before_score": float(before.score()),
+                # "after_score": float(after.score()),
                 "before_gates": int(before.gates_failing),
                 "after_gates": int(after.gates_failing),
                 "improved": bool(is_improved),
@@ -1017,16 +1791,51 @@ class RepoJanitorIterationController:
                 best_id = after_id
                 best_branch = branch
 
+                pr_error: str | None = None
+
                 if budget.open_pr_on_improvement:
-                    self.pr_manager.commit_and_push(
-                        branch,
-                        getattr(proposal, "title", "Repo Janitor improvement"),
+                    self._status_start(
+                        status_callback,
+                        status_timers,
+                        phase="propose_pr",
+                        message="Opening improvement PR",
+                        pct=85,
+                        iteration=i,
+                        branch=branch,
                     )
-                    pr_url = self.pr_manager.open_pr(branch=branch, proposal=proposal)
                     try:
-                        self.pr_manager.run_tests_and_update_pr(branch)
-                    except Exception:
-                        pass
+                        self.pr_manager.commit_and_push(
+                            branch,
+                            getattr(proposal, "title", "Repo Janitor improvement"),
+                        )
+                        pr_url = self.pr_manager.open_pr(branch=branch, proposal=proposal)
+                        try:
+                            self.pr_manager.run_tests_and_update_pr(branch)
+                        except Exception:
+                            pass
+
+                        self._status_finish(
+                            status_callback,
+                            status_timers,
+                            phase="propose_pr",
+                            message="Improvement PR ready",
+                            pct=95,
+                            iteration=i,
+                            branch=branch,
+                            outcome=pr_url or "branch_pushed",
+                        )
+                    except Exception as e:
+                        pr_error = str(e)
+                        self._status_finish(
+                            status_callback,
+                            status_timers,
+                            phase="propose_pr",
+                            message="Improvement PR failed",
+                            pct=95,
+                            iteration=i,
+                            branch=branch,
+                            error=pr_error,
+                        )
 
                 insert_improvement_attempt(
                     self.conn,
@@ -1041,10 +1850,11 @@ class RepoJanitorIterationController:
                         "description": getattr(proposal, "description", ""),
                         "artifacts": attempt_artifacts,
                         "diff_summary": diff_summary,
+                        "quality_report": quality_report,
                     },
                     pr_url=pr_url,
                     improved=True,
-                    error_text=None,
+                    error_text=pr_error,
                 )
 
                 if budget.stop_on_first_improvement:
@@ -1063,12 +1873,22 @@ class RepoJanitorIterationController:
                         "description": getattr(proposal, "description", ""),
                         "artifacts": attempt_artifacts,
                         "diff_summary": diff_summary,
+                        "quality_report": quality_report,
                     },
                     pr_url=None,
                     improved=False,
                     error_text=None,
                 )
                 self._rollback_to_base(base_branch)
+
+        self._status_start(
+            status_callback,
+            status_timers,
+            phase="summarize",
+            message="Finalizing self-improvement run",
+            pct=90,
+            branch=best_branch or base_branch,
+        )
 
         final_artifact = run_artifact_dir / "final_scoreboard.json"
         final = self.scoreboard.run(
@@ -1085,15 +1905,23 @@ class RepoJanitorIterationController:
             "path": final.artifact_path,
             "relative_path": final.artifact_relpath,
         }
-        self._log_gaps_from_scoreboard(final, source="scoreboard")
 
-        if gap_ids:
-            if final.passed():
-                for gid in gap_ids:
-                    mark_gap_status(self.conn, gid, "fixed")
-            else:
-                for gid in gap_ids:
-                    mark_gap_status(self.conn, gid, "queued")
+        final_fingerprints = self._log_gaps_from_scoreboard(final, source="scoreboard")
+        reconcile_gap_states_for_source(
+            self.conn,
+            source="scoreboard",
+            active_fingerprints=final_fingerprints,
+            active_status="queued",
+        )
+
+        for gap in selected_gaps:
+            if str(gap.get("source") or "") == "scoreboard":
+                continue
+            mark_gap_status(
+                self.conn,
+                int(gap["id"]),
+                "fixed" if final.passed() else "queued",
+            )
 
         try:
             self._rollback_to_base(base_branch)
@@ -1106,10 +1934,28 @@ class RepoJanitorIterationController:
         except Exception:
             pass
 
+        self._status_finish(
+            status_callback,
+            status_timers,
+            phase="summarize",
+            message="Self-improvement run complete",
+            pct=100,
+            branch=best_branch or base_branch,
+            outcome="improved" if improved_any else "no_change",
+        )
+
         return {
             "goal": computed_goal,
-            "baseline": {"score": float(baseline.score()), "gates": int(baseline.gates_failing)},
-            "best": {"score": float(best.score()), "gates": int(best.gates_failing)},
+            "baseline": {
+                "score": self._raw_score(baseline),
+                "comparison_score": float(self._score_value(baseline)),
+                "gates": int(baseline.gates_failing),
+            },
+            "best": {
+                "score": self._raw_score(best),
+                "comparison_score": float(self._score_value(best)),
+                "gates": int(best.gates_failing),
+            },
             "attempts": attempts,
             "improved": bool(improved_any),
             "pr_url": pr_url,

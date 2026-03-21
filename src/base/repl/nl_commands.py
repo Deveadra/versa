@@ -7,6 +7,9 @@ from base.utils.time import utc_iso
 
 from ..agents.orchestrator import Orchestrator
 
+# from base.self_improve import models as sj_models
+
+
 orch = Orchestrator()
 
 
@@ -179,10 +182,7 @@ def handle_nl_command(cmd: str) -> str:
         title_match = re.match(
             r"(?:add|schedule) (?:a |an )?(.+?) (every|weekly|daily|monthly)", cmd_low
         )
-        if title_match:
-            title = title_match.group(1).strip().title()
-        else:
-            title = "Untitled Event"
+        title = title_match.group(1).strip().title() if title_match else "Untitled Event"
 
         # recurrence phrase
         recur_match = re.search(r"(every .+|daily .+|weekly .+|monthly .+)", cmd_low)

@@ -4,12 +4,15 @@ import inspect
 import re
 import subprocess
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
+from base.quality.policy import RepairPolicy
+from base.quality.repair_service import QualityRepairService
 from base.self_improve.iteration_controller import (
     IterationBudget,
     LeashPolicy,
@@ -22,6 +25,7 @@ from base.self_improve.self_improve_db import (
     fetch_open_gaps,
     insert_score_run,
     make_gap_fingerprint,
+    reconcile_gap_states_for_source,
     upsert_gap,
 )
 from config.config import settings
@@ -32,6 +36,7 @@ class SelfImproveRunConfig:
     budget: IterationBudget = IterationBudget()
     gap_limit: int = 5
     open_pr: bool = True
+    status_callback: Callable[[dict[str, Any]], None] | None = None
 
 
 class SelfImproveService:
@@ -80,6 +85,7 @@ class SelfImproveService:
 
         ensure_self_improve_schema(self.conn)
         self.scoreboard = ScoreboardRunner(self.repo)
+        self.quality_service = QualityRepairService(self.repo)
 
     # -------------------------
     # git helpers
@@ -87,10 +93,7 @@ class SelfImproveService:
 
     def _git(self, args: list[str], *, check: bool = True) -> subprocess.CompletedProcess:
         p = subprocess.run(
-            ["git", *args],
-            cwd=str(self.repo),
-            text=True,
-            capture_output=True,
+            ["git", *args], cwd=str(self.repo), text=True, capture_output=True, check=False
         )
         if check and p.returncode != 0:
             raise RuntimeError(
@@ -240,21 +243,120 @@ class SelfImproveService:
     def _default_policy(self) -> LeashPolicy:
         return self.policy
 
+    def _run_quality_gate(
+        self,
+        *,
+        scope: str,
+        status_callback: Callable[[dict[str, Any]], None] | None = None,
+        base_ref: str | None = None,
+    ) -> dict[str, Any]:
+        if scope == "changed_files":
+            policy = RepairPolicy.for_changed_files()
+        elif scope == "branch_delta":
+            policy = RepairPolicy.for_branch_delta(
+                base_ref=(base_ref or (settings.github_default_branch or "main").strip()),
+                head_ref="HEAD",
+            )
+        elif scope == "full_repo":
+            policy = RepairPolicy.for_full_repo()
+        else:
+            raise ValueError(f"Unsupported quality gate scope: {scope}")
+
+        policy.run_typecheck = True
+        policy.run_tests = False
+
+        self._emit_status(
+            status_callback,
+            phase="quality_gate",
+            state="start",
+            message=f"Running quality repair gate ({scope})",
+            pct=78,
+            branch=self._current_branch(),
+        )
+
+        report = self.quality_service.repair(policy=policy)
+        report_dict = report.to_dict()
+        report_dir = report.report_dir.as_posix() if report.report_dir is not None else ""
+        report_dict["report_dir"] = report_dir
+
+        outcome = "clean" if self._quality_gate_passed(report_dict) else "blocked"
+        self._emit_status(
+            status_callback,
+            phase="quality_gate",
+            state="complete",
+            message="Quality repair gate finished",
+            pct=82,
+            branch=self._current_branch(),
+            outcome=outcome,
+            extra={
+                "blocked_count": len(report.blocked),
+                "report_dir": report_dir,
+            },
+        )
+        return report_dict
+
+    @staticmethod
+    def _quality_gate_passed(report: dict[str, Any]) -> bool:
+        final_snapshot = report.get("final_snapshot") or {}
+        return int(final_snapshot.get("total_diagnostics", 0)) == 0
+
     def _changed_files_since_base(self, base: str) -> list[str]:
         out = self._git(["diff", "--name-only", f"{base}..HEAD"], check=False).stdout or ""
         return [ln.strip() for ln in out.splitlines() if ln.strip()]
+
+    def _emit_status(
+        self,
+        callback: Callable[[dict[str, Any]], None] | None,
+        *,
+        phase: str,
+        state: str,
+        message: str,
+        pct: int | None = None,
+        iteration: int | None = None,
+        branch: str | None = None,
+        duration_ms: float | None = None,
+        outcome: str | None = None,
+        error: str | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        if callback is None:
+            return
+
+        payload: dict[str, Any] = {
+            "phase": phase,
+            "state": state,
+            "message": message,
+            "pct": pct,
+            "iteration": iteration,
+            "branch": branch,
+            "duration_ms": duration_ms,
+            "outcome": outcome,
+            "error": error,
+        }
+        if extra:
+            payload["extra"] = extra
+
+        try:
+            callback(payload)
+        except Exception as e:
+            logger.debug(f"[self-improve] status callback failed: {e}")
 
     # -------------------------
     # gap logging
     # -------------------------
 
-    def log_gaps_from_scoreboard(self, run, *, source: str = "scoreboard") -> None:
+    def log_gaps_from_scoreboard(self, run, *, source: str = "scoreboard") -> set[str]:
+        active_fingerprints: set[str] = set()
+
         for name, tr in run.tool_results.items():
             if tr.exit_code == 0:
                 continue
+
             fingerprint = make_gap_fingerprint(
                 source, name, str(tr.exit_code), tr.stderr_tail or tr.stdout_tail
             )
+            active_fingerprints.add(fingerprint)
+
             upsert_gap(
                 self.conn,
                 source=source,
@@ -266,6 +368,15 @@ class SelfImproveService:
                 priority=50 if name in ("pytest", "compile") else 25,
                 metadata={"tool": name, "exit_code": tr.exit_code},
             )
+
+        reconcile_gap_states_for_source(
+            self.conn,
+            source=source,
+            active_fingerprints=active_fingerprints,
+            active_status="queued",
+        )
+
+        return active_fingerprints
 
     def build_goal_from_gaps(self, *, limit: int) -> tuple[str, list[int]]:
         gaps = fetch_open_gaps(self.conn, limit=limit)
@@ -307,12 +418,14 @@ class SelfImproveService:
     # public entrypoints
     # -------------------------
 
-    def run_daily(self, *, cfg: SelfImproveRunConfig = SelfImproveRunConfig()) -> dict[str, Any]:
+    def run_daily(self, *, cfg: SelfImproveRunConfig | None = None) -> dict[str, Any]:
+        cfg = cfg or SelfImproveRunConfig()
         return self._run_unified(branch_label="daily-self-improve", cfg=cfg, extra_context=None)
 
     def run_manual(
-        self, *, cfg: SelfImproveRunConfig = SelfImproveRunConfig(), include_dream: bool = True
+        self, *, cfg: SelfImproveRunConfig | None = None, include_dream: bool = True
     ) -> dict[str, Any]:
+        cfg = cfg or SelfImproveRunConfig()
         dream_context = ""
         if include_dream:
             try:
@@ -351,6 +464,7 @@ class SelfImproveService:
         Unifies the old propose_code_change pathway behind the service:
           - build index
           - propose patch
+          - run the quality repair gate
           - open PR
           - run tests and update PR body
         """
@@ -364,6 +478,26 @@ class SelfImproveService:
         results = self.proposal_engine.apply_proposal(proposal)
         failed = [f"- {c.path}: {msg}" for (c, ok, msg) in results if not ok]
 
+        if not any(ok for (_, ok, _) in results):
+            try:
+                self.pr_manager.restore_original_branch()
+            except Exception:
+                pass
+            return "Proposal aborted — no changes could be safely applied."
+
+        quality_report = self._run_quality_gate(scope="changed_files")
+        if not self._quality_gate_passed(quality_report):
+            try:
+                self.pr_manager.restore_original_branch()
+            except Exception:
+                pass
+
+            report_dir = quality_report.get("report_dir") or "(unknown)"
+            return (
+                "Proposal aborted — quality repair gate could not fully clean the changed files.\n\n"
+                f"Repair report: {report_dir}"
+            )
+
         run = self.scoreboard.run(mode="all", fix=False)
         self._insert_score_run_compat(
             run_type="interactive_propose",
@@ -372,13 +506,6 @@ class SelfImproveService:
             git_sha=self._current_sha(),
         )
         self.log_gaps_from_scoreboard(run, source="diagnostic")
-
-        if not any(ok for (_, ok, _) in results):
-            try:
-                self.pr_manager.restore_original_branch()
-            except Exception:
-                pass
-            return "Proposal aborted — no changes could be safely applied."
 
         self.pr_manager.commit_and_push(branch, proposal.title)
         pr_url = self.pr_manager.open_pr(branch=branch, proposal=proposal)
@@ -393,11 +520,66 @@ class SelfImproveService:
         except Exception:
             pass
 
-        report = []
+        report_parts = [f"Quality repair report: {quality_report.get('report_dir') or '(unknown)'}"]
         if failed:
-            report.append("⚠️ Some changes could not be applied:\n" + "\n".join(failed))
-        report_text = "\n\n".join(report) if report else "✅ All changes applied successfully."
-        return f"Proposal opened: {pr_url}\n\n{report_text}"
+            report_parts.append("⚠️ Some changes could not be applied:\n" + "\n".join(failed))
+        else:
+            report_parts.append("✅ All applied changes passed the quality repair gate.")
+
+        return f"Proposal opened: {pr_url}\n\n" + "\n\n".join(report_parts)
+
+    # def run_interactive_proposal(self, *, instruction: str) -> str:
+    #     """
+    #     Unifies the old propose_code_change pathway behind the service:
+    #       - build index
+    #       - propose patch
+    #       - open PR
+    #       - run tests and update PR body
+    #     """
+    #     base = (settings.github_default_branch or "main").strip()
+    #     index_md = self._index_md()
+    #     proposal = self.proposal_engine.propose(instruction, index_md=index_md)
+
+    #     suffix = self._sanitize_suffix(proposal.title)
+    #     branch = self.pr_manager.prepare_branch(suffix, base=base)
+
+    #     results = self.proposal_engine.apply_proposal(proposal)
+    #     failed = [f"- {c.path}: {msg}" for (c, ok, msg) in results if not ok]
+
+    #     run = self.scoreboard.run(mode="all", fix=False)
+    #     self._insert_score_run_compat(
+    #         run_type="interactive_propose",
+    #         run=run,
+    #         git_branch=branch,
+    #         git_sha=self._current_sha(),
+    #     )
+    #     self.log_gaps_from_scoreboard(run, source="diagnostic")
+
+    #     if not any(ok for (_, ok, _) in results):
+    #         try:
+    #             self.pr_manager.restore_original_branch()
+    #         except Exception:
+    #             pass
+    #         return "Proposal aborted — no changes could be safely applied."
+
+    #     self.pr_manager.commit_and_push(branch, proposal.title)
+    #     pr_url = self.pr_manager.open_pr(branch=branch, proposal=proposal)
+
+    #     try:
+    #         self.pr_manager.run_tests_and_update_pr(branch)
+    #     except Exception:
+    #         pass
+
+    #     try:
+    #         self.pr_manager.restore_original_branch()
+    #     except Exception:
+    #         pass
+
+    #     report = []
+    #     if failed:
+    #         report.append("⚠️ Some changes could not be applied:\n" + "\n".join(failed))
+    #     report_text = "\n\n".join(report) if report else "✅ All changes applied successfully."
+    #     return f"Proposal opened: {pr_url}\n\n{report_text}"
 
     # -------------------------
     # unified engine
@@ -408,7 +590,7 @@ class SelfImproveService:
     ) -> dict[str, Any]:
         base = (settings.github_default_branch or "main").strip()
         suffix = self._sanitize_suffix(f"{branch_label}-{int(time.time())}")
-        branch = self.pr_manager.prepare_branch(suffix, base=base, restore_stash=False)
+        branch = self.pr_manager.prepare_branch(suffix, base=base, restore_stash=True)
 
         goal_hint = ""
         if extra_context and extra_context.strip():
@@ -424,7 +606,11 @@ class SelfImproveService:
         )
 
         try:
-            result = controller.run(goal=goal_hint, budget=cfg.budget)
+            result = controller.run(
+                goal=goal_hint,
+                budget=cfg.budget,
+                status_callback=cfg.status_callback,
+            )
         except TypeError:
             controller = RepoJanitorIterationController(
                 repo_root=str(self.repo),
@@ -434,23 +620,54 @@ class SelfImproveService:
                 pr_manager=None,
                 policy=self._default_policy(),
             )
-            result = controller.run(goal=goal_hint, budget=cfg.budget)
+            result = controller.run(
+                goal=goal_hint,
+                budget=cfg.budget,
+                status_callback=cfg.status_callback,
+            )
+
+        quality_report: dict[str, Any] | None = None
+        if result.get("improved"):
+            quality_report = self._run_quality_gate(
+                scope="changed_files",
+                status_callback=cfg.status_callback,
+            )
+            result["quality_report"] = quality_report
+
+            if not self._quality_gate_passed(quality_report):
+                result["quality_gate_failed"] = True
+                result["quality_report_dir"] = quality_report.get("report_dir")
+                result["improved"] = False
+                logger.warning(
+                    "[self-improve] quality repair gate blocked promotion; changed files remain dirty"
+                )
 
         pr_url = result.get("pr_url")
+        promotion_branch = str(result.get("branch") or branch)
 
         if cfg.open_pr and result.get("improved") and not pr_url:
+            self._emit_status(
+                cfg.status_callback,
+                phase="propose_pr",
+                state="start",
+                message="Opening improvement PR",
+                pct=85,
+                branch=promotion_branch,
+            )
             try:
                 if self._git_dirty():
-                    self.pr_manager.commit_and_push(branch, f"Repo Janitor: {branch_label}")
+                    self.pr_manager.commit_and_push(
+                        promotion_branch, f"Repo Janitor: {branch_label}"
+                    )
                 else:
-                    self._push_branch_compat(branch)
+                    self._push_branch_compat(promotion_branch)
 
                 body = (
                     "Repo Janitor unified self-improvement run\n\n"
                     f"### Goal\n{result.get('goal', '')}\n\n"
                     f"### Baseline\nscore={result['baseline']['score']:.2f} gates={result['baseline']['gates']}\n\n"
                     f"### Best\nscore={result['best']['score']:.2f} gates={result['best']['gates']}\n\n"
-                    f"Branch: `{branch}`\n"
+                    f"Branch: `{promotion_branch}`\n"
                 )
 
                 pr_url = self.open_pr_from_branch(
@@ -460,10 +677,29 @@ class SelfImproveService:
                 )
 
                 try:
-                    self.pr_manager.run_tests_and_update_pr(branch)
+                    self.pr_manager.run_tests_and_update_pr(promotion_branch)
                 except Exception:
                     pass
+
+                self._emit_status(
+                    cfg.status_callback,
+                    phase="propose_pr",
+                    state="complete",
+                    message="Improvement PR ready",
+                    pct=95,
+                    branch=promotion_branch,
+                    outcome=pr_url or "branch_pushed",
+                )
             except Exception as e:
+                self._emit_status(
+                    cfg.status_callback,
+                    phase="propose_pr",
+                    state="error",
+                    message="Improvement PR failed",
+                    pct=95,
+                    branch=promotion_branch,
+                    error=str(e),
+                )
                 logger.exception(f"[self-improve] PR open failed: {e}")
 
         try:
@@ -472,11 +708,48 @@ class SelfImproveService:
             pass
 
         result["pr_url"] = pr_url
-        result["branch"] = result.get("branch") or branch
+        result["branch"] = result.get("branch") or promotion_branch
 
         self._record_dream_summary_event(result=result, goal=result.get("goal", ""))
+        self._flush_store_background_work(timeout=10.0)
 
         return result
+
+    def _flush_store_background_work(self, *, timeout: float = 10.0) -> None:
+        """
+        Best-effort drain of any pending background memory/vector work so
+        short-lived runs do not die during interpreter shutdown.
+        """
+        if self.store is None:
+            return
+
+        for method_name in (
+            "wait_for_background_tasks",
+            "wait_for_pending_writes",
+            "flush",
+            "close",
+        ):
+            fn = getattr(self.store, method_name, None)
+            if not callable(fn):
+                continue
+
+            try:
+                params = inspect.signature(fn).parameters
+                if "timeout" in params:
+                    fn(timeout=timeout)
+                else:
+                    fn()
+                logger.debug(f"[self-improve] store background work flushed via {method_name}")
+                return
+            except TypeError:
+                try:
+                    fn()
+                    logger.debug(f"[self-improve] store background work flushed via {method_name}")
+                    return
+                except Exception as e:
+                    logger.debug(f"[self-improve] flush via {method_name} failed: {e}")
+            except Exception as e:
+                logger.debug(f"[self-improve] flush via {method_name} failed: {e}")
 
     def _record_dream_summary_event(self, *, result: dict[str, Any], goal: str) -> None:
         """

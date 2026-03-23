@@ -51,7 +51,7 @@ def main() -> int:
 
     output_root = REPO_ROOT / "artifacts" / "quality"
     output_root.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%S.%fZ")
     output_path = output_root / f"verify-{timestamp}.json"
     output_path.write_text(
         json.dumps(

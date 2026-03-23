@@ -803,9 +803,17 @@ class RepoJanitorIterationController:
                 )
                 break
 
+# -------------- Safe Autofix Lane ------------------
+
             if i == 1:
                 branch_name = f"repo-janitor-autofix-{int(time.time())}-it{i}"
                 branch = self.pr_manager.prepare_branch(branch_name, base=base_for_branches)
+
+                safe_autofix_proposal = Proposal(
+                    title="Repo Janitor: safe autofix",
+                    description="Applied Black formatting and Ruff safe fixes.",
+                    changes=[],
+                )
 
                 self._status_start(
                     status_callback,
@@ -1105,11 +1113,11 @@ class RepoJanitorIterationController:
 
                     improved_any = True
 
-                    safe_autofix_proposal = Proposal(
-                        title="Repo Janitor: safe autofix",
-                        description="Applied Black formatting and Ruff safe fixes.",
-                        changes=[],
-                    )
+                    # safe_autofix_proposal = Proposal(
+                    #     title="Repo Janitor: safe autofix",
+                    #     description="Applied Black formatting and Ruff safe fixes.",
+                    #     changes=[],
+                    # )
 
                     pr_error: str | None = None
                     pr_url = None
@@ -1125,10 +1133,15 @@ class RepoJanitorIterationController:
                             branch=branch,
                         )
                         try:
-                            self.pr_manager.commit_and_push(branch, safe_autofix_proposal.title)
-                            pr_url = self.pr_manager.open_pr(
-                                branch=branch, proposal=safe_autofix_proposal
+                            self.pr_manager.commit_and_push(
+                              branch,
+                              safe_autofix_proposal.title
                             )
+
+                            pr_url = self.pr_manager.open_pr(
+                                  branch=branch, proposal=safe_autofix_proposal
+                            )
+
                             if pr_url:
                                 try:
                                     self.pr_manager.run_tests_and_update_pr(branch)
@@ -1183,32 +1196,64 @@ class RepoJanitorIterationController:
                         break
 
                 else:
-                    # proposal_json = {
-                    #     "mode": "safe_autofix",
-                    #     "description": "Applied Black formatting and Ruff safe fixes.",
-                    #     "artifacts": attempt_artifacts,
-                    #     "diff_summary": diff_summary,
-                    #     "health_improved": bool(health_improved),
-                    #     "worktree_changed": bool(worktree_changed),
-                    # }
-                    proposal_json = (
-                        {
+                    if not health_improved:
+                        self._status_finish(
+                            status_callback,
+                            status_timers,
+                            phase="verify",
+                            message="Safe autofix made no measurable improvement",
+                            pct=80,
+                            iteration=i,
+                            branch=branch,
+                            outcome="no_change",
+                        )
+
+                        attempt_artifacts["summary"] = self._write_attempt_summary_artifact(
+                            run_artifact_dir=run_artifact_dir,
+                            iteration=i,
+                            branch=branch,
+                            stage="safe_autofix_scored",
+                            improved=False,
+                            error=None,
+                            attempt_artifacts=attempt_artifacts,
+                            extra={
+                                "diff_summary": diff_summary,
+                                "health_improved": False,
+                                "worktree_changed": bool(worktree_changed),
+                                "proposal_outcome": proposal_outcome,
+                                "proposal_note": proposal_note,
+                            },
+                        )
+
+                        attempt_row = {
+                            "iteration": i,
+                            "branch": branch,
+                            "before_score": self._raw_score(before),
+                            "after_score": self._raw_score(after),
+                            "before_gates": int(before.gates_failing),
+                            "after_gates": int(after.gates_failing),
+                            "improved": False,
+                            "health_improved": False,
+                            "worktree_changed": bool(worktree_changed),
                             "mode": "safe_autofix",
-                            "description": safe_autofix_proposal.description,
                             "artifacts": attempt_artifacts,
                             "diff_summary": diff_summary,
-                            "health_improved": bool(health_improved),
-                            "worktree_changed": bool(worktree_changed),
-                            "quality_report": quality_report,
-                        },
-                    )
+                        }
+                        attempts.append(attempt_row)
+                        artifacts["attempts"].append(attempt_artifacts)
+
+                    proposal_json = {
+                        "mode": "safe_autofix",
+                        "description": safe_autofix_proposal.description,
+                        "artifacts": attempt_artifacts,
+                        "diff_summary": diff_summary,
+                        "health_improved": bool(health_improved),
+                        "worktree_changed": bool(worktree_changed),
+                    }
 
                     if proposal_outcome is not None:
-                        proposal_json = {
-                            **proposal_json,
-                            "outcome": proposal_outcome,
-                            "note": proposal_note,
-                        }
+                        proposal_json["outcome"] = proposal_outcome
+                        proposal_json["note"] = proposal_note
 
                     insert_improvement_attempt(
                         self.conn,

@@ -15,7 +15,8 @@ conn = sqlite3.connect(DB)
 conn.row_factory = sqlite3.Row
 cur = conn.cursor()
 
-cur.executescript("""
+cur.executescript(
+    """
 CREATE TABLE IF NOT EXISTS usage_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_text TEXT,
@@ -40,7 +41,8 @@ CREATE TABLE IF NOT EXISTS facts (
   value TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
-""")
+"""
+)
 conn.commit()
 
 for _i in range(50):

@@ -1341,12 +1341,14 @@ class Orchestrator:
             conn = self.db.conn
 
             # Last score run (correct table/columns)
-            r = conn.execute("""
+            r = conn.execute(
+                """
               SELECT id, created_at, run_type, mode, fix_enabled, git_branch, git_sha, score, passed
               FROM repo_score_runs
               ORDER BY id DESC
               LIMIT 1
-              """).fetchone()
+              """
+            ).fetchone()
 
             if not r:
                 return "No self-improve runs recorded yet."
@@ -1363,18 +1365,24 @@ class Orchestrator:
             passed = bool(r[8])
 
             # Last improvement attempt
-            a = conn.execute("""
+            a = conn.execute(
+                """
               SELECT id, created_at, iteration, branch, proposal_title, pr_url, improved, error_text, proposal_json
               FROM repo_improvement_attempts
               ORDER BY id DESC
               LIMIT 1
-              """).fetchone()
+              """
+            ).fetchone()
 
-            open_gaps = int(conn.execute("""
+            open_gaps = int(
+                conn.execute(
+                    """
                   SELECT COUNT(*)
                   FROM capability_gaps
                   WHERE status IN ('queued','in_progress','new')
-                  """).fetchone()[0])
+                  """
+                ).fetchone()[0]
+            )
 
             lines: list[str] = []
             lines.append("Self-improve status:")
@@ -1431,12 +1439,14 @@ class Orchestrator:
         if sub == "last":
             conn = self.db.conn
 
-            a = conn.execute("""
+            a = conn.execute(
+                """
               SELECT id, created_at, iteration, branch, proposal_title, pr_url, improved, error_text, proposal_json
               FROM repo_improvement_attempts
               ORDER BY id DESC
               LIMIT 1
-              """).fetchone()
+              """
+            ).fetchone()
 
             if not a:
                 return "No self-improve attempts recorded yet."

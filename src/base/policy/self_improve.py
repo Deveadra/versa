@@ -196,14 +196,16 @@ def propose_new_rules(policy) -> list[dict[str, Any]]:
             proposals.append(rule)
 
     # === Heuristic 2: under-performing rules (EMA) → propose gentler, less frequent variant ===
-    bad_rules = conn.execute("""
+    bad_rules = conn.execute(
+        """
         SELECT r.id, r.name, r.topic_id,
                COALESCE(s.ema_success, 0.5) AS ema_success,
                COALESCE(s.ema_negative, 0.5) AS ema_negative
         FROM engagement_rules r
         LEFT JOIN rule_stats s ON s.rule_id = r.id
         WHERE COALESCE(s.ema_success, 0.5) < 0.3 AND COALESCE(s.ema_negative, 0.5) > 0.7
-        """).fetchall()
+        """
+    ).fetchall()
 
     for r in bad_rules:
         topic = _row_get(r, "topic_id", "general")
@@ -240,7 +242,8 @@ def propose_new_rules(policy) -> list[dict[str, Any]]:
     if not _table_exists(conn, "rule_history"):
         logger.debug("rule_history not found; skipping time-of-day adaptation.")
     else:
-        history = conn.execute(f"""
+        history = conn.execute(
+            f"""
             SELECT topic_id,
                    outcome,
                    strftime('%H', {ts_expr}) AS hour,
@@ -248,7 +251,8 @@ def propose_new_rules(policy) -> list[dict[str, Any]]:
             FROM rule_history
             WHERE {ts_expr} > datetime('now','-7 day')
             GROUP BY topic_id, outcome, hour
-            """).fetchall()
+            """
+        ).fetchall()
 
         for h in history:
             try:

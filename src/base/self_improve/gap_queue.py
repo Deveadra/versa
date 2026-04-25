@@ -42,12 +42,14 @@ class GapQueue:
         return int(cur.lastrowid)
 
     def next_gap(self) -> Gap | None:
-        row = self.conn.execute("""
+        row = self.conn.execute(
+            """
             SELECT * FROM capability_gaps
             WHERE status='open'
             ORDER BY severity DESC, occurrences DESC, created_at ASC
             LIMIT 1
-            """).fetchone()
+            """
+        ).fetchone()
         return Gap(**dict(row)) if row else None
 
     def mark(self, gap_id: int, status: GapStatus) -> None:

@@ -60,12 +60,14 @@ def handle_policy_command(text: str, policy: PolicyStore) -> str | None:
 
     # === List active rules ===
     if re.search(r"\blist (my )?(rules|engagement rules)\b", t):
-        rows = policy.conn.execute("""
+        rows = policy.conn.execute(
+            """
             SELECT name, topic_id, priority, enabled
             FROM engagement_rules
             ORDER BY priority ASC
             LIMIT 20
-        """).fetchall()
+        """
+        ).fetchall()
         if not rows:
             return "I have no active rules."
         lines = [

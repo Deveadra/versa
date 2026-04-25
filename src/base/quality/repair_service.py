@@ -3,7 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from base.quality.diff_scope import GitDiffScopeResolver
-from base.quality.models import Diagnostic, QualitySnapshot, RepairReport, RepairRound
+from base.quality.models import (
+    Diagnostic,
+    QualitySnapshot,
+    RepairReport,
+    RepairRound,
+    Severity,
+    ToolName,
+)
 from base.quality.policy import RepairPolicy
 from base.quality.report import write_repair_report
 from base.quality.runner import QualityRunner
@@ -33,9 +40,19 @@ class QualityRepairService:
         explicit_files: tuple[Path, ...] = (),
     ) -> RepairReport:
         active_policy = policy or self.policy
-        files = self.resolver.resolve_files(active_policy, explicit_files=explicit_files)
 
-        if not files:
+        candidate_files = self.resolver.resolve_candidate_files(
+            active_policy,
+            explicit_files=explicit_files,
+        )
+        files = self.resolver.filter_files(candidate_files, active_policy.file_extensions)
+        unsupported_files = tuple(path for path in candidate_files if path not in files)
+        unsupported_diagnostics = self._unsupported_diagnostics(
+            unsupported_files,
+            include=active_policy.fail_on_unsupported_files,
+        )
+
+        if not candidate_files:
             empty_snapshot = QualitySnapshot()
             report = RepairReport(
                 repo_root=self.repo_root,
@@ -52,21 +69,43 @@ class QualityRepairService:
             report.report_dir = report_dir
             return report
 
-        baseline = self.runner.snapshot(
-            files,
-            run_typecheck=active_policy.run_typecheck,
-            run_tests=False,
+        if not files:
+            snapshot = QualitySnapshot(diagnostics=unsupported_diagnostics, commands=())
+            report = RepairReport(
+                repo_root=self.repo_root,
+                scope_name=active_policy.scope_mode.value,
+                files_in_scope=(),
+                baseline=snapshot,
+                after_autofix=snapshot,
+                final_snapshot=snapshot,
+                rounds=(),
+                blocked=unsupported_diagnostics,
+                notes=(
+                    "Files were found in scope, but none are supported by the current repair gate.",
+                ),
+            )
+            report_dir = write_repair_report(report, self.repo_root / active_policy.report_root)
+            report.report_dir = report_dir
+            return report
+
+        baseline = self._merge_snapshot(
+            self.runner.snapshot(
+                files,
+                run_typecheck=active_policy.run_typecheck,
+                run_tests=False,
+            ),
+            unsupported_diagnostics,
         )
 
-        if active_policy.auto_format:
-            self.runner.run_ruff_format(files, fix=True)
-        if active_policy.auto_fix_ruff:
-            self.runner.run_ruff_check(files, fix=True)
+        self.runner.apply_autofix(files)
 
-        after_autofix = self.runner.snapshot(
-            files,
-            run_typecheck=active_policy.run_typecheck,
-            run_tests=False,
+        after_autofix = self._merge_snapshot(
+            self.runner.snapshot(
+                files,
+                run_typecheck=active_policy.run_typecheck,
+                run_tests=False,
+            ),
+            unsupported_diagnostics,
         )
 
         rounds: list[RepairRound] = []
@@ -101,19 +140,25 @@ class QualityRepairService:
                 )
                 break
 
-            next_snapshot = self.runner.snapshot(
-                files,
-                run_typecheck=active_policy.run_typecheck,
-                run_tests=False,
+            next_snapshot = self._merge_snapshot(
+                self.runner.snapshot(
+                    files,
+                    run_typecheck=active_policy.run_typecheck,
+                    run_tests=False,
+                ),
+                unsupported_diagnostics,
             )
 
             if next_snapshot.total_diagnostics > current_snapshot.total_diagnostics:
                 for path, content in backups.items():
                     (self.repo_root / path).write_text(content, encoding="utf-8")
-                reverted_snapshot = self.runner.snapshot(
-                    files,
-                    run_typecheck=active_policy.run_typecheck,
-                    run_tests=False,
+                reverted_snapshot = self._merge_snapshot(
+                    self.runner.snapshot(
+                        files,
+                        run_typecheck=active_policy.run_typecheck,
+                        run_tests=False,
+                    ),
+                    unsupported_diagnostics,
                 )
                 notes.append(f"Round {round_number} was reverted because diagnostics increased.")
                 current_snapshot = reverted_snapshot
@@ -129,18 +174,17 @@ class QualityRepairService:
             )
             current_snapshot = next_snapshot
 
-        final_snapshot = self.runner.snapshot(
-            files,
-            run_typecheck=active_policy.run_typecheck,
-            run_tests=active_policy.run_tests,
-            pytest_args=active_policy.pytest_args,
+        final_snapshot = self._merge_snapshot(
+            self.runner.snapshot(
+                files,
+                run_typecheck=active_policy.run_typecheck,
+                run_tests=active_policy.run_tests,
+                pytest_args=active_policy.pytest_args,
+            ),
+            unsupported_diagnostics,
         )
 
-        blocked = tuple(
-            diagnostic
-            for diagnostic in final_snapshot.diagnostics
-            if self._is_in_scope(diagnostic, files)
-        )
+        blocked = tuple(final_snapshot.diagnostics)
 
         report = RepairReport(
             repo_root=self.repo_root,
@@ -159,5 +203,36 @@ class QualityRepairService:
         return report
 
     @staticmethod
-    def _is_in_scope(diagnostic: Diagnostic, files: tuple[Path, ...]) -> bool:
-        return diagnostic.path is not None and diagnostic.path in files
+    def _merge_snapshot(
+        snapshot: QualitySnapshot,
+        extra_diagnostics: tuple[Diagnostic, ...],
+    ) -> QualitySnapshot:
+        if not extra_diagnostics:
+            return snapshot
+
+        return QualitySnapshot(
+            diagnostics=tuple(snapshot.diagnostics) + tuple(extra_diagnostics),
+            commands=tuple(snapshot.commands),
+        )
+
+    @staticmethod
+    def _unsupported_diagnostics(
+        files: tuple[Path, ...],
+        *,
+        include: bool,
+    ) -> tuple[Diagnostic, ...]:
+        if not include:
+            return ()
+
+        diagnostics: list[Diagnostic] = []
+        for path in files:
+            diagnostics.append(
+                Diagnostic(
+                    tool=ToolName.SYSTEM,
+                    code="UNSUPPORTED_FILE",
+                    message="File type is not yet supported by the repair gate.",
+                    severity=Severity.ERROR,
+                    path=path,
+                )
+            )
+        return tuple(diagnostics)

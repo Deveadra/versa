@@ -188,3 +188,12 @@ export const DomainEventSchema = z.object({
 
 export type Task = z.infer<typeof TaskSchema>;
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
+
+export * from './contracts/identity-doctrine';
+export * from './contracts/memory-gateway';
+export * from './contracts/workspace-state';
+export * from './contracts/skills';
+export * from './contracts/environment-twin';
+export * from './contracts/approvals-trust-ladder';
+export * from './contracts/telemetry-events';
+export * from './contracts/mcp-gateway';

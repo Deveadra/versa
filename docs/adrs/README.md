@@ -8,3 +8,4 @@
 - ADR-006 Connector/plugin architecture
 - ADR-007 Security baseline and consent ledger
 - ADR-008 Desktop-capable future, web-first present
+- ADR-009 Redesign architecture baseline and contract-first workstream model

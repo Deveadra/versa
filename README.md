@@ -236,3 +236,9 @@ pnpm test
 ```
 
 The existing Aerith/Ultron project structure and workflows remain intact.
+
+### Redesign architecture baseline references
+
+- `docs/redesign/architecture-baseline.md`
+- `docs/adrs/ADR-009.md`
+- `docs/task-cards/active/ws00-issue-43-architecture-baseline.md`

@@ -1,0 +1,23 @@
+{
+	"folders": [
+		{
+			"path": "../../.."
+		},
+		{
+			"path": "../../../../claude-code"
+		},
+		{
+			"path": "../../../../claude-code-buddy-reroll"
+		},
+		{
+			"path": "../../../../../src/python_scripts"
+		},
+		{
+			"path": "../../../../../src/Roo-Code"
+		},
+		{
+			"path": "../../../../node_modules"
+		}
+	],
+	"settings": {}
+}

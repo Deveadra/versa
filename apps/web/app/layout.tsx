@@ -16,6 +16,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <li><Link href="/schedule">Schedule</Link></li>
               <li><Link href="/study">Study</Link></li>
               <li><Link href="/jobs">Job Hub</Link></li>
+            </ul>
             <ul style={{ listStyle: 'none', padding: 0 }}>
               <li><Link href="/today">Today</Link></li>
               <li><Link href="/tasks">Tasks</Link></li>

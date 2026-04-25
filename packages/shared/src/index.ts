@@ -1,7 +1,16 @@
 import { z } from 'zod';
 
 export const DomainEnum = z.enum(['core', 'study', 'jobs', 'health', 'integration', 'system']);
-export const StatusEnum = z.enum(['todo', 'in_progress', 'done', 'archived', 'active', 'paused', 'completed', 'missed']);
+export const StatusEnum = z.enum([
+  'todo',
+  'in_progress',
+  'done',
+  'archived',
+  'active',
+  'paused',
+  'completed',
+  'missed',
+]);
 export const PriorityEnum = z.enum(['low', 'medium', 'high', 'critical']);
 export const SourceEnum = z.enum(['manual', 'imported', 'system', 'ai']);
 export const SensitivityEnum = z.enum(['public', 'internal', 'private', 'restricted']);
@@ -21,7 +30,10 @@ const MetadataSchema = z.object({
 
 const EntityBase = z.object({ id: IdSchema, metadata: MetadataSchema });
 
-export const UserProfileSchema = EntityBase.extend({ displayName: z.string(), email: z.string().email() });
+export const UserProfileSchema = EntityBase.extend({
+  displayName: z.string(),
+  email: z.string().email(),
+});
 export const TaskSchema = EntityBase.extend({
   title: z.string().min(1),
   description: z.string().optional(),
@@ -59,21 +71,80 @@ export const ScheduleBlockSchema = EntityBase.extend({
   notes: z.string().optional(),
   status: StatusEnum,
 });
-export const CalendarEventSchema = EntityBase.extend({ externalId: z.string(), startsAt: TimestampSchema, endsAt: TimestampSchema });
-export const EmailThreadSummarySchema = EntityBase.extend({ subject: z.string(), summary: z.string() });
-export const StudyCourseSchema = EntityBase.extend({ title: z.string(), code: z.string().optional(), term: z.string().optional(), instructor: z.string().optional(), status: StatusEnum });
-export const StudyAssignmentSchema = EntityBase.extend({ courseId: IdSchema, title: z.string(), dueDate: TimestampSchema.optional(), status: StatusEnum });
-export const StudySessionSchema = EntityBase.extend({ courseId: IdSchema, assignmentId: IdSchema.optional(), startTime: TimestampSchema, endTime: TimestampSchema.optional(), outcome: z.string().optional() });
-export const JobLeadSchema = EntityBase.extend({ company: z.string(), role: z.string(), source: SourceEnum, status: StatusEnum });
-export const JobApplicationSchema = EntityBase.extend({ leadId: IdSchema.optional(), status: StatusEnum, followUpDate: TimestampSchema.optional() });
-export const ResumeAssetSchema = EntityBase.extend({ label: z.string(), version: z.string().optional(), targetRole: z.string().optional() });
-export const FoodEntrySchema = EntityBase.extend({ mealType: z.string(), calories: z.number().optional() });
-export const SymptomEntrySchema = EntityBase.extend({ symptom: z.string(), severity: z.number().min(1).max(10) });
-export const WorkTicketSchema = EntityBase.extend({ system: z.string(), title: z.string(), status: StatusEnum });
+export const CalendarEventSchema = EntityBase.extend({
+  externalId: z.string(),
+  startsAt: TimestampSchema,
+  endsAt: TimestampSchema,
+});
+export const EmailThreadSummarySchema = EntityBase.extend({
+  subject: z.string(),
+  summary: z.string(),
+});
+export const StudyCourseSchema = EntityBase.extend({
+  title: z.string(),
+  code: z.string().optional(),
+  term: z.string().optional(),
+  instructor: z.string().optional(),
+  status: StatusEnum,
+});
+export const StudyAssignmentSchema = EntityBase.extend({
+  courseId: IdSchema,
+  title: z.string(),
+  dueDate: TimestampSchema.optional(),
+  status: StatusEnum,
+});
+export const StudySessionSchema = EntityBase.extend({
+  courseId: IdSchema,
+  assignmentId: IdSchema.optional(),
+  startTime: TimestampSchema,
+  endTime: TimestampSchema.optional(),
+  outcome: z.string().optional(),
+});
+export const JobLeadSchema = EntityBase.extend({
+  company: z.string(),
+  role: z.string(),
+  source: SourceEnum,
+  status: StatusEnum,
+});
+export const JobApplicationSchema = EntityBase.extend({
+  leadId: IdSchema.optional(),
+  status: StatusEnum,
+  followUpDate: TimestampSchema.optional(),
+});
+export const ResumeAssetSchema = EntityBase.extend({
+  label: z.string(),
+  version: z.string().optional(),
+  targetRole: z.string().optional(),
+});
+export const FoodEntrySchema = EntityBase.extend({
+  mealType: z.string(),
+  calories: z.number().optional(),
+});
+export const SymptomEntrySchema = EntityBase.extend({
+  symptom: z.string(),
+  severity: z.number().min(1).max(10),
+});
+export const WorkTicketSchema = EntityBase.extend({
+  system: z.string(),
+  title: z.string(),
+  status: StatusEnum,
+});
 export const MemoryEventSchema = EntityBase.extend({ summary: z.string(), domain: DomainEnum });
-export const ConsentGrantSchema = EntityBase.extend({ scope: z.string(), granted: z.boolean(), grantedAt: TimestampSchema });
-export const IntegrationAccountSchema = EntityBase.extend({ provider: z.string(), accountLabel: z.string(), connectedAt: TimestampSchema });
-export const SystemEventSchema = EntityBase.extend({ eventType: z.string(), domain: DomainEnum, payload: z.record(z.any()) });
+export const ConsentGrantSchema = EntityBase.extend({
+  scope: z.string(),
+  granted: z.boolean(),
+  grantedAt: TimestampSchema,
+});
+export const IntegrationAccountSchema = EntityBase.extend({
+  provider: z.string(),
+  accountLabel: z.string(),
+  connectedAt: TimestampSchema,
+});
+export const SystemEventSchema = EntityBase.extend({
+  eventType: z.string(),
+  domain: DomainEnum,
+  payload: z.record(z.any()),
+});
 
 export const EventTypeEnum = z.enum([
   'task.created',

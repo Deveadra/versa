@@ -803,7 +803,7 @@ class RepoJanitorIterationController:
                 )
                 break
 
-# -------------- Safe Autofix Lane ------------------
+            # -------------- Safe Autofix Lane ------------------
 
             if i == 1:
                 branch_name = f"repo-janitor-autofix-{int(time.time())}-it{i}"
@@ -1133,13 +1133,10 @@ class RepoJanitorIterationController:
                             branch=branch,
                         )
                         try:
-                            self.pr_manager.commit_and_push(
-                              branch,
-                              safe_autofix_proposal.title
-                            )
+                            self.pr_manager.commit_and_push(branch, safe_autofix_proposal.title)
 
                             pr_url = self.pr_manager.open_pr(
-                                  branch=branch, proposal=safe_autofix_proposal
+                                branch=branch, proposal=safe_autofix_proposal
                             )
 
                             if pr_url:

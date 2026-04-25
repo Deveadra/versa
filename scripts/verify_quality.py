@@ -6,14 +6,14 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from base.quality.diff_scope import GitDiffScopeResolver
-from base.quality.policy import RepairPolicy
-from base.quality.runner import QualityRunner
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
+
+from base.quality.diff_scope import GitDiffScopeResolver
+from base.quality.policy import RepairPolicy
+from base.quality.runner import QualityRunner
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -30,6 +30,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+
+    # from base.quality.diff_scope import GitDiffScopeResolver
+    # from base.quality.policy import RepairPolicy
+    # from base.quality.runner import QualityRunner
+
     args = build_parser().parse_args()
 
     if args.scope == "changed_files":

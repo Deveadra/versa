@@ -29,7 +29,11 @@ export default function TasksPage() {
     <section>
       <h1>Tasks</h1>
       <form onSubmit={onSubmit} style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-        <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Quick add task" />
+        <input
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
+          placeholder="Quick add task"
+        />
         <button type="submit">Add</button>
       </form>
 
@@ -39,13 +43,24 @@ export default function TasksPage() {
         <button onClick={() => setScope('overdue')}>Overdue</button>
       </div>
 
-      {tasks.length === 0 ? <p>No tasks yet.</p> : (
+      {tasks.length === 0 ? (
+        <p>No tasks yet.</p>
+      ) : (
         <ul>
           {tasks.map((task) => (
             <li key={task.id} style={{ marginBottom: 8 }}>
-              <strong>{task.title}</strong> ({task.status}) {task.due_date ? `due ${task.due_date}` : ''}
+              <strong>{task.title}</strong> ({task.status}){' '}
+              {task.due_date ? `due ${task.due_date}` : ''}
               {task.status !== 'done' ? (
-                <button style={{ marginLeft: 8 }} onClick={async () => { await completeTask(String(task.id)); await load(); }}>Complete</button>
+                <button
+                  style={{ marginLeft: 8 }}
+                  onClick={async () => {
+                    await completeTask(String(task.id));
+                    await load();
+                  }}
+                >
+                  Complete
+                </button>
               ) : null}
             </li>
           ))}

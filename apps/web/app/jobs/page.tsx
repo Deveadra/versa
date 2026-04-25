@@ -14,7 +14,9 @@ export default function JobsPage() {
     setLeads(result.data.leads);
     setApps(result.data.applications);
   };
-  useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    void load();
+  }, []);
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -29,14 +31,38 @@ export default function JobsPage() {
     <section>
       <h1>Job Hub</h1>
       <form onSubmit={onSubmit} style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-        <input value={company} onChange={(event) => setCompany(event.target.value)} placeholder="Company" />
+        <input
+          value={company}
+          onChange={(event) => setCompany(event.target.value)}
+          placeholder="Company"
+        />
         <input value={role} onChange={(event) => setRole(event.target.value)} placeholder="Role" />
         <button type="submit">Add lead</button>
       </form>
       <h3>Leads</h3>
-      {!leads.length ? <p>No leads yet.</p> : <ul>{leads.map((lead) => <li key={lead.id}>{lead.company} — {lead.role}</li>)}</ul>}
+      {!leads.length ? (
+        <p>No leads yet.</p>
+      ) : (
+        <ul>
+          {leads.map((lead) => (
+            <li key={lead.id}>
+              {lead.company} — {lead.role}
+            </li>
+          ))}
+        </ul>
+      )}
       <h3>Applications</h3>
-      {!apps.length ? <p>No applications yet.</p> : <ul>{apps.map((app) => <li key={app.id}>{app.status} ({app.lead_id})</li>)}</ul>}
+      {!apps.length ? (
+        <p>No applications yet.</p>
+      ) : (
+        <ul>
+          {apps.map((app) => (
+            <li key={app.id}>
+              {app.status} ({app.lead_id})
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }

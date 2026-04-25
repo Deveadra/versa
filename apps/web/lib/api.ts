@@ -21,22 +21,49 @@ export const fetchTasks = (scope: 'all' | 'today' | 'overdue' = 'all') =>
   api<{ data: Array<Record<string, string>> }>(`/tasks?scope=${scope}`);
 
 export const createTask = (title: string) =>
-  api<{ data: Record<string, string> }>('/tasks', { method: 'POST', body: JSON.stringify({ title }) });
+  api<{ data: Record<string, string> }>('/tasks', {
+    method: 'POST',
+    body: JSON.stringify({ title }),
+  });
 
 export const completeTask = (taskId: string) =>
-  api<{ data: Record<string, string> }>(`/tasks/${taskId}`, { method: 'PATCH', body: JSON.stringify({ status: 'done', completed_at: new Date().toISOString() }) });
+  api<{ data: Record<string, string> }>(`/tasks/${taskId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status: 'done', completed_at: new Date().toISOString() }),
+  });
 
 export const fetchGoals = () => api<{ data: Array<Record<string, string>> }>('/goals');
-export const createGoal = (title: string) => api<{ data: Record<string, string> }>('/goals', { method: 'POST', body: JSON.stringify({ title }) });
+export const createGoal = (title: string) =>
+  api<{ data: Record<string, string> }>('/goals', {
+    method: 'POST',
+    body: JSON.stringify({ title }),
+  });
 
 export const fetchSchedule = () =>
-  api<{ data: Array<Record<string, string>> }>(`/schedule?view=day&date=${new Date().toISOString().slice(0, 10)}`);
-export const createScheduleBlock = (payload: { title: string; date: string; startTime: string; endTime: string }) =>
-  api<{ data: Record<string, string> }>('/schedule', { method: 'POST', body: JSON.stringify(payload) });
+  api<{ data: Array<Record<string, string>> }>(
+    `/schedule?view=day&date=${new Date().toISOString().slice(0, 10)}`,
+  );
+export const createScheduleBlock = (payload: {
+  title: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+}) =>
+  api<{ data: Record<string, string> }>('/schedule', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 
 export const fetchPlanner = () => api<{ data: Record<string, unknown> }>('/planner/today');
-export const fetchStudyAssignments = () => api<{ data: Array<Record<string, string>> }>('/study/assignments');
-export const fetchJobs = () => api<{ data: { leads: Array<Record<string, string>>; applications: Array<Record<string, string>> } }>('/jobs');
+export const fetchStudyAssignments = () =>
+  api<{ data: Array<Record<string, string>> }>('/study/assignments');
+export const fetchJobs = () =>
+  api<{
+    data: { leads: Array<Record<string, string>>; applications: Array<Record<string, string>> };
+  }>('/jobs');
 
 export const createJobLead = (company: string, role: string) =>
-  api<{ data: Record<string, string> }>('/jobs/leads', { method: 'POST', body: JSON.stringify({ company, role }) });
+  api<{ data: Record<string, string> }>('/jobs/leads', {
+    method: 'POST',
+    body: JSON.stringify({ company, role }),
+  });

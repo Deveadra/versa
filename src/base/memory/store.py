@@ -150,19 +150,16 @@ class MemoryStore:
         cur = self.conn.cursor()
 
         # Simple key/value facts
-        cur.execute(
-            """
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS facts (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
                 last_updated TEXT NOT NULL
             )
-            """
-        )
+            """)
 
         # Legacy "memories" table for whole exchanges
-        cur.execute(
-            """
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS memories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT,
@@ -170,12 +167,10 @@ class MemoryStore:
                 content TEXT,
                 response TEXT
             )
-            """
-        )
+            """)
 
         # Events (atomic things worth recalling)
-        cur.execute(
-            """
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 content TEXT NOT NULL,
@@ -183,21 +178,17 @@ class MemoryStore:
                 importance REAL NOT NULL DEFAULT 0.0,
                 type TEXT NOT NULL DEFAULT 'event'
             )
-            """
-        )
+            """)
 
         # Full-text search index linked to events.content
         try:
-            cur.execute(
-                """
+            cur.execute("""
                 CREATE VIRTUAL TABLE IF NOT EXISTS events_fts
                 USING fts5(content, content='events', content_rowid='id')
-                """
-            )
+                """)
 
             # Keep FTS index in sync automatically
-            cur.executescript(
-                """
+            cur.executescript("""
                 CREATE TRIGGER IF NOT EXISTS events_ai AFTER INSERT ON events BEGIN
                   INSERT INTO events_fts(rowid, content) VALUES (new.id, new.content);
                 END;
@@ -210,8 +201,7 @@ class MemoryStore:
                   INSERT INTO events_fts(events_fts, rowid, content) VALUES('delete', old.id, old.content);
                   INSERT INTO events_fts(rowid, content) VALUES (new.id, new.content);
                 END;
-                """
-            )
+                """)
 
             self._fts_enabled = True
         except sqlite3.OperationalError as e:

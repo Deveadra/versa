@@ -16,8 +16,7 @@ class KGStore:
         self._init_tables()
 
     def _init_tables(self) -> None:
-        self.db.conn.executescript(
-            """
+        self.db.conn.executescript("""
             CREATE TABLE IF NOT EXISTS entities (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
@@ -42,8 +41,7 @@ class KGStore:
                 alias TEXT NOT NULL,
                 FOREIGN KEY(entity_id) REFERENCES entities(id)
             );
-            """
-        )
+            """)
         self.db.conn.commit()
 
     def upsert_entity(self, name: str, type_: str | None = None) -> int:

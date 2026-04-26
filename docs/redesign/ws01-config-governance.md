@@ -1,6 +1,6 @@
 # WS01 — Canonical config and dependency governance
 
-Issue: https://github.com/Deveadra/versa/issues/46
+Issue: `https://github.com/Deveadra/versa/issues/46`
 
 ## Canonical config surface
 

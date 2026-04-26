@@ -152,14 +152,12 @@ def db(tmp_path: Path) -> SQLiteConn:
 
 
 def _latest_attempt_row(db: SQLiteConn):
-    row = db.conn.execute(
-        """
+    row = db.conn.execute("""
         SELECT proposal_json, error_text
         FROM repo_improvement_attempts
         ORDER BY id DESC
         LIMIT 1
-        """
-    ).fetchone()
+        """).fetchone()
     assert row is not None, "Expected at least one repo_improvement_attempts row"
     return row[0], row[1]
 

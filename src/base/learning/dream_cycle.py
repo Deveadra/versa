@@ -22,8 +22,7 @@ def propose_new_signals_and_rules(conn):
     """
     # Fetch context for LLM
     cur = conn.cursor()
-    stats = cur.execute(
-        """
+    stats = cur.execute("""
         SELECT topic_id, COUNT(*) as fires,
                SUM(CASE WHEN outcome='acted' THEN 1 ELSE 0 END) as acted,
                SUM(CASE WHEN outcome='ignore' THEN 1 ELSE 0 END) as ignored
@@ -31,8 +30,7 @@ def propose_new_signals_and_rules(conn):
         GROUP BY topic_id
         ORDER BY fires DESC
         LIMIT 20
-    """
-    ).fetchall()
+    """).fetchall()
 
     topics = [r["topic_id"] for r in stats]
     signals = [r["name"] for r in conn.execute("SELECT name FROM context_signals").fetchall()]
@@ -133,20 +131,16 @@ def run_dream_cycle(conn):
 def expand_consequence_map(conn):
     cur = conn.cursor()
     # gather ignored topics + complaints
-    complaints = cur.execute(
-        """
+    complaints = cur.execute("""
         SELECT DISTINCT note FROM feedback_events
         WHERE kind='complaint'
           AND created_at > datetime('now','-7 day')
-    """
-    ).fetchall()
-    topics = cur.execute(
-        """
+    """).fetchall()
+    topics = cur.execute("""
         SELECT DISTINCT topic_id FROM rule_history
         WHERE outcome='ignored'
           AND timestamp > datetime('now','-7 day')
-    """
-    ).fetchall()
+    """).fetchall()
 
     prompt = f"""
     Current consequence map: {cur.execute("SELECT keyword, topic_id FROM consequence_map").fetchall()}
@@ -175,13 +169,11 @@ def expand_consequence_map(conn):
 
 def cluster_complaints(conn):
     cur = conn.cursor()
-    complaints = cur.execute(
-        """
+    complaints = cur.execute("""
         SELECT note FROM feedback_events
         WHERE kind='complaint'
           AND created_at > datetime('now','-14 day')
-    """
-    ).fetchall()
+    """).fetchall()
 
     if not complaints:
         return

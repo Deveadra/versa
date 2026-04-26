@@ -17,8 +17,7 @@ class CalendarStore:
         self._init_tables()
 
     def _init_tables(self):
-        self.db.conn.executescript(
-            """
+        self.db.conn.executescript("""
             CREATE TABLE IF NOT EXISTS calendar_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT NOT NULL,
@@ -29,8 +28,7 @@ class CalendarStore:
                 attendees TEXT,               -- JSON array of strings or name/email pairs
                 meta TEXT                     -- JSON blob for anything else
             );
-            """
-        )
+            """)
         self.db.conn.commit()
 
     # -----------------------------

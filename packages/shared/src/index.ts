@@ -488,6 +488,109 @@ export const MemoryConsolidationResultSchema = z.object({
   linkedSourceCount: z.number().int().min(0),
 });
 
+export const SkillExecutionStatusEnum = z.enum([
+  'succeeded',
+  'failed',
+  'blocked',
+  'invalid_request',
+]);
+
+export const SkillInputFieldSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().min(1),
+  required: z.boolean().default(true),
+  schemaHint: z.string().min(1).optional(),
+});
+
+export const SkillOutputFieldSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().min(1),
+  schemaHint: z.string().min(1).optional(),
+});
+
+export const SkillValidationRequirementSchema = z.object({
+  id: z.string().min(1),
+  description: z.string().min(1),
+  required: z.boolean().default(true),
+});
+
+export const SkillFailureHandlingSchema = z.object({
+  retryable: z.boolean().default(false),
+  maxRetries: z.number().int().min(0).default(0),
+  escalation: z.string().min(1).optional(),
+});
+
+export const SkillApprovalRequirementSchema = z.object({
+  required: z.boolean().default(false),
+  rationale: z.string().min(1).optional(),
+  policyRef: z.string().min(1).optional(),
+});
+
+export const SkillMetadataSchema = z.object({
+  description: z.string().min(1),
+  version: z.string().min(1),
+  inputs: z.array(SkillInputFieldSchema).default([]),
+  outputs: z.array(SkillOutputFieldSchema).default([]),
+  requiredTools: z.array(z.string().min(1)).default([]),
+  requiredResources: z.array(z.string().min(1)).default([]),
+  validationChecks: z.array(SkillValidationRequirementSchema).default([]),
+  failureHandling: SkillFailureHandlingSchema,
+  approval: SkillApprovalRequirementSchema,
+});
+
+export const SkillDefinitionSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  metadata: SkillMetadataSchema,
+  tags: z.array(z.string().min(1)).default([]),
+  bounded: z.boolean().default(true),
+  deterministic: z.boolean().default(true),
+});
+
+export const SkillExecutionContextSchema = z.object({
+  traceId: z.string().min(1).optional(),
+  actor: z.string().min(1).optional(),
+  workspace: z.string().min(1).optional(),
+});
+
+export const SkillExecutionRequestSchema = z
+  .object({
+    skillId: z.string().min(1).optional(),
+    skillName: z.string().min(1).optional(),
+    input: z.record(z.any()).default({}),
+    context: SkillExecutionContextSchema.default({}),
+  })
+  .refine((value) => Boolean(value.skillId || value.skillName), {
+    message: 'skillId or skillName is required',
+  });
+
+export const SkillValidationResultSchema = z.object({
+  id: z.string().min(1),
+  passed: z.boolean(),
+  message: z.string().optional(),
+});
+
+export const SkillErrorSchema = z.object({
+  code: z.string().min(1),
+  message: z.string().min(1),
+  details: z.record(z.any()).optional(),
+});
+
+export const SkillExecutionResultSchema = z.object({
+  executionId: z.string().min(1),
+  skillId: z.string().min(1),
+  skillName: z.string().min(1),
+  status: SkillExecutionStatusEnum,
+  startedAt: TimestampSchema,
+  completedAt: TimestampSchema,
+  output: z.record(z.any()).default({}),
+  validation: z.object({
+    passed: z.boolean(),
+    checks: z.array(SkillValidationResultSchema).default([]),
+  }),
+  error: SkillErrorSchema.optional(),
+});
+
 export type Task = z.infer<typeof TaskSchema>;
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
 export type TraceContext = z.infer<typeof TraceContextSchema>;
@@ -530,3 +633,16 @@ export type MemoryWriteRequest = z.infer<typeof MemoryWriteRequestSchema>;
 export type MemoryReadRequest = z.infer<typeof MemoryReadRequestSchema>;
 export type MemoryConsolidationRequest = z.infer<typeof MemoryConsolidationRequestSchema>;
 export type MemoryConsolidationResult = z.infer<typeof MemoryConsolidationResultSchema>;
+export type SkillExecutionStatus = z.infer<typeof SkillExecutionStatusEnum>;
+export type SkillInputField = z.infer<typeof SkillInputFieldSchema>;
+export type SkillOutputField = z.infer<typeof SkillOutputFieldSchema>;
+export type SkillValidationRequirement = z.infer<typeof SkillValidationRequirementSchema>;
+export type SkillFailureHandling = z.infer<typeof SkillFailureHandlingSchema>;
+export type SkillApprovalRequirement = z.infer<typeof SkillApprovalRequirementSchema>;
+export type SkillMetadata = z.infer<typeof SkillMetadataSchema>;
+export type SkillDefinition = z.infer<typeof SkillDefinitionSchema>;
+export type SkillExecutionContext = z.infer<typeof SkillExecutionContextSchema>;
+export type SkillExecutionRequest = z.infer<typeof SkillExecutionRequestSchema>;
+export type SkillValidationResult = z.infer<typeof SkillValidationResultSchema>;
+export type SkillError = z.infer<typeof SkillErrorSchema>;
+export type SkillExecutionResult = z.infer<typeof SkillExecutionResultSchema>;

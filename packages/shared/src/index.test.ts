@@ -5,6 +5,9 @@ import {
   MemoryConsolidationRequestSchema,
   MemoryReadRequestSchema,
   MemoryWriteRequestSchema,
+  SkillDefinitionSchema,
+  SkillExecutionRequestSchema,
+  SkillExecutionResultSchema,
   TelemetryEventSchema,
   WorkspaceCheckpointCreateRequestSchema,
   WorkspaceCreateRequestSchema,
@@ -202,5 +205,86 @@ describe('Workspace contracts', () => {
     expect(create.slug).toBe('deveadra/versa');
     expect(patch.nextRecommendedActions?.[0]?.priority).toBe('high');
     expect(checkpoint.createdBy).toBe('orion');
+  });
+});
+
+describe('Skill contracts', () => {
+  it('validates skill definition, execution request, and execution result contracts', () => {
+    const definition = SkillDefinitionSchema.parse({
+      id: 'repo-inspection',
+      name: 'repo_inspection',
+      bounded: true,
+      deterministic: true,
+      tags: ['inspection'],
+      metadata: {
+        description: 'Inspect repo paths in a bounded way',
+        version: '0.1.0',
+        inputs: [
+          {
+            name: 'files',
+            description: 'list of files',
+            required: true,
+          },
+        ],
+        outputs: [
+          {
+            name: 'summary',
+            description: 'inspection summary',
+          },
+        ],
+        requiredTools: ['read_file'],
+        requiredResources: ['workspace'],
+        validationChecks: [
+          {
+            id: 'inputs.files.present',
+            description: 'files input provided',
+            required: true,
+          },
+        ],
+        failureHandling: {
+          retryable: false,
+          maxRetries: 0,
+        },
+        approval: {
+          required: false,
+        },
+      },
+    });
+
+    const request = SkillExecutionRequestSchema.parse({
+      skillId: definition.id,
+      input: {
+        files: ['packages/shared/src/index.ts'],
+      },
+      context: {
+        traceId: 'trace-skill-1',
+        actor: 'orion',
+      },
+    });
+
+    const result = SkillExecutionResultSchema.parse({
+      executionId: 'skx_12345678',
+      skillId: definition.id,
+      skillName: definition.name,
+      status: 'succeeded',
+      startedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      output: {
+        summary: 'ok',
+      },
+      validation: {
+        passed: true,
+        checks: [
+          {
+            id: 'inputs.files.present',
+            passed: true,
+            message: 'files input provided',
+          },
+        ],
+      },
+    });
+
+    expect(request.skillId).toBe('repo-inspection');
+    expect(result.status).toBe('succeeded');
   });
 });

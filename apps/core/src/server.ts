@@ -15,9 +15,19 @@ import {
   createLogger,
   createNdjsonFileSink,
   createRequestTelemetryMiddleware,
+  createTelemetrySink,
+  getTelemetryContext,
 } from '@versa/logging';
 import type { TraceContext } from '@versa/shared';
 import { generateDailyPlan } from './planner';
+
+declare global {
+  namespace Express {
+    interface Request {
+      telemetryContext?: Partial<TraceContext>;
+    }
+  }
+}
 
 const app = express();
 const cfg = loadConfig();
@@ -35,22 +45,16 @@ const logger = createLogger({
     service: 'core',
     source: 'http',
   },
-  sink: (event) => {
-    if (cfg.TELEMETRY_CONSOLE_ENABLED) {
-      console.log(JSON.stringify(event));
-    }
-
-    if (cfg.TELEMETRY_ENABLED) {
-      telemetryFileSink(event);
-    }
-  },
+  sink: createTelemetrySink({
+    consoleEnabled: cfg.TELEMETRY_CONSOLE_ENABLED,
+    sinks: cfg.TELEMETRY_ENABLED ? [telemetryFileSink] : [],
+  }),
 });
 
 const asString = (value: unknown) =>
   Array.isArray(value) ? String(value[0]) : String(value ?? '');
 
-const requestContext = (req: Request): Partial<TraceContext> =>
-  (req as Request & { telemetryContext?: Partial<TraceContext> }).telemetryContext ?? {};
+const requestContext = (req: Request): Partial<TraceContext> => getTelemetryContext(req);
 
 const emit = (
   eventType: string,

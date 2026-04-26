@@ -1,11 +1,18 @@
 import { randomUUID } from 'node:crypto';
-import { appendFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
+import { appendFile, mkdir } from 'node:fs/promises';
 import { TelemetryEventSchema, type TraceContext, type TelemetryEvent } from '@versa/shared';
 
 type LegacyLogLevel = 'info' | 'error';
 type TelemetryLevel = 'debug' | 'info' | 'warn' | 'error';
 
 type TelemetrySink = (event: TelemetryEvent) => void;
+export type { TraceContext };
+
+type SinkOptions = {
+  consoleEnabled?: boolean;
+  sinks?: TelemetrySink[];
+};
 
 type TelemetryActor = {
   service: string;
@@ -47,8 +54,16 @@ const readHeaderValue = (
   key: string,
 ) => {
   const value = headers?.[key.toLowerCase()] ?? headers?.[key];
-  if (Array.isArray(value)) return value[0];
-  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    const first = value[0]?.trim();
+    return first ? first : undefined;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : undefined;
+  }
+
   return undefined;
 };
 
@@ -65,21 +80,70 @@ const consoleSink: TelemetrySink = (event) => {
 };
 
 export const createNdjsonFileSink = (path: string): TelemetrySink => {
-  return (event) => {
-    void appendFile(path, `${JSON.stringify(event)}\n`).catch((error) => {
-      console.error(
-        JSON.stringify({
-          level: 'error',
-          eventType: 'telemetry.sink.error',
-          message: 'failed to write telemetry event',
-          path,
-          error: (error as Error).message,
-          timestamp: new Date().toISOString(),
-        }),
-      );
+  let sinkDisabled = false;
+  let sinkErrorReported = false;
+
+  const ensureDirectoryReady = mkdir(dirname(path), { recursive: true })
+    .then(() => true)
+    .catch((error) => {
+      sinkDisabled = true;
+
+      if (!sinkErrorReported) {
+        sinkErrorReported = true;
+        console.error(
+          JSON.stringify({
+            level: 'error',
+            eventType: 'telemetry.sink.error',
+            message: 'failed to initialize telemetry sink directory',
+            path,
+            error: (error as Error).message,
+            timestamp: new Date().toISOString(),
+          }),
+        );
+      }
+
+      return false;
     });
+
+  return (event) => {
+    if (sinkDisabled) return;
+
+    void ensureDirectoryReady
+      .then((ready) => (ready ? appendFile(path, `${JSON.stringify(event)}\n`) : undefined))
+      .catch((error) => {
+        sinkDisabled = true;
+
+        if (!sinkErrorReported) {
+          sinkErrorReported = true;
+          console.error(
+            JSON.stringify({
+              level: 'error',
+              eventType: 'telemetry.sink.error',
+              message: 'failed to write telemetry event',
+              path,
+              error: (error as Error).message,
+              timestamp: new Date().toISOString(),
+            }),
+          );
+        }
+      });
   };
 };
+
+export const createTelemetrySink = ({ consoleEnabled = true, sinks = [] }: SinkOptions): TelemetrySink => {
+  return (event) => {
+    if (consoleEnabled) {
+      consoleSink(event);
+    }
+
+    sinks.forEach((sink) => sink(event));
+  };
+};
+
+export type TelemetryRequest = RequestLike;
+
+export const getTelemetryContext = (req: TelemetryRequest): Partial<TraceContext> =>
+  req.telemetryContext ?? {};
 
 export const createLogger = ({ actor, context = {}, sink = consoleSink }: LoggerOptions) => {
   const emit = ({ eventType, message, level = 'info', context: eventContext, attributes = {} }: TelemetryInput) => {

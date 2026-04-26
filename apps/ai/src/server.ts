@@ -4,6 +4,7 @@ import {
   createLogger,
   createNdjsonFileSink,
   createRequestTelemetryMiddleware,
+  createTelemetrySink,
 } from '@versa/logging';
 
 const app = express();
@@ -15,15 +16,10 @@ const logger = createLogger({
     service: 'ai',
     source: 'http',
   },
-  sink: (event) => {
-    if (cfg.TELEMETRY_CONSOLE_ENABLED) {
-      console.log(JSON.stringify(event));
-    }
-
-    if (cfg.TELEMETRY_ENABLED) {
-      telemetryFileSink(event);
-    }
-  },
+  sink: createTelemetrySink({
+    consoleEnabled: cfg.TELEMETRY_CONSOLE_ENABLED,
+    sinks: cfg.TELEMETRY_ENABLED ? [telemetryFileSink] : [],
+  }),
 });
 
 const capabilities = {

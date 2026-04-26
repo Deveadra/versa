@@ -318,6 +318,14 @@ app.get('/workspaces', (_req: Request, res: Response) => {
   res.json({ data: workspaceGateway.list() });
 });
 
+const workspaceSlugFromRequest = (req: Request): string => {
+  const wildcard = req.params[0];
+  if (typeof wildcard === 'string' && wildcard.length > 0) {
+    return decodeURIComponent(wildcard);
+  }
+  return decodeURIComponent(asString(req.params.slug));
+};
+
 app.post('/workspaces', (req: Request, res: Response) => {
   try {
     const workspace = workspaceGateway.create(req.body);
@@ -327,17 +335,17 @@ app.post('/workspaces', (req: Request, res: Response) => {
   }
 });
 
-app.get('/workspaces/:slug', (req: Request, res: Response) => {
-  const workspace = workspaceGateway.getBySlug(asString(req.params.slug));
+app.get('/workspaces/*', (req: Request, res: Response) => {
+  const workspace = workspaceGateway.getBySlug(workspaceSlugFromRequest(req));
   if (!workspace) {
     return res.status(404).json({ error: 'workspace not found' });
   }
   return res.json({ data: workspace });
 });
 
-app.patch('/workspaces/:slug/state', (req: Request, res: Response) => {
+app.patch('/workspaces/*/state', (req: Request, res: Response) => {
   try {
-    const workspace = workspaceGateway.updateState(asString(req.params.slug), req.body);
+    const workspace = workspaceGateway.updateState(workspaceSlugFromRequest(req), req.body);
     if (!workspace) {
       return res.status(404).json({ error: 'workspace not found' });
     }
@@ -347,17 +355,17 @@ app.patch('/workspaces/:slug/state', (req: Request, res: Response) => {
   }
 });
 
-app.post('/workspaces/:slug/activate', (req: Request, res: Response) => {
-  const workspace = workspaceGateway.activate(asString(req.params.slug));
+app.post('/workspaces/*/activate', (req: Request, res: Response) => {
+  const workspace = workspaceGateway.activate(workspaceSlugFromRequest(req));
   if (!workspace) {
     return res.status(404).json({ error: 'workspace not found' });
   }
   return res.json({ data: workspace });
 });
 
-app.post('/workspaces/:slug/checkpoints', (req: Request, res: Response) => {
+app.post('/workspaces/*/checkpoints', (req: Request, res: Response) => {
   try {
-    const checkpoint = workspaceGateway.checkpoint(asString(req.params.slug), req.body);
+    const checkpoint = workspaceGateway.checkpoint(workspaceSlugFromRequest(req), req.body);
     if (!checkpoint) {
       return res.status(404).json({ error: 'workspace not found' });
     }
@@ -367,15 +375,19 @@ app.post('/workspaces/:slug/checkpoints', (req: Request, res: Response) => {
   }
 });
 
-app.get('/workspaces/:slug/context', (req: Request, res: Response) => {
+app.get('/workspaces/*/context', (req: Request, res: Response) => {
   const rawLimit = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined;
   if (typeof req.query.limit === 'string' && !Number.isFinite(rawLimit)) {
     return res.status(400).json({ error: 'limit must be a valid number' });
   }
 
+  if (rawLimit !== undefined && rawLimit < 1) {
+    return res.status(400).json({ error: 'limit must be a positive number' });
+  }
+
   const context = workspaceGateway.getContextBundle(
-    asString(req.params.slug),
-    rawLimit ? Math.max(1, Math.floor(rawLimit)) : 5,
+    workspaceSlugFromRequest(req),
+    rawLimit !== undefined ? Math.floor(rawLimit) : 5,
   );
   if (!context) {
     return res.status(404).json({ error: 'workspace not found' });

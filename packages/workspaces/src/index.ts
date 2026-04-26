@@ -1,18 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import {
+  deriveWorkspaceSummary,
+  normalizeWorkspaceCheckpointLimit,
   WorkspaceCheckpointCreateRequestSchema,
   WorkspaceCheckpointSchema,
   WorkspaceContextBundleSchema,
   WorkspaceCreateRequestSchema,
   WorkspaceRecordSchema,
   WorkspaceStatePatchSchema,
-  WorkspaceSummarySchema,
   type WorkspaceCheckpoint,
   type WorkspaceCheckpointCreateRequest,
   type WorkspaceContextBundle,
   type WorkspaceCreateRequest,
   type WorkspaceRecord,
-  type WorkspaceState,
   type WorkspaceStatePatch,
   type WorkspaceSummary,
 } from '@versa/shared';
@@ -51,29 +51,7 @@ type InMemoryWorkspaceStore = {
   checkpoints: Map<string, WorkspaceCheckpoint[]>;
 };
 
-const toSummary = (workspace: WorkspaceRecord): WorkspaceSummary =>
-  WorkspaceSummarySchema.parse({
-    id: workspace.id,
-    slug: workspace.slug,
-    name: workspace.name,
-    currentObjective: workspace.state.currentObjective,
-    activeBlockerCount: workspace.state.activeBlockers.filter(
-      (b: WorkspaceState['activeBlockers'][number]) => b.status === 'active',
-    ).length,
-    nextActionCount: workspace.state.nextRecommendedActions.length,
-    updatedAt: workspace.metadata.updatedAt,
-    lastActivatedAt: workspace.metadata.lastActivatedAt,
-  });
-
-const patchState = (
-  current: WorkspaceState,
-  patch: WorkspaceStatePatch,
-  timestamp: string,
-): WorkspaceState => ({
-  ...current,
-  ...patch,
-  updatedAt: timestamp,
-});
+const toSummary = (workspace: WorkspaceRecord): WorkspaceSummary => deriveWorkspaceSummary(workspace);
 
 const createInMemoryStore = (): InMemoryWorkspaceStore => ({
   byId: new Map(),
@@ -141,7 +119,11 @@ const createInMemoryRepository = (
         ...current.metadata,
         updatedAt: timestamp,
       },
-      state: patchState(current.state, parsedPatch, timestamp),
+      state: {
+        ...current.state,
+        ...parsedPatch,
+        updatedAt: timestamp,
+      },
     });
 
     store.byId.set(workspaceId, updated);
@@ -172,12 +154,10 @@ const createInMemoryRepository = (
     if (!current) return null;
 
     const parsed = WorkspaceCheckpointCreateRequestSchema.parse(input);
-    const snapshot = parsed.snapshot
-      ? {
-          ...parsed.snapshot,
-          updatedAt: deps.now(),
-        }
-      : current.state;
+    const snapshot = {
+      ...(parsed.snapshot ?? current.state),
+      updatedAt: deps.now(),
+    };
 
     const checkpoint = WorkspaceCheckpointSchema.parse({
       id: deps.idFactory('wcp'),
@@ -196,7 +176,7 @@ const createInMemoryRepository = (
 
   listCheckpoints: (workspaceId: string, limit = 10): WorkspaceCheckpoint[] => {
     const list = store.checkpoints.get(workspaceId) ?? [];
-    return list.slice(0, Math.max(1, limit));
+    return list.slice(0, normalizeWorkspaceCheckpointLimit(limit, 10));
   },
 });
 

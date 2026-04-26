@@ -397,6 +397,25 @@ export const WorkspaceSummarySchema = z.object({
   lastActivatedAt: TimestampSchema.optional(),
 });
 
+export const normalizeWorkspaceCheckpointLimit = (limit?: number, fallback = 10) => {
+  const normalizedFallback = Number.isFinite(fallback) ? Math.max(1, Math.floor(fallback)) : 10;
+  if (limit === undefined) return normalizedFallback;
+  if (!Number.isFinite(limit)) return normalizedFallback;
+  return Math.max(1, Math.floor(limit));
+};
+
+export const deriveWorkspaceSummary = (workspace: WorkspaceRecord): WorkspaceSummary =>
+  WorkspaceSummarySchema.parse({
+    id: workspace.id,
+    slug: workspace.slug,
+    name: workspace.name,
+    currentObjective: workspace.state.currentObjective,
+    activeBlockerCount: workspace.state.activeBlockers.filter((b) => b.status === 'active').length,
+    nextActionCount: workspace.state.nextRecommendedActions.length,
+    updatedAt: workspace.metadata.updatedAt,
+    lastActivatedAt: workspace.metadata.lastActivatedAt,
+  });
+
 export const WorkspaceContextBundleSchema = z.object({
   workspace: WorkspaceRecordSchema,
   summary: WorkspaceSummarySchema,

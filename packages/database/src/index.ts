@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  deriveWorkspaceSummary,
   DomainEventSchema,
   MemoryConsolidationRequestSchema,
   MemoryReadRequestSchema,
@@ -15,6 +16,7 @@ import {
   WorkspaceRecordSchema,
   WorkspaceStatePatchSchema,
   WorkspaceSummarySchema,
+  normalizeWorkspaceCheckpointLimit,
   type MemoryConsolidationRequest,
   type MemoryReadRequest,
   type MemoryRecord,
@@ -523,18 +525,7 @@ export const workspaceRepo = (db: Database.Database) => ({
 
     return rows.map((row) => {
       const workspace = parseWorkspaceRow(row);
-      return WorkspaceSummarySchema.parse({
-        id: workspace.id,
-        slug: workspace.slug,
-        name: workspace.name,
-        currentObjective: workspace.state.currentObjective,
-        activeBlockerCount: workspace.state.activeBlockers.filter(
-          (b: WorkspaceRecord['state']['activeBlockers'][number]) => b.status === 'active',
-        ).length,
-        nextActionCount: workspace.state.nextRecommendedActions.length,
-        updatedAt: workspace.metadata.updatedAt,
-        lastActivatedAt: workspace.metadata.lastActivatedAt,
-      });
+      return WorkspaceSummarySchema.parse(deriveWorkspaceSummary(workspace));
     });
   },
 
@@ -660,7 +651,7 @@ export const workspaceRepo = (db: Database.Database) => ({
   },
 
   listCheckpoints: (workspaceId: string, limit = 10): WorkspaceCheckpoint[] => {
-    const parsedLimit = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 10;
+    const parsedLimit = normalizeWorkspaceCheckpointLimit(limit, 10);
     const rows = db
       .prepare(
         'SELECT * FROM workspace_checkpoints WHERE workspace_id = ? ORDER BY created_at DESC LIMIT ?',

@@ -11,6 +11,7 @@ import {
   scheduleRepo,
   studyRepo,
   taskRepo,
+  workspaceRepo,
 } from '@versa/database';
 import {
   createLogger,
@@ -20,6 +21,7 @@ import {
   getTelemetryContext,
 } from '@versa/logging';
 import { createMemoryGateway } from '@versa/memory';
+import { createWorkspaceGateway } from '@versa/workspaces';
 import { MemoryTierEnum, type TraceContext } from '@versa/shared';
 import { ZodError } from 'zod';
 import { generateDailyPlan } from './planner';
@@ -41,7 +43,9 @@ const schedules = scheduleRepo(db);
 const study = studyRepo(db);
 const jobs = jobRepo(db);
 const memories = memoryRepo(db);
+const workspaces = workspaceRepo(db);
 const memoryGateway = createMemoryGateway({ repository: memories });
+const workspaceGateway = createWorkspaceGateway({ repository: workspaces });
 const events = eventRepo(db);
 
 const telemetryFileSink = createNdjsonFileSink('artifacts/telemetry.ndjson');
@@ -308,6 +312,75 @@ app.get('/planner/today', (_req: Request, res: Response) => res.json({ data: get
 app.get('/events', (req: Request, res: Response) => {
   const limit = Number(req.query.limit ?? 100);
   res.json({ data: events.list(limit) });
+});
+
+app.get('/workspaces', (_req: Request, res: Response) => {
+  res.json({ data: workspaceGateway.list() });
+});
+
+app.post('/workspaces', (req: Request, res: Response) => {
+  try {
+    const workspace = workspaceGateway.create(req.body);
+    return res.status(201).json({ data: workspace });
+  } catch (error) {
+    return sendValidationError(res, error);
+  }
+});
+
+app.get('/workspaces/:slug', (req: Request, res: Response) => {
+  const workspace = workspaceGateway.getBySlug(asString(req.params.slug));
+  if (!workspace) {
+    return res.status(404).json({ error: 'workspace not found' });
+  }
+  return res.json({ data: workspace });
+});
+
+app.patch('/workspaces/:slug/state', (req: Request, res: Response) => {
+  try {
+    const workspace = workspaceGateway.updateState(asString(req.params.slug), req.body);
+    if (!workspace) {
+      return res.status(404).json({ error: 'workspace not found' });
+    }
+    return res.json({ data: workspace });
+  } catch (error) {
+    return sendValidationError(res, error);
+  }
+});
+
+app.post('/workspaces/:slug/activate', (req: Request, res: Response) => {
+  const workspace = workspaceGateway.activate(asString(req.params.slug));
+  if (!workspace) {
+    return res.status(404).json({ error: 'workspace not found' });
+  }
+  return res.json({ data: workspace });
+});
+
+app.post('/workspaces/:slug/checkpoints', (req: Request, res: Response) => {
+  try {
+    const checkpoint = workspaceGateway.checkpoint(asString(req.params.slug), req.body);
+    if (!checkpoint) {
+      return res.status(404).json({ error: 'workspace not found' });
+    }
+    return res.status(201).json({ data: checkpoint });
+  } catch (error) {
+    return sendValidationError(res, error);
+  }
+});
+
+app.get('/workspaces/:slug/context', (req: Request, res: Response) => {
+  const rawLimit = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined;
+  if (typeof req.query.limit === 'string' && !Number.isFinite(rawLimit)) {
+    return res.status(400).json({ error: 'limit must be a valid number' });
+  }
+
+  const context = workspaceGateway.getContextBundle(
+    asString(req.params.slug),
+    rawLimit ? Math.max(1, Math.floor(rawLimit)) : 5,
+  );
+  if (!context) {
+    return res.status(404).json({ error: 'workspace not found' });
+  }
+  return res.json({ data: context });
 });
 
 app.get('/memory', (req: Request, res: Response) => {

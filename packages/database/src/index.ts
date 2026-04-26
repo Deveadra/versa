@@ -9,10 +9,22 @@ import {
   MemoryReadRequestSchema,
   MemoryRecordSchema,
   MemoryWriteRequestSchema,
+  WorkspaceCheckpointCreateRequestSchema,
+  WorkspaceCheckpointSchema,
+  WorkspaceCreateRequestSchema,
+  WorkspaceRecordSchema,
+  WorkspaceStatePatchSchema,
+  WorkspaceSummarySchema,
   type MemoryConsolidationRequest,
   type MemoryReadRequest,
   type MemoryRecord,
   type MemoryWriteRequest,
+  type WorkspaceCheckpoint,
+  type WorkspaceCheckpointCreateRequest,
+  type WorkspaceCreateRequest,
+  type WorkspaceRecord,
+  type WorkspaceStatePatch,
+  type WorkspaceSummary,
 } from '@versa/shared';
 
 const defaultDbPath = path.resolve(
@@ -435,6 +447,227 @@ export const memoryRepo = (db: Database.Database) => ({
         },
       },
     });
+  },
+});
+
+const parseWorkspaceRow = (row: Record<string, unknown>): WorkspaceRecord =>
+  WorkspaceRecordSchema.parse({
+    id: row.id,
+    slug: row.slug,
+    name: row.name,
+    repository: row.repository ?? undefined,
+    metadata: JSON.parse(String(row.metadata_json)),
+    state: JSON.parse(String(row.state_json)),
+  });
+
+const parseWorkspaceCheckpointRow = (row: Record<string, unknown>): WorkspaceCheckpoint =>
+  WorkspaceCheckpointSchema.parse({
+    id: row.id,
+    workspaceId: row.workspace_id,
+    summary: row.summary,
+    snapshot: JSON.parse(String(row.snapshot_json)),
+    createdAt: row.created_at,
+    createdBy: row.created_by,
+  });
+
+export const workspaceRepo = (db: Database.Database) => ({
+  create: (input: WorkspaceCreateRequest): WorkspaceRecord => {
+    const parsed = WorkspaceCreateRequestSchema.parse(input);
+    const existing = db.prepare('SELECT id FROM workspaces WHERE slug = ?').get(parsed.slug);
+    if (existing) {
+      throw new Error(`workspace slug already exists: ${parsed.slug}`);
+    }
+
+    const timestamp = now();
+    const record = WorkspaceRecordSchema.parse({
+      id: id('wrk'),
+      slug: parsed.slug,
+      name: parsed.name,
+      repository: parsed.repository,
+      metadata: {
+        owner: parsed.metadata.owner,
+        tags: parsed.metadata.tags ?? [],
+        source: parsed.metadata.source ?? 'manual',
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        lastActivatedAt: parsed.metadata.lastActivatedAt,
+      },
+      state: {
+        ...parsed.state,
+        updatedAt: timestamp,
+      },
+    });
+
+    db.prepare(
+      `INSERT INTO workspaces (id,slug,name,repository,metadata_json,state_json,created_at,updated_at,last_activated_at)
+       VALUES (@id,@slug,@name,@repository,@metadata_json,@state_json,@created_at,@updated_at,@last_activated_at)`,
+    ).run({
+      id: record.id,
+      slug: record.slug,
+      name: record.name,
+      repository: record.repository ?? null,
+      metadata_json: JSON.stringify(record.metadata),
+      state_json: JSON.stringify(record.state),
+      created_at: record.metadata.createdAt,
+      updated_at: record.metadata.updatedAt,
+      last_activated_at: record.metadata.lastActivatedAt ?? null,
+    });
+
+    return record;
+  },
+
+  list: (): WorkspaceSummary[] => {
+    const rows = db
+      .prepare('SELECT * FROM workspaces ORDER BY updated_at DESC')
+      .all() as Array<Record<string, unknown>>;
+
+    return rows.map((row) => {
+      const workspace = parseWorkspaceRow(row);
+      return WorkspaceSummarySchema.parse({
+        id: workspace.id,
+        slug: workspace.slug,
+        name: workspace.name,
+        currentObjective: workspace.state.currentObjective,
+        activeBlockerCount: workspace.state.activeBlockers.filter(
+          (b: WorkspaceRecord['state']['activeBlockers'][number]) => b.status === 'active',
+        ).length,
+        nextActionCount: workspace.state.nextRecommendedActions.length,
+        updatedAt: workspace.metadata.updatedAt,
+        lastActivatedAt: workspace.metadata.lastActivatedAt,
+      });
+    });
+  },
+
+  getBySlug: (slug: string): WorkspaceRecord | null => {
+    const row = db.prepare('SELECT * FROM workspaces WHERE slug = ?').get(slug) as
+      | Record<string, unknown>
+      | undefined;
+    if (!row) return null;
+    return parseWorkspaceRow(row);
+  },
+
+  updateState: (workspaceId: string, patch: WorkspaceStatePatch): WorkspaceRecord | null => {
+    const currentRow = db.prepare('SELECT * FROM workspaces WHERE id = ?').get(workspaceId) as
+      | Record<string, unknown>
+      | undefined;
+    if (!currentRow) return null;
+
+    const parsedPatch = WorkspaceStatePatchSchema.parse(patch);
+    const current = parseWorkspaceRow(currentRow);
+    const timestamp = now();
+    const updated = WorkspaceRecordSchema.parse({
+      ...current,
+      metadata: {
+        ...current.metadata,
+        updatedAt: timestamp,
+      },
+      state: {
+        ...current.state,
+        ...parsedPatch,
+        updatedAt: timestamp,
+      },
+    });
+
+    db.prepare(
+      `UPDATE workspaces
+       SET state_json = @state_json,
+           metadata_json = @metadata_json,
+           updated_at = @updated_at,
+           last_activated_at = @last_activated_at
+       WHERE id = @id`,
+    ).run({
+      id: updated.id,
+      state_json: JSON.stringify(updated.state),
+      metadata_json: JSON.stringify(updated.metadata),
+      updated_at: updated.metadata.updatedAt,
+      last_activated_at: updated.metadata.lastActivatedAt ?? null,
+    });
+
+    return updated;
+  },
+
+  setActivated: (workspaceId: string): WorkspaceRecord | null => {
+    const currentRow = db.prepare('SELECT * FROM workspaces WHERE id = ?').get(workspaceId) as
+      | Record<string, unknown>
+      | undefined;
+    if (!currentRow) return null;
+
+    const current = parseWorkspaceRow(currentRow);
+    const timestamp = now();
+    const updated = WorkspaceRecordSchema.parse({
+      ...current,
+      metadata: {
+        ...current.metadata,
+        updatedAt: timestamp,
+        lastActivatedAt: timestamp,
+      },
+    });
+
+    db.prepare(
+      `UPDATE workspaces
+       SET metadata_json = @metadata_json,
+           updated_at = @updated_at,
+           last_activated_at = @last_activated_at
+       WHERE id = @id`,
+    ).run({
+      id: updated.id,
+      metadata_json: JSON.stringify(updated.metadata),
+      updated_at: updated.metadata.updatedAt,
+      last_activated_at: updated.metadata.lastActivatedAt ?? null,
+    });
+
+    return updated;
+  },
+
+  createCheckpoint: (
+    workspaceId: string,
+    input: WorkspaceCheckpointCreateRequest,
+  ): WorkspaceCheckpoint | null => {
+    const currentRow = db.prepare('SELECT * FROM workspaces WHERE id = ?').get(workspaceId) as
+      | Record<string, unknown>
+      | undefined;
+    if (!currentRow) return null;
+
+    const current = parseWorkspaceRow(currentRow);
+    const parsed = WorkspaceCheckpointCreateRequestSchema.parse(input);
+    const snapshot = {
+      ...(parsed.snapshot ?? current.state),
+      updatedAt: now(),
+    };
+
+    const checkpoint = WorkspaceCheckpointSchema.parse({
+      id: id('wcp'),
+      workspaceId,
+      summary: parsed.summary,
+      snapshot,
+      createdAt: now(),
+      createdBy: parsed.createdBy,
+    });
+
+    db.prepare(
+      `INSERT INTO workspace_checkpoints (id,workspace_id,summary,snapshot_json,created_at,created_by)
+       VALUES (@id,@workspace_id,@summary,@snapshot_json,@created_at,@created_by)`,
+    ).run({
+      id: checkpoint.id,
+      workspace_id: checkpoint.workspaceId,
+      summary: checkpoint.summary,
+      snapshot_json: JSON.stringify(checkpoint.snapshot),
+      created_at: checkpoint.createdAt,
+      created_by: checkpoint.createdBy,
+    });
+
+    return checkpoint;
+  },
+
+  listCheckpoints: (workspaceId: string, limit = 10): WorkspaceCheckpoint[] => {
+    const parsedLimit = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 10;
+    const rows = db
+      .prepare(
+        'SELECT * FROM workspace_checkpoints WHERE workspace_id = ? ORDER BY created_at DESC LIMIT ?',
+      )
+      .all(workspaceId, parsedLimit) as Array<Record<string, unknown>>;
+
+    return rows.map(parseWorkspaceCheckpointRow);
   },
 });
 

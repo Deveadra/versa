@@ -71,6 +71,9 @@ importers:
       '@versa/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@versa/workspaces':
+        specifier: workspace:*
+        version: link:../../packages/workspaces
       cors:
         specifier: ^2.8.5
         version: 2.8.6
@@ -146,6 +149,12 @@ importers:
   packages/testing: {}
 
   packages/ui: {}
+
+  packages/workspaces:
+    dependencies:
+      '@versa/shared':
+        specifier: workspace:*
+        version: link:../shared
 
 packages:
 

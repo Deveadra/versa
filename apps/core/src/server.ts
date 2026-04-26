@@ -7,6 +7,7 @@ import {
   eventRepo,
   goalRepo,
   jobRepo,
+  memoryRepo,
   scheduleRepo,
   studyRepo,
   taskRepo,
@@ -18,6 +19,7 @@ import {
   createTelemetrySink,
   getTelemetryContext,
 } from '@versa/logging';
+import { createMemoryGateway } from '@versa/memory';
 import type { TraceContext } from '@versa/shared';
 import { generateDailyPlan } from './planner';
 
@@ -37,6 +39,8 @@ const goals = goalRepo(db);
 const schedules = scheduleRepo(db);
 const study = studyRepo(db);
 const jobs = jobRepo(db);
+const memories = memoryRepo(db);
+const memoryGateway = createMemoryGateway({ repository: memories });
 const events = eventRepo(db);
 
 const telemetryFileSink = createNdjsonFileSink('artifacts/telemetry.ndjson');
@@ -290,6 +294,59 @@ app.get('/planner/today', (_req: Request, res: Response) => res.json({ data: get
 app.get('/events', (req: Request, res: Response) => {
   const limit = Number(req.query.limit ?? 100);
   res.json({ data: events.list(limit) });
+});
+
+app.get('/memory', (req: Request, res: Response) => {
+  const queryText = typeof req.query.q === 'string' ? req.query.q : undefined;
+  const tier = typeof req.query.tier === 'string' ? req.query.tier : undefined;
+  const minConfidence =
+    typeof req.query.minConfidence === 'string' ? Number(req.query.minConfidence) : undefined;
+  const limit = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined;
+
+  const data = memoryGateway.read({
+    text: queryText,
+    tiers: tier ? [tier as 'session' | 'episodic' | 'semantic' | 'procedural'] : undefined,
+    minConfidence: Number.isFinite(minConfidence) ? minConfidence : undefined,
+    limit: Number.isFinite(limit) && limit ? limit : 20,
+  });
+
+  res.json({ data });
+});
+
+app.post('/memory', (req: Request, res: Response) => {
+  const memory = memoryGateway.write(req.body);
+  emit(
+    'memory.note.recorded',
+    'memory',
+    String(memory.id),
+    {
+      tier: memory.tier,
+      confidence: memory.metadata.confidence,
+      source: memory.metadata.source,
+    },
+    'core',
+    requestContext(req),
+  );
+
+  res.status(201).json({ data: memory });
+});
+
+app.post('/memory/consolidate', (req: Request, res: Response) => {
+  const result = memoryGateway.consolidate(req.body);
+  emit(
+    'memory.note.recorded',
+    'memory',
+    String(result.promotedMemory.id),
+    {
+      tier: result.promotedMemory.tier,
+      linkedSourceCount: result.linkedSourceCount,
+      sourceMemoryIds: result.promotedMemory.metadata.provenance.sourceMemoryIds ?? [],
+    },
+    'core',
+    requestContext(req),
+  );
+
+  res.status(201).json({ data: result });
 });
 
 app.post('/quick-capture', (req: Request, res: Response) => {

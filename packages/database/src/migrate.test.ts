@@ -35,6 +35,12 @@ describe('migration smoke', () => {
 
     expect(row?.name).toBe('tasks');
 
+    const memoryRow = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='memories'")
+      .get() as { name: string } | undefined;
+
+    expect(memoryRow?.name).toBe('memories');
+
     db.close();
   });
 });

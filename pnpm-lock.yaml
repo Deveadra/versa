@@ -65,6 +65,9 @@ importers:
       '@versa/logging':
         specifier: workspace:*
         version: link:../../packages/logging
+      '@versa/memory':
+        specifier: workspace:*
+        version: link:../../packages/memory
       '@versa/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -121,6 +124,12 @@ importers:
   packages/integrations: {}
 
   packages/logging:
+    dependencies:
+      '@versa/shared':
+        specifier: workspace:*
+        version: link:../shared
+
+  packages/memory:
     dependencies:
       '@versa/shared':
         specifier: workspace:*

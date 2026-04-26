@@ -8,8 +8,8 @@ Execute this task card only. Stay in scope. Read the issue and task card first, 
 
 ---
 
-Issue: `https://github.com/Deveadra/versa/issues/48`
-Task card: docs/task-cards/active/ws03-issue-48-identity-doctrine.md
+Issue: `https://github.com/Deveadra/versa/issues/49`
+Task card: docs/task-cards/active/ws04-issue-49-memory-gateway.md
 
 You are operating in Versa Executor mode for the `versa` repository.
 

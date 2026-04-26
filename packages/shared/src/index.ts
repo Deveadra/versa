@@ -213,9 +213,75 @@ export const TelemetryEventSchema = z.object({
   attributes: z.record(z.any()).default({}),
 });
 
+export const DoctrineDecisionPriorityEnum = z.enum([
+  'operator_safety',
+  'mission_alignment',
+  'truthfulness',
+  'user_intent',
+  'reversibility',
+  'execution_speed',
+]);
+
+export const DoctrineEscalationSeverityEnum = z.enum(['low', 'medium', 'high', 'critical']);
+
+export const DoctrineResponseStyleSchema = z.object({
+  tone: z.string().min(1),
+  verbosity: z.enum(['minimal', 'concise', 'detailed']).default('concise'),
+  markdownRequired: z.boolean().default(true),
+  citationStyle: z.enum(['repo-link', 'none']).default('repo-link'),
+  forbiddenPhrases: z.array(z.string()).default([]),
+});
+
+export const DoctrineEscalationRuleSchema = z.object({
+  id: z.string().min(1),
+  condition: z.string().min(1),
+  severity: DoctrineEscalationSeverityEnum,
+  action: z.string().min(1),
+});
+
+export const DoctrineAutonomyBoundarySchema = z.object({
+  action: z.string().min(1),
+  requiresApproval: z.boolean(),
+  rationale: z.string().min(1),
+});
+
+export const DoctrineSafetyRuleSchema = z.object({
+  id: z.string().min(1),
+  rule: z.string().min(1),
+  rationale: z.string().min(1),
+});
+
+export const DoctrineSchema = z.object({
+  doctrineId: z.string().min(1),
+  version: z.string().min(1),
+  mission: z.string().min(1),
+  operatorPrinciples: z.array(z.string().min(1)).min(1),
+  responseStyle: DoctrineResponseStyleSchema,
+  decisionPriorities: z.array(DoctrineDecisionPriorityEnum).min(1),
+  escalationRules: z.array(DoctrineEscalationRuleSchema).default([]),
+  autonomyBoundaries: z.array(DoctrineAutonomyBoundarySchema).default([]),
+  safetyNoGoActions: z.array(DoctrineSafetyRuleSchema).min(1),
+  ownership: z.object({
+    team: z.string().min(1),
+    maintainers: z.array(z.string().min(1)).min(1),
+  }),
+  metadata: z.object({
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+    changeSummary: z.string().optional(),
+  }),
+});
+
 export type Task = z.infer<typeof TaskSchema>;
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
 export type TraceContext = z.infer<typeof TraceContextSchema>;
 export type TelemetryActor = z.infer<typeof TelemetryActorSchema>;
 export type TelemetryLevel = z.infer<typeof TelemetryLevelEnum>;
 export type TelemetryEvent = z.infer<typeof TelemetryEventSchema>;
+export type DoctrineDecisionPriority = z.infer<typeof DoctrineDecisionPriorityEnum>;
+export type DoctrineEscalationSeverity = z.infer<typeof DoctrineEscalationSeverityEnum>;
+export type DoctrineResponseStyle = z.infer<typeof DoctrineResponseStyleSchema>;
+export type DoctrineEscalationRule = z.infer<typeof DoctrineEscalationRuleSchema>;
+export type DoctrineAutonomyBoundary = z.infer<typeof DoctrineAutonomyBoundarySchema>;
+export type DoctrineSafetyRule = z.infer<typeof DoctrineSafetyRuleSchema>;
+export type Doctrine = z.infer<typeof DoctrineSchema>;

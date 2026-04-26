@@ -11,8 +11,23 @@ import {
   studyRepo,
   taskRepo,
 } from '@versa/database';
-import { log } from '@versa/logging';
+import {
+  createLogger,
+  createNdjsonFileSink,
+  createRequestTelemetryMiddleware,
+  createTelemetrySink,
+  getTelemetryContext,
+} from '@versa/logging';
+import type { TraceContext } from '@versa/shared';
 import { generateDailyPlan } from './planner';
+
+declare global {
+  namespace Express {
+    interface Request {
+      telemetryContext?: Partial<TraceContext>;
+    }
+  }
+}
 
 const app = express();
 const cfg = loadConfig();
@@ -24,8 +39,22 @@ const study = studyRepo(db);
 const jobs = jobRepo(db);
 const events = eventRepo(db);
 
+const telemetryFileSink = createNdjsonFileSink('artifacts/telemetry.ndjson');
+const logger = createLogger({
+  actor: {
+    service: 'core',
+    source: 'http',
+  },
+  sink: createTelemetrySink({
+    consoleEnabled: cfg.TELEMETRY_CONSOLE_ENABLED,
+    sinks: cfg.TELEMETRY_ENABLED ? [telemetryFileSink] : [],
+  }),
+});
+
 const asString = (value: unknown) =>
   Array.isArray(value) ? String(value[0]) : String(value ?? '');
+
+const requestContext = (req: Request): Partial<TraceContext> => getTelemetryContext(req);
 
 const emit = (
   eventType: string,
@@ -33,6 +62,7 @@ const emit = (
   entityId: string,
   payload: Record<string, unknown>,
   domain: 'core' | 'study' | 'jobs' = 'core',
+  context: Partial<TraceContext> = {},
 ) => {
   events.record({
     eventId: `evt_${randomUUID().slice(0, 8)}`,
@@ -43,8 +73,20 @@ const emit = (
     entityRef: { type: entityType, id: entityId },
     payload,
     sensitivity: 'internal',
-    traceId: randomUUID(),
+    traceId: context.traceId ?? randomUUID(),
   });
+
+  logger.info(
+    'domain.event.recorded',
+    'domain event recorded',
+    {
+      eventType,
+      entityType,
+      entityId,
+      domain,
+    },
+    context,
+  );
 };
 
 const getDailyPlan = () => {
@@ -76,6 +118,7 @@ const getDailyPlan = () => {
 
 app.use(cors());
 app.use(express.json());
+app.use(createRequestTelemetryMiddleware(logger));
 
 app.get('/health', (_req: Request, res: Response) => res.json({ ok: true }));
 
@@ -86,7 +129,7 @@ app.get('/tasks', (req: Request, res: Response) => {
 
 app.post('/tasks', (req: Request, res: Response) => {
   const task = tasks.create(req.body as Record<string, unknown> as any);
-  emit('task.created', 'task', String(task.id), { title: task.title });
+  emit('task.created', 'task', String(task.id), { title: task.title }, 'core', requestContext(req));
   res.status(201).json({ data: task });
 });
 
@@ -95,20 +138,27 @@ app.patch('/tasks/:taskId', (req: Request, res: Response) => {
   if (!updated) return res.status(404).json({ error: 'task not found' });
   const eventType =
     (updated as Record<string, unknown>).status === 'done' ? 'task.completed' : 'task.updated';
-  emit(eventType, 'task', asString(req.params.taskId), req.body as Record<string, unknown>);
+  emit(
+    eventType,
+    'task',
+    asString(req.params.taskId),
+    req.body as Record<string, unknown>,
+    'core',
+    requestContext(req),
+  );
   return res.json({ data: updated });
 });
 
 app.delete('/tasks/:taskId', (req: Request, res: Response) => {
   tasks.remove(asString(req.params.taskId));
-  emit('task.archived', 'task', asString(req.params.taskId), {});
+  emit('task.archived', 'task', asString(req.params.taskId), {}, 'core', requestContext(req));
   res.status(204).send();
 });
 
 app.get('/goals', (_req: Request, res: Response) => res.json({ data: goals.list() }));
 app.post('/goals', (req: Request, res: Response) => {
   const goal = goals.create(req.body);
-  emit('goal.created', 'goal', String(goal.id), { title: goal.title });
+  emit('goal.created', 'goal', String(goal.id), { title: goal.title }, 'core', requestContext(req));
   res.status(201).json({ data: goal });
 });
 app.patch('/goals/:goalId', (req: Request, res: Response) => {
@@ -119,6 +169,8 @@ app.patch('/goals/:goalId', (req: Request, res: Response) => {
     'goal',
     asString(req.params.goalId),
     req.body as Record<string, unknown>,
+    'core',
+    requestContext(req),
   );
   return res.json({ data: updated });
 });
@@ -131,7 +183,14 @@ app.get('/schedule', (req: Request, res: Response) => {
 app.post('/schedule', (req: Request, res: Response) => {
   try {
     const block = schedules.create(req.body);
-    emit('schedule.block.created', 'schedule_block', String(block.id), { title: block.title });
+    emit(
+      'schedule.block.created',
+      'schedule_block',
+      String(block.id),
+      { title: block.title },
+      'core',
+      requestContext(req),
+    );
     res.status(201).json({ data: block });
   } catch (error) {
     res.status(400).json({ error: (error as Error).message });
@@ -149,6 +208,8 @@ app.patch('/schedule/:blockId/status', (req: Request, res: Response) => {
     'schedule_block',
     asString(req.params.blockId),
     { status },
+    'core',
+    requestContext(req),
   );
   res.json({ ok: true });
 });
@@ -158,7 +219,14 @@ app.get('/study/assignments', (_req: Request, res: Response) =>
 );
 app.post('/study/courses', (req: Request, res: Response) => {
   const course = study.createCourse(String(req.body.title));
-  emit('study.course.created', 'study_course', String(course.id), { title: course.title }, 'study');
+  emit(
+    'study.course.created',
+    'study_course',
+    String(course.id),
+    { title: course.title },
+    'study',
+    requestContext(req),
+  );
   res.status(201).json({ data: course });
 });
 app.post('/study/assignments', (req: Request, res: Response) => {
@@ -173,6 +241,7 @@ app.post('/study/assignments', (req: Request, res: Response) => {
     String(assignment.id),
     { title: assignment.title },
     'study',
+    requestContext(req),
   );
   res.status(201).json({ data: assignment });
 });
@@ -184,6 +253,7 @@ app.patch('/study/assignments/:assignmentId/complete', (req: Request, res: Respo
     asString(req.params.assignmentId),
     {},
     'study',
+    requestContext(req),
   );
   res.json({ ok: true });
 });
@@ -193,7 +263,14 @@ app.get('/jobs', (_req: Request, res: Response) =>
 );
 app.post('/jobs/leads', (req: Request, res: Response) => {
   const lead = jobs.createLead(String(req.body.company), String(req.body.role));
-  emit('job.lead.created', 'job_lead', String(lead.id), { company: lead.company }, 'jobs');
+  emit(
+    'job.lead.created',
+    'job_lead',
+    String(lead.id),
+    { company: lead.company },
+    'jobs',
+    requestContext(req),
+  );
   res.status(201).json({ data: lead });
 });
 app.post('/jobs/leads/:leadId/convert', (req: Request, res: Response) => {
@@ -204,6 +281,7 @@ app.post('/jobs/leads/:leadId/convert', (req: Request, res: Response) => {
     String(application.id),
     { leadId: asString(req.params.leadId) },
     'jobs',
+    requestContext(req),
   );
   res.status(201).json({ data: application });
 });
@@ -247,6 +325,18 @@ app.get('/ai/health', async (_req: Request, res: Response) => {
   }
 });
 
-app.listen(cfg.CORE_PORT, () => {
-  log('info', 'core.started', { port: cfg.CORE_PORT });
+const server = app.listen(cfg.CORE_PORT, () => {
+  logger.info('app.started', 'core server started', {
+    port: cfg.CORE_PORT,
+  });
 });
+
+const handleShutdown = (signal: string) => {
+  logger.info('app.shutdown.requested', 'core shutdown requested', { signal });
+  server.close(() => {
+    logger.info('app.stopped', 'core server stopped', { signal });
+  });
+};
+
+process.once('SIGINT', () => handleShutdown('SIGINT'));
+process.once('SIGTERM', () => handleShutdown('SIGTERM'));

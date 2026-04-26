@@ -186,5 +186,36 @@ export const DomainEventSchema = z.object({
   traceId: z.string(),
 });
 
+export const TelemetryLevelEnum = z.enum(['debug', 'info', 'warn', 'error']);
+
+export const TraceContextSchema = z.object({
+  traceId: z.string().min(1),
+  correlationId: z.string().min(1).optional(),
+  runId: z.string().min(1).optional(),
+  requestId: z.string().min(1).optional(),
+  parentTraceId: z.string().min(1).optional(),
+});
+
+export const TelemetryActorSchema = z.object({
+  service: z.string().min(1),
+  source: z.string().min(1),
+  actorId: z.string().min(1).optional(),
+});
+
+export const TelemetryEventSchema = z.object({
+  eventId: IdSchema,
+  eventType: z.string().min(1),
+  level: TelemetryLevelEnum,
+  message: z.string().min(1),
+  timestamp: TimestampSchema,
+  actor: TelemetryActorSchema,
+  context: TraceContextSchema,
+  attributes: z.record(z.any()).default({}),
+});
+
 export type Task = z.infer<typeof TaskSchema>;
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
+export type TraceContext = z.infer<typeof TraceContextSchema>;
+export type TelemetryActor = z.infer<typeof TelemetryActorSchema>;
+export type TelemetryLevel = z.infer<typeof TelemetryLevelEnum>;
+export type TelemetryEvent = z.infer<typeof TelemetryEventSchema>;

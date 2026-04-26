@@ -41,6 +41,18 @@ describe('migration smoke', () => {
 
     expect(memoryRow?.name).toBe('memories');
 
+    const workspaceRow = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='workspaces'")
+      .get() as { name: string } | undefined;
+
+    expect(workspaceRow?.name).toBe('workspaces');
+
+    const workspaceCheckpointRow = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='workspace_checkpoints'")
+      .get() as { name: string } | undefined;
+
+    expect(workspaceCheckpointRow?.name).toBe('workspace_checkpoints');
+
     db.close();
   });
 });

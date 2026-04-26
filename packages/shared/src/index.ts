@@ -272,6 +272,156 @@ export const DoctrineSchema = z.object({
   }),
 });
 
+export const WorkspaceBlockerStatusEnum = z.enum(['active', 'mitigated', 'resolved']);
+
+export const WorkspaceBlockerSchema = z.object({
+  description: z.string().min(1),
+  status: WorkspaceBlockerStatusEnum.default('active'),
+  owner: z.string().min(1).optional(),
+  notes: z.string().optional(),
+});
+
+export const WorkspaceDecisionSchema = z.object({
+  summary: z.string().min(1),
+  rationale: z.string().optional(),
+  decidedAt: TimestampSchema,
+});
+
+export const WorkspaceFileReferenceSchema = z.object({
+  path: z.string().min(1),
+  reason: z.string().optional(),
+});
+
+export const WorkspaceCommandReferenceSchema = z.object({
+  command: z.string().min(1),
+  description: z.string().optional(),
+});
+
+export const WorkspaceProcedureSchema = z.object({
+  name: z.string().min(1),
+  command: z.string().min(1),
+  validatedAt: TimestampSchema.optional(),
+  notes: z.string().optional(),
+});
+
+export const WorkspaceRecommendedActionSchema = z.object({
+  action: z.string().min(1),
+  priority: PriorityEnum.default('medium'),
+  rationale: z.string().optional(),
+});
+
+export const WorkspaceStateSchema = z.object({
+  currentObjective: z.string().min(1),
+  activeBlockers: z.array(WorkspaceBlockerSchema).default([]),
+  recentDecisions: z.array(WorkspaceDecisionSchema).default([]),
+  importantFiles: z.array(WorkspaceFileReferenceSchema).default([]),
+  knownCommands: z.array(WorkspaceCommandReferenceSchema).default([]),
+  validatedProcedures: z.array(WorkspaceProcedureSchema).default([]),
+  nextRecommendedActions: z.array(WorkspaceRecommendedActionSchema).default([]),
+  updatedAt: TimestampSchema,
+});
+
+export const WorkspaceStatePatchSchema = z
+  .object({
+    currentObjective: z.string().min(1).optional(),
+    activeBlockers: z.array(WorkspaceBlockerSchema).optional(),
+    recentDecisions: z.array(WorkspaceDecisionSchema).optional(),
+    importantFiles: z.array(WorkspaceFileReferenceSchema).optional(),
+    knownCommands: z.array(WorkspaceCommandReferenceSchema).optional(),
+    validatedProcedures: z.array(WorkspaceProcedureSchema).optional(),
+    nextRecommendedActions: z.array(WorkspaceRecommendedActionSchema).optional(),
+  })
+  .refine((input) => Object.values(input).some((value) => value !== undefined), {
+    message: 'at least one workspace state field must be provided',
+  });
+
+export const WorkspaceMetadataSchema = z.object({
+  owner: z.string().min(1).optional(),
+  tags: z.array(z.string().min(1)).default([]),
+  source: SourceEnum.default('manual'),
+  createdAt: TimestampSchema,
+  updatedAt: TimestampSchema,
+  lastActivatedAt: TimestampSchema.optional(),
+});
+
+export const WorkspaceIdentitySchema = z.object({
+  id: IdSchema,
+  slug: z.string().min(2).regex(/^[a-z0-9][a-z0-9._/-]*$/),
+  name: z.string().min(1),
+  repository: z.string().min(1).optional(),
+});
+
+export const WorkspaceRecordSchema = WorkspaceIdentitySchema.extend({
+  metadata: WorkspaceMetadataSchema,
+  state: WorkspaceStateSchema,
+});
+
+export const WorkspaceCreateRequestSchema = z.object({
+  slug: WorkspaceIdentitySchema.shape.slug,
+  name: WorkspaceIdentitySchema.shape.name,
+  repository: WorkspaceIdentitySchema.shape.repository,
+  metadata: z
+    .object({
+      owner: WorkspaceMetadataSchema.shape.owner,
+      tags: WorkspaceMetadataSchema.shape.tags,
+      source: WorkspaceMetadataSchema.shape.source,
+      lastActivatedAt: WorkspaceMetadataSchema.shape.lastActivatedAt,
+    })
+    .default({}),
+  state: WorkspaceStateSchema.omit({ updatedAt: true }),
+});
+
+export const WorkspaceCheckpointSchema = z.object({
+  id: IdSchema,
+  workspaceId: IdSchema,
+  summary: z.string().min(1),
+  snapshot: WorkspaceStateSchema,
+  createdAt: TimestampSchema,
+  createdBy: z.string().min(1),
+});
+
+export const WorkspaceCheckpointCreateRequestSchema = z.object({
+  summary: z.string().min(1),
+  createdBy: z.string().min(1),
+  snapshot: WorkspaceStateSchema.omit({ updatedAt: true }).optional(),
+});
+
+export const WorkspaceSummarySchema = z.object({
+  id: IdSchema,
+  slug: WorkspaceIdentitySchema.shape.slug,
+  name: WorkspaceIdentitySchema.shape.name,
+  currentObjective: z.string().min(1),
+  activeBlockerCount: z.number().int().min(0),
+  nextActionCount: z.number().int().min(0),
+  updatedAt: TimestampSchema,
+  lastActivatedAt: TimestampSchema.optional(),
+});
+
+export const normalizeWorkspaceCheckpointLimit = (limit?: number, fallback = 10) => {
+  const normalizedFallback = Number.isFinite(fallback) ? Math.max(1, Math.floor(fallback)) : 10;
+  if (limit === undefined) return normalizedFallback;
+  if (!Number.isFinite(limit)) return normalizedFallback;
+  return Math.max(1, Math.floor(limit));
+};
+
+export const deriveWorkspaceSummary = (workspace: WorkspaceRecord): WorkspaceSummary =>
+  WorkspaceSummarySchema.parse({
+    id: workspace.id,
+    slug: workspace.slug,
+    name: workspace.name,
+    currentObjective: workspace.state.currentObjective,
+    activeBlockerCount: workspace.state.activeBlockers.filter((b) => b.status === 'active').length,
+    nextActionCount: workspace.state.nextRecommendedActions.length,
+    updatedAt: workspace.metadata.updatedAt,
+    lastActivatedAt: workspace.metadata.lastActivatedAt,
+  });
+
+export const WorkspaceContextBundleSchema = z.object({
+  workspace: WorkspaceRecordSchema,
+  summary: WorkspaceSummarySchema,
+  recentCheckpoints: z.array(WorkspaceCheckpointSchema).default([]),
+});
+
 export const MemoryTierEnum = z.enum(['session', 'episodic', 'semantic', 'procedural']);
 export const MemoryRetentionStrategyEnum = z.enum(['session', 'ttl', 'durable']);
 
@@ -351,6 +501,25 @@ export type DoctrineEscalationRule = z.infer<typeof DoctrineEscalationRuleSchema
 export type DoctrineAutonomyBoundary = z.infer<typeof DoctrineAutonomyBoundarySchema>;
 export type DoctrineSafetyRule = z.infer<typeof DoctrineSafetyRuleSchema>;
 export type Doctrine = z.infer<typeof DoctrineSchema>;
+export type WorkspaceBlockerStatus = z.infer<typeof WorkspaceBlockerStatusEnum>;
+export type WorkspaceBlocker = z.infer<typeof WorkspaceBlockerSchema>;
+export type WorkspaceDecision = z.infer<typeof WorkspaceDecisionSchema>;
+export type WorkspaceFileReference = z.infer<typeof WorkspaceFileReferenceSchema>;
+export type WorkspaceCommandReference = z.infer<typeof WorkspaceCommandReferenceSchema>;
+export type WorkspaceProcedure = z.infer<typeof WorkspaceProcedureSchema>;
+export type WorkspaceRecommendedAction = z.infer<typeof WorkspaceRecommendedActionSchema>;
+export type WorkspaceState = z.infer<typeof WorkspaceStateSchema>;
+export type WorkspaceStatePatch = z.infer<typeof WorkspaceStatePatchSchema>;
+export type WorkspaceMetadata = z.infer<typeof WorkspaceMetadataSchema>;
+export type WorkspaceIdentity = z.infer<typeof WorkspaceIdentitySchema>;
+export type WorkspaceRecord = z.infer<typeof WorkspaceRecordSchema>;
+export type WorkspaceCreateRequest = z.infer<typeof WorkspaceCreateRequestSchema>;
+export type WorkspaceCheckpoint = z.infer<typeof WorkspaceCheckpointSchema>;
+export type WorkspaceCheckpointCreateRequest = z.infer<
+  typeof WorkspaceCheckpointCreateRequestSchema
+>;
+export type WorkspaceSummary = z.infer<typeof WorkspaceSummarySchema>;
+export type WorkspaceContextBundle = z.infer<typeof WorkspaceContextBundleSchema>;
 export type MemoryTier = z.infer<typeof MemoryTierEnum>;
 export type MemoryRetentionStrategy = z.infer<typeof MemoryRetentionStrategyEnum>;
 export type MemoryProvenance = z.infer<typeof MemoryProvenanceSchema>;

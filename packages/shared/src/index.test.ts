@@ -6,6 +6,9 @@ import {
   MemoryReadRequestSchema,
   MemoryWriteRequestSchema,
   TelemetryEventSchema,
+  WorkspaceCheckpointCreateRequestSchema,
+  WorkspaceCreateRequestSchema,
+  WorkspaceStatePatchSchema,
 } from './index';
 
 describe('DomainEventSchema', () => {
@@ -152,5 +155,52 @@ describe('Memory contracts', () => {
     expect(write.tier).toBe('episodic');
     expect(read.limit).toBe(10);
     expect(consolidation.targetTier).toBe('semantic');
+  });
+});
+
+describe('Workspace contracts', () => {
+  it('validates workspace create/state/checkpoint contracts', () => {
+    const create = WorkspaceCreateRequestSchema.parse({
+      slug: 'deveadra/versa',
+      name: 'Versa',
+      repository: 'github.com/Deveadra/versa',
+      metadata: {
+        owner: 'platform',
+        tags: ['redesign', 'ws05'],
+        source: 'manual',
+      },
+      state: {
+        currentObjective: 'Ship WS05 workspace-state foundations',
+        activeBlockers: [{ description: 'None currently', status: 'mitigated' }],
+        recentDecisions: [
+          {
+            summary: 'Use explicit workspace records and checkpoints',
+            decidedAt: new Date().toISOString(),
+          },
+        ],
+        importantFiles: [{ path: 'apps/core/src/server.ts', reason: 'workspace API endpoints' }],
+        knownCommands: [{ command: 'pnpm test', description: 'full workspace tests' }],
+        validatedProcedures: [{ name: 'monorepo validation', command: 'pnpm lint' }],
+        nextRecommendedActions: [{ action: 'Add workspace API read path', priority: 'high' }],
+      },
+    });
+
+    const patch = WorkspaceStatePatchSchema.parse({
+      nextRecommendedActions: [
+        {
+          action: 'Run WS05 validation suite',
+          priority: 'high',
+        },
+      ],
+    });
+
+    const checkpoint = WorkspaceCheckpointCreateRequestSchema.parse({
+      summary: 'Validated workspace foundations',
+      createdBy: 'orion',
+    });
+
+    expect(create.slug).toBe('deveadra/versa');
+    expect(patch.nextRecommendedActions?.[0]?.priority).toBe('high');
+    expect(checkpoint.createdBy).toBe('orion');
   });
 });

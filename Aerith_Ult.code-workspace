@@ -11,6 +11,9 @@
 		},
 		{
 			"path": "../claude-code-buddy-reroll"
+		},
+		{
+			"path": "../../src/Roo-Code"
 		}
 	],
 	"settings": {}

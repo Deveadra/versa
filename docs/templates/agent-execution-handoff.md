@@ -1,7 +1,36 @@
+# Agent Execution Handoff
+
+Use this template when launching an execution agent against a bounded task card.
+
+This template is executor-agnostic.
+It is for Roo, Codex, Claude Code, or any future execution agent.
+
+## Purpose
+
+This handoff tells the execution agent exactly how to use:
+- the GitHub issue
+- the active task card
+- the repo
+
+The handoff does not invent scope.
+The issue and task card remain the authority.
+
+## Usage rules
+
+- Always provide a real GitHub issue number or URL.
+- Always provide a real task card path.
+- Do not provide only the issue.
+- Do not provide only the template.
+- The executor must read `Base Branch` and `Branch` from the task card.
+- The executor must not invent or derive a different branch name.
+
+## Template
+
+```txt
 Issue: <GitHub issue number or full GitHub issue URL>
 Task card: docs/task-cards/active/<task-card-file-name>.md
 
-You are operating in Versa Executor mode for the `versa` repository.
+You are operating as the execution agent for the `versa` repository.
 
 Required workflow:
 1. Read the GitHub issue first.
@@ -30,6 +59,6 @@ Hard constraints:
 - Do not perform unrelated cleanup.
 - Do not delete or heavily rewrite legacy Python runtime code unless the issue explicitly authorizes it.
 - Do not create the work branch from the currently checked-out branch unless it exactly matches the task card’s Base Branch.
-- Do not commit, push, or open a PR unless I explicitly ask.
+- Do not commit, push, or open a PR unless explicitly asked.
 
 Begin now by reading the issue and task card, extracting Base Branch and Branch from the task card, switching to the correct base, and then giving the minimal plan before editing.

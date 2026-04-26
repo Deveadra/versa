@@ -41,6 +41,23 @@ Archived cards are historical records and must not be reused without review.
 
 ---
 
+## Branch naming convention
+
+The planner or human creating the task card is responsible for determining the canonical branch name.
+
+Use:
+
+`<epic-topic>/ws##-<task-card-name>`
+
+Example:
+
+`redesign/ws00-architecture-baseline`
+
+Execution agents must read and use this value from the task card.
+They must not invent a different branch name.
+
+---
+
 ## Required workflow
 
 ### 1. Planning
@@ -62,6 +79,10 @@ The task card must:
 - link to the GitHub issue
 - restate the objective
 - define in-scope and out-of-scope work
+- define the Task Card Name
+- derive the Task Card File Name
+- define Base Branch
+- define Branch using the repo naming convention
 - specify the branch name
 - specify the PR title
 - define validation commands
@@ -111,6 +132,8 @@ The template is never the authority for scope by itself.
 Execution agents must treat task cards as binding execution instructions.
 
 Agents must:
+- read `Base Branch` and `Branch` from the task card
+- not invent a different branch name
 - read the linked GitHub issue before changing code
 - inspect current repo state before editing
 - preserve working behavior unless the issue explicitly changes it

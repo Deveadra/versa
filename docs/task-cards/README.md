@@ -253,6 +253,31 @@ Every task card must include these fields:
 
 ---
 
+## Archive naming convention
+
+Completed task cards must be moved, not deleted.
+
+Archive location format:
+
+`docs/task-cards/archive/<epic-slug>-epic-<epic-issue-number>/`
+
+For example:
+
+`docs/task-cards/archive/redesign-aerith-ult-modular-operating-layer-epic-42/`
+
+Archived task cards keep their original task card filename:
+
+`ws##-issue-<issue-number>-<task-card-name>.md`
+
+Execution agents must:
+1. read the `Parent Epic`
+2. derive the archive folder name from the canonical epic slug and epic issue number
+3. create the archive folder if it does not exist
+4. move the task card there using `git mv`
+5. never delete completed task cards unless explicitly instructed
+
+---
+
 ### Expectations for humans and planner agents
 
 Humans and planner agents are responsible for:

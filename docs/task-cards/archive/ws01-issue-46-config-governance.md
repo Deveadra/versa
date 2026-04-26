@@ -67,4 +67,4 @@ Create a canonical configuration layer and dependency-governance baseline so all
 
 ## Notes for Agent
 
-WS1 depends on the architecture baseline from WS0. Read issue #46 first, then this task card, then inspect the repo. Prefer additive config/schema/documentation changes with strong defaults.
+This task card depends on the architecture baseline from WS0. Read issue #46 first, then this task card, then inspect the repo. Prefer additive config/schema/documentation changes with strong defaults.

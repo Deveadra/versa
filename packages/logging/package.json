@@ -13,5 +13,8 @@
     "lint": "echo \"lint ok\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@versa/shared": "workspace:*"
   }
 }

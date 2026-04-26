@@ -47,6 +47,9 @@ importers:
       '@versa/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@versa/logging':
+        specifier: workspace:*
+        version: link:../../packages/logging
       express:
         specifier: ^4.21.2
         version: 4.22.1
@@ -111,7 +114,11 @@ importers:
 
   packages/integrations: {}
 
-  packages/logging: {}
+  packages/logging:
+    dependencies:
+      '@versa/shared':
+        specifier: workspace:*
+        version: link:../shared
 
   packages/security: {}
 

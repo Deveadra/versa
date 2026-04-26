@@ -140,8 +140,7 @@ class StateStore:
         self._init_schema()
 
     def _init_schema(self) -> None:
-        self.conn.executescript(
-            """
+        self.conn.executescript("""
             CREATE TABLE IF NOT EXISTS cursors (
                 source TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
@@ -167,8 +166,7 @@ class StateStore:
                 raw_json TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
-            """
-        )
+            """)
         self.conn.commit()
 
     def close(self) -> None:

@@ -13,8 +13,6 @@ import {
 } from '@versa/database';
 import { log } from '@versa/logging';
 import { generateDailyPlan } from './planner';
-import { connectDb, eventRepo, taskRepo } from '@versa/database';
-import { log } from '@versa/logging';
 
 const app = express();
 const cfg = loadConfig();
@@ -75,8 +73,6 @@ const getDailyPlan = () => {
     followUpsSoon,
   });
 };
-
-const events = eventRepo(db);
 
 app.use(cors());
 app.use(express.json());
@@ -234,30 +230,6 @@ app.post('/quick-capture', (req: Request, res: Response) => {
       .status(201)
       .json({ data: jobs.createLead(String(req.body.company), String(req.body.role)) });
   return res.status(400).json({ error: 'unsupported quick capture kind' });
-});
-
-app.get('/tasks', (_req: Request, res: Response) => {
-  res.json({ data: tasks.listTasks() });
-});
-
-app.post('/tasks', (req: Request, res: Response) => {
-  const task = tasks.createTask({
-    title: String(req.body.title),
-    description: req.body.description,
-  });
-  events.record({
-    eventId: `evt_${randomUUID().slice(0, 8)}`,
-    eventType: 'task.created',
-    actor: 'core-api',
-    timestamp: new Date().toISOString(),
-    domain: 'core',
-    entityRef: { type: 'task', id: task.id },
-    payload: { title: task.title },
-    sensitivity: 'internal',
-    traceId: randomUUID(),
-  });
-  log('info', 'task.created', { taskId: task.id });
-  res.status(201).json({ data: task });
 });
 
 app.post('/scheduler/run', (_req: Request, res: Response) =>

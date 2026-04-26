@@ -13,8 +13,7 @@ class RetrieverTests(unittest.TestCase):
         self.conn = sqlite3.connect(self.dbfile, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         cur = self.conn.cursor()
-        cur.executescript(
-            """
+        cur.executescript("""
         CREATE TABLE IF NOT EXISTS facts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             key TEXT, value TEXT, created_at TEXT, last_reinforced TEXT
@@ -23,8 +22,7 @@ class RetrieverTests(unittest.TestCase):
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_text TEXT, normalized_intent TEXT, resolved_action TEXT, params_json TEXT, created_at TEXT
         );
-        """
-        )
+        """)
         self.conn.commit()
         # insert sample data
         cur.execute(

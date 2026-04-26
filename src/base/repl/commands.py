@@ -131,14 +131,12 @@ def handle_command(cmd: str, text: str, policy) -> str | None:
             conn = orch.db.conn
 
             # Latest score run
-            cur = conn.execute(
-                """
+            cur = conn.execute("""
                 SELECT id, created_at, run_type, mode, fix_enabled, git_branch, git_sha, score, passed
                 FROM repo_score_runs
                 ORDER BY id DESC
                 LIMIT 1
-                """
-            )
+                """)
             r = cur.fetchone()
             if not r:
                 return "No self-improve runs recorded yet."
@@ -155,24 +153,20 @@ def handle_command(cmd: str, text: str, policy) -> str | None:
             passed = bool(r[8])
 
             # Latest improvement attempt (if any)
-            cur2 = conn.execute(
-                """
+            cur2 = conn.execute("""
                 SELECT id, created_at, iteration, branch, proposal_title, pr_url, improved, error_text
                 FROM repo_improvement_attempts
                 ORDER BY id DESC
                 LIMIT 1
-                """
-            )
+                """)
             a = cur2.fetchone()
 
             # Open gaps count
-            cur3 = conn.execute(
-                """
+            cur3 = conn.execute("""
                 SELECT COUNT(*)
                 FROM capability_gaps
                 WHERE status IN ('queued', 'in_progress', 'new')
-                """
-            )
+                """)
             open_gaps = int(cur3.fetchone()[0])
 
             lines = []

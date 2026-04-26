@@ -3,7 +3,17 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DomainEventSchema } from '@versa/shared';
+import {
+  DomainEventSchema,
+  MemoryConsolidationRequestSchema,
+  MemoryReadRequestSchema,
+  MemoryRecordSchema,
+  MemoryWriteRequestSchema,
+  type MemoryConsolidationRequest,
+  type MemoryReadRequest,
+  type MemoryRecord,
+  type MemoryWriteRequest,
+} from '@versa/shared';
 
 const defaultDbPath = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -306,6 +316,126 @@ export const jobRepo = (db: Database.Database) => ({
     return row;
   },
   listTasks: () => db.prepare('SELECT * FROM tasks ORDER BY created_at DESC').all() as TaskRecord[],
+});
+
+const parseMemoryRow = (row: Record<string, unknown>): MemoryRecord =>
+  MemoryRecordSchema.parse({
+    id: row.id,
+    tier: row.tier,
+    summary: row.summary,
+    content: JSON.parse(String(row.content_json)),
+    metadata: JSON.parse(String(row.metadata_json)),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    lastAccessedAt: row.last_accessed_at ?? undefined,
+  });
+
+export const memoryRepo = (db: Database.Database) => ({
+  create: (input: MemoryWriteRequest): MemoryRecord => {
+    const parsed = MemoryWriteRequestSchema.parse(input);
+    const timestamp = now();
+    const record = MemoryRecordSchema.parse({
+      id: id('mem'),
+      tier: parsed.tier,
+      summary: parsed.summary,
+      content: parsed.content,
+      metadata: parsed.metadata,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      lastAccessedAt: timestamp,
+    });
+
+    db.prepare(
+      `INSERT INTO memories (id,tier,summary,content_json,metadata_json,created_at,updated_at,last_accessed_at)
+       VALUES (@id,@tier,@summary,@content_json,@metadata_json,@created_at,@updated_at,@last_accessed_at)`,
+    ).run({
+      id: record.id,
+      tier: record.tier,
+      summary: record.summary,
+      content_json: JSON.stringify(record.content),
+      metadata_json: JSON.stringify(record.metadata),
+      created_at: record.createdAt,
+      updated_at: record.updatedAt,
+      last_accessed_at: record.lastAccessedAt ?? null,
+    });
+
+    return record;
+  },
+
+  getById: (memoryId: string): MemoryRecord | null => {
+    const row = db.prepare('SELECT * FROM memories WHERE id = ?').get(memoryId) as
+      | Record<string, unknown>
+      | undefined;
+
+    if (!row) return null;
+
+    const touchedAt = now();
+    db.prepare('UPDATE memories SET last_accessed_at = ? WHERE id = ?').run(touchedAt, memoryId);
+
+    return parseMemoryRow({
+      ...row,
+      last_accessed_at: touchedAt,
+    });
+  },
+
+  list: (input?: MemoryReadRequest): MemoryRecord[] => {
+    const parsed = MemoryReadRequestSchema.parse(input ?? {});
+    const whereClauses: string[] = [];
+    const params: Array<string | number> = [];
+
+    if (parsed.tiers && parsed.tiers.length > 0) {
+      const placeholders = parsed.tiers.map(() => '?').join(', ');
+      whereClauses.push(`tier IN (${placeholders})`);
+      params.push(...parsed.tiers);
+    }
+
+    if (parsed.minConfidence !== undefined) {
+      whereClauses.push('CAST(json_extract(metadata_json, \'$.confidence\') AS REAL) >= ?');
+      params.push(parsed.minConfidence);
+    }
+
+    if (parsed.text) {
+      whereClauses.push(
+        '(lower(summary) LIKE ? OR lower(content_json) LIKE ? OR lower(json_extract(metadata_json, \'$.tags\')) LIKE ?)',
+      );
+      const like = `%${parsed.text.trim().toLowerCase()}%`;
+      params.push(like, like, like);
+    }
+
+    const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+    const rows = db
+      .prepare(`SELECT * FROM memories ${whereSql} ORDER BY updated_at DESC LIMIT ?`)
+      .all(...params, parsed.limit) as Array<Record<string, unknown>>;
+
+    return rows.map(parseMemoryRow);
+  },
+
+  consolidate: (input: MemoryConsolidationRequest): MemoryRecord => {
+    const parsed = MemoryConsolidationRequestSchema.parse(input);
+
+    const missing = parsed.sourceMemoryIds.filter((sourceId) => {
+      const row = db.prepare('SELECT id FROM memories WHERE id = ?').get(sourceId);
+      return !row;
+    });
+
+    if (missing.length > 0) {
+      throw new Error(`cannot consolidate missing memories: ${missing.join(', ')}`);
+    }
+
+    return memoryRepo(db).create({
+      tier: parsed.targetTier,
+      summary: parsed.summary,
+      content: parsed.content,
+      metadata: {
+        ...parsed.metadata,
+        provenance: {
+          ...parsed.metadata.provenance,
+          sourceMemoryIds: parsed.sourceMemoryIds,
+          notes: parsed.reason,
+        },
+      },
+    });
+  },
 });
 
 export const eventRepo = (db: Database.Database) => ({

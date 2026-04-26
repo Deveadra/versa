@@ -272,6 +272,72 @@ export const DoctrineSchema = z.object({
   }),
 });
 
+export const MemoryTierEnum = z.enum(['session', 'episodic', 'semantic', 'procedural']);
+export const MemoryRetentionStrategyEnum = z.enum(['session', 'ttl', 'durable']);
+
+export const MemoryProvenanceSchema = z.object({
+  actor: z.string().min(1),
+  traceId: z.string().min(1).optional(),
+  eventId: z.string().min(1).optional(),
+  subsystem: z.string().min(1).optional(),
+  sourceMemoryIds: z.array(IdSchema).optional(),
+  notes: z.string().optional(),
+});
+
+export const MemoryRetentionSchema = z.object({
+  strategy: MemoryRetentionStrategyEnum,
+  ttlDays: z.number().int().positive().optional(),
+  decayRate: z.number().min(0).max(1).optional(),
+});
+
+export const MemoryMetadataSchema = z.object({
+  confidence: z.number().min(0).max(1),
+  source: SourceEnum,
+  sensitivity: SensitivityEnum,
+  retention: MemoryRetentionSchema,
+  provenance: MemoryProvenanceSchema,
+  tags: z.array(z.string().min(1)).default([]),
+});
+
+export const MemoryRecordSchema = z.object({
+  id: IdSchema,
+  tier: MemoryTierEnum,
+  summary: z.string().min(1),
+  content: z.record(z.any()).default({}),
+  metadata: MemoryMetadataSchema,
+  createdAt: TimestampSchema,
+  updatedAt: TimestampSchema,
+  lastAccessedAt: TimestampSchema.optional(),
+});
+
+export const MemoryWriteRequestSchema = z.object({
+  tier: MemoryTierEnum,
+  summary: z.string().min(1),
+  content: z.record(z.any()).default({}),
+  metadata: MemoryMetadataSchema,
+});
+
+export const MemoryReadRequestSchema = z.object({
+  text: z.string().min(1).optional(),
+  tiers: z.array(MemoryTierEnum).min(1).optional(),
+  minConfidence: z.number().min(0).max(1).optional(),
+  limit: z.number().int().min(1).max(100).default(20),
+});
+
+export const MemoryConsolidationRequestSchema = z.object({
+  sourceMemoryIds: z.array(IdSchema).min(2),
+  targetTier: z.enum(['semantic', 'procedural']),
+  summary: z.string().min(1),
+  reason: z.string().min(1),
+  content: z.record(z.any()).default({}),
+  metadata: MemoryMetadataSchema,
+});
+
+export const MemoryConsolidationResultSchema = z.object({
+  promotedMemory: MemoryRecordSchema,
+  linkedSourceCount: z.number().int().min(0),
+});
+
 export type Task = z.infer<typeof TaskSchema>;
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
 export type TraceContext = z.infer<typeof TraceContextSchema>;
@@ -285,3 +351,13 @@ export type DoctrineEscalationRule = z.infer<typeof DoctrineEscalationRuleSchema
 export type DoctrineAutonomyBoundary = z.infer<typeof DoctrineAutonomyBoundarySchema>;
 export type DoctrineSafetyRule = z.infer<typeof DoctrineSafetyRuleSchema>;
 export type Doctrine = z.infer<typeof DoctrineSchema>;
+export type MemoryTier = z.infer<typeof MemoryTierEnum>;
+export type MemoryRetentionStrategy = z.infer<typeof MemoryRetentionStrategyEnum>;
+export type MemoryProvenance = z.infer<typeof MemoryProvenanceSchema>;
+export type MemoryRetention = z.infer<typeof MemoryRetentionSchema>;
+export type MemoryMetadata = z.infer<typeof MemoryMetadataSchema>;
+export type MemoryRecord = z.infer<typeof MemoryRecordSchema>;
+export type MemoryWriteRequest = z.infer<typeof MemoryWriteRequestSchema>;
+export type MemoryReadRequest = z.infer<typeof MemoryReadRequestSchema>;
+export type MemoryConsolidationRequest = z.infer<typeof MemoryConsolidationRequestSchema>;
+export type MemoryConsolidationResult = z.infer<typeof MemoryConsolidationResultSchema>;

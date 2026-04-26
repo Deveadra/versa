@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { DoctrineSchema, DomainEventSchema, TelemetryEventSchema } from './index';
+import {
+  DoctrineSchema,
+  DomainEventSchema,
+  MemoryConsolidationRequestSchema,
+  MemoryReadRequestSchema,
+  MemoryWriteRequestSchema,
+  TelemetryEventSchema,
+} from './index';
 
 describe('DomainEventSchema', () => {
   it('validates a task.created event', () => {
@@ -99,5 +106,51 @@ describe('DoctrineSchema', () => {
 
     expect(parsed.doctrineId).toBe('aerith.ultron');
     expect(parsed.decisionPriorities[0]).toBe('operator_safety');
+  });
+});
+
+describe('Memory contracts', () => {
+  it('validates memory write/read/consolidation contracts', () => {
+    const write = MemoryWriteRequestSchema.parse({
+      tier: 'episodic',
+      summary: 'User completed afternoon workout',
+      content: { durationMinutes: 45, type: 'cardio' },
+      metadata: {
+        confidence: 0.82,
+        source: 'manual',
+        sensitivity: 'private',
+        retention: {
+          strategy: 'durable',
+          ttlDays: 365,
+          decayRate: 0.15,
+        },
+        provenance: {
+          actor: 'core-api',
+          traceId: 'trace-memory-1',
+          subsystem: 'core',
+        },
+        tags: ['health', 'habit'],
+      },
+    });
+
+    const read = MemoryReadRequestSchema.parse({
+      text: 'workout',
+      tiers: ['episodic', 'semantic'],
+      minConfidence: 0.5,
+      limit: 10,
+    });
+
+    const consolidation = MemoryConsolidationRequestSchema.parse({
+      sourceMemoryIds: ['mem_12345678', 'mem_87654321'],
+      targetTier: 'semantic',
+      summary: 'User tends to exercise in afternoons',
+      reason: 'pattern observed over multiple sessions',
+      content: { cadence: 'weekly' },
+      metadata: write.metadata,
+    });
+
+    expect(write.tier).toBe('episodic');
+    expect(read.limit).toBe(10);
+    expect(consolidation.targetTier).toBe('semantic');
   });
 });

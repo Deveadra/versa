@@ -1,7 +1,5 @@
 import type { Doctrine } from '@versa/shared';
 
-const now = new Date().toISOString();
-
 export const defaultDoctrine: Doctrine = {
   doctrineId: 'aerith.ultron',
   version: '1.0.0',
@@ -74,8 +72,8 @@ export const defaultDoctrine: Doctrine = {
     maintainers: ['@deveadra'],
   },
   metadata: {
-    createdAt: now,
-    updatedAt: now,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
     changeSummary: 'Initial WS03 doctrine baseline.',
   },
 };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DomainEventSchema, TelemetryEventSchema } from './index';
+import { DoctrineSchema, DomainEventSchema, TelemetryEventSchema } from './index';
 
 describe('DomainEventSchema', () => {
   it('validates a task.created event', () => {
@@ -46,5 +46,58 @@ describe('TelemetryEventSchema', () => {
 
     expect(parsed.context.traceId).toBe('trace-123');
     expect(parsed.level).toBe('info');
+  });
+});
+
+describe('DoctrineSchema', () => {
+  it('validates a doctrine document', () => {
+    const parsed = DoctrineSchema.parse({
+      doctrineId: 'aerith.ultron',
+      version: '1.0.0',
+      mission: 'Protect operator intent while executing reliable outcomes.',
+      operatorPrinciples: ['Be truthful', 'Prefer reversible actions'],
+      responseStyle: {
+        tone: 'direct',
+        verbosity: 'concise',
+        markdownRequired: true,
+        citationStyle: 'repo-link',
+        forbiddenPhrases: ['Great', 'Certainly'],
+      },
+      decisionPriorities: ['operator_safety', 'mission_alignment', 'truthfulness'],
+      escalationRules: [
+        {
+          id: 'approval-destructive',
+          condition: 'destructive operation is requested',
+          severity: 'high',
+          action: 'request explicit operator approval',
+        },
+      ],
+      autonomyBoundaries: [
+        {
+          action: 'git push',
+          requiresApproval: true,
+          rationale: 'remote side effects require operator confirmation',
+        },
+      ],
+      safetyNoGoActions: [
+        {
+          id: 'no-unauthorized-destructive-changes',
+          rule: 'Do not execute destructive repository actions without explicit authorization.',
+          rationale: 'Preserve operator control and recoverability.',
+        },
+      ],
+      ownership: {
+        team: 'platform',
+        maintainers: ['@deveadra'],
+      },
+      metadata: {
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        changeSummary: 'initial doctrine baseline',
+      },
+    });
+
+    expect(parsed.doctrineId).toBe('aerith.ultron');
+    expect(parsed.decisionPriorities[0]).toBe('operator_safety');
   });
 });

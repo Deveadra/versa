@@ -31,6 +31,8 @@ const ConfigSchema = z.object({
   FEATURE_APPROVALS_ENABLED: booleanFromEnv.default(false),
   FEATURE_SKILLS_ENABLED: booleanFromEnv.default(false),
   FEATURE_WORKSPACES_ENABLED: booleanFromEnv.default(false),
+  FEATURE_DOCTRINE_ENABLED: booleanFromEnv.default(true),
+  DOCTRINE_PATH: z.string().default('state/doctrine.json'),
 
   MCP_ENABLED: booleanFromEnv.default(false),
   MCP_TRANSPORT: z.enum(['stdio', 'http']).default('stdio'),

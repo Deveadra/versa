@@ -17,6 +17,8 @@ describe('parseConfig', () => {
     expect(parsed.FEATURE_APPROVALS_ENABLED).toBe(false);
     expect(parsed.FEATURE_SKILLS_ENABLED).toBe(false);
     expect(parsed.FEATURE_WORKSPACES_ENABLED).toBe(false);
+    expect(parsed.FEATURE_DOCTRINE_ENABLED).toBe(true);
+    expect(parsed.DOCTRINE_PATH).toBe('state/doctrine.json');
 
     expect(parsed.MCP_ENABLED).toBe(false);
     expect(parsed.TELEMETRY_ENABLED).toBe(false);
@@ -29,6 +31,7 @@ describe('parseConfig', () => {
       NODE_ENV: 'production',
       RUNTIME_MODE: 'hybrid',
       FEATURE_MEMORY_ENABLED: 'true',
+      FEATURE_DOCTRINE_ENABLED: '0',
       MCP_ENABLED: '1',
       TELEMETRY_OTLP_ENABLED: 'yes',
       BRIDGE_ENABLED: 'on',
@@ -40,6 +43,7 @@ describe('parseConfig', () => {
     expect(parsed.NODE_ENV).toBe('production');
     expect(parsed.RUNTIME_MODE).toBe('hybrid');
     expect(parsed.FEATURE_MEMORY_ENABLED).toBe(true);
+    expect(parsed.FEATURE_DOCTRINE_ENABLED).toBe(false);
     expect(parsed.MCP_ENABLED).toBe(true);
     expect(parsed.TELEMETRY_OTLP_ENABLED).toBe(true);
     expect(parsed.BRIDGE_ENABLED).toBe(true);

@@ -6,7 +6,7 @@ import {
   createRequestTelemetryMiddleware,
   createTelemetrySink,
 } from '@versa/logging';
-import { createFoundationalSkillRegistry } from '@versa/skills';
+import { createFoundationalSkillRegistry, type SkillDefinition } from '@versa/skills';
 
 const app = express();
 const cfg = loadConfig();
@@ -39,7 +39,7 @@ app.get('/health', (_req: Request, res: Response) => res.json({ ok: true }));
 app.get('/capabilities', (_req: Request, res: Response) => res.json({ capabilities: Object.keys(capabilities) }));
 app.get('/skills', (_req: Request, res: Response) =>
   res.json({
-    data: skillRegistry.list().map((skill: { id: string; name: string; metadata: unknown }) => ({
+    data: skillRegistry.list().map((skill: SkillDefinition) => ({
       id: skill.id,
       name: skill.name,
       metadata: skill.metadata,
@@ -58,11 +58,11 @@ app.post('/skills/execute', (req: Request, res: Response) => {
     context: {},
   });
 
-  if (result.status === 'succeeded') {
-    return res.status(200).json({ data: result });
-  }
-
-  return res.status(400).json({ data: result });
+  if (result.status === 'succeeded') return res.status(200).json({ data: result });
+  if (result.status === 'invalid_request') return res.status(422).json({ data: result });
+  if (result.error?.code === 'SKILL_NOT_FOUND') return res.status(404).json({ data: result });
+  if (result.status === 'blocked') return res.status(409).json({ data: result });
+  return res.status(500).json({ data: result });
 });
 
 const server = app.listen(cfg.AI_PORT, () => {

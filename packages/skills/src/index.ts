@@ -7,6 +7,7 @@ import {
   type SkillExecutionRequest,
   type SkillExecutionResult,
 } from '@versa/shared';
+import { ZodError } from 'zod';
 
 export type SkillHandler = (input: Record<string, unknown>) => Record<string, unknown>;
 
@@ -19,6 +20,16 @@ export type SkillRegistry = {
 
 const nowIso = () => new Date().toISOString();
 
+const errorMessage = (error: unknown, fallback: string) => {
+  if (error instanceof ZodError) {
+    return error.issues.map((issue: { message: string }) => issue.message).join('; ');
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return fallback;
+};
+
 export const createSkillRegistry = (
   options?: {
     now?: () => string;
@@ -28,30 +39,65 @@ export const createSkillRegistry = (
   const now = options?.now ?? nowIso;
   const executionIdFactory = options?.executionIdFactory ?? (() => `skx_${randomUUID().slice(0, 8)}`);
   const byId = new Map<string, SkillDefinition>();
+  const byName = new Map<string, SkillDefinition>();
   const handlers = new Map<string, SkillHandler>();
 
   const register = (definition: SkillDefinition, handler: SkillHandler) => {
     const parsed = SkillDefinitionSchema.parse(definition);
+    const existing = byId.get(parsed.id);
+    if (existing && existing.name !== parsed.name) {
+      byName.delete(existing.name);
+    }
     byId.set(parsed.id, parsed);
+    byName.set(parsed.name, parsed);
     handlers.set(parsed.id, handler);
   };
 
   const list = () => Array.from(byId.values());
 
-  const resolveByName = (name: string): SkillDefinition | null =>
-    Array.from(byId.values()).find((item) => item.name === name) ?? null;
+  const resolveByName = (name: string): SkillDefinition | null => byName.get(name) ?? null;
 
   const get = (skillIdOrName: string): SkillDefinition | null =>
     byId.get(skillIdOrName) ?? resolveByName(skillIdOrName);
 
   const execute = (request: SkillExecutionRequest): SkillExecutionResult => {
     const startedAt = now();
-    const parsed = SkillExecutionRequestSchema.parse(request);
-    const resolved = parsed.skillId
-      ? byId.get(parsed.skillId) ?? null
-      : parsed.skillName
-        ? resolveByName(parsed.skillName)
-        : null;
+    let parsed: SkillExecutionRequest;
+
+    try {
+      parsed = SkillExecutionRequestSchema.parse(request);
+    } catch (error) {
+      return SkillExecutionResultSchema.parse({
+        executionId: executionIdFactory(),
+        skillId: 'unknown',
+        skillName: 'unknown',
+        status: 'invalid_request',
+        startedAt,
+        completedAt: now(),
+        output: {},
+        validation: {
+          passed: false,
+          checks: [
+            {
+              id: 'request.valid',
+              passed: false,
+              message: errorMessage(error, 'invalid skill execution request'),
+            },
+          ],
+        },
+        error: {
+          code: 'INVALID_REQUEST',
+          message: errorMessage(error, 'invalid skill execution request'),
+        },
+      });
+    }
+
+    const resolved =
+      parsed.skillId !== undefined && parsed.skillId.length > 0
+        ? byId.get(parsed.skillId) ?? null
+        : parsed.skillName
+          ? resolveByName(parsed.skillName)
+          : null;
 
     if (!resolved) {
       return SkillExecutionResultSchema.parse({
@@ -394,7 +440,7 @@ export const createFoundationalSkillRegistry = (): SkillRegistry => {
   for (const definition of skills) {
     const handler = handlers[definition.id];
     if (!handler) {
-      continue;
+      throw new Error(`missing handler for foundational skill: ${definition.id}`);
     }
     registry.register(definition, handler);
   }

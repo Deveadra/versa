@@ -59,6 +59,48 @@ describe('createSkillRegistry', () => {
     expect(result.status).toBe('failed');
     expect(result.error?.code).toBe('SKILL_NOT_FOUND');
   });
+
+  it('returns invalid_request instead of throwing when request payload is malformed', () => {
+    const registry = createSkillRegistry({
+      now: () => '2026-01-01T00:00:00.000Z',
+      executionIdFactory: () => 'skx_fixed_3',
+    });
+
+    const result = registry.execute({
+      input: {},
+      context: {},
+    } as any);
+
+    expect(result.status).toBe('invalid_request');
+    expect(result.error?.code).toBe('INVALID_REQUEST');
+  });
+
+  it('supports direct name lookup without scanning the id map externally', () => {
+    const registry = createSkillRegistry();
+    registry.register(
+      {
+        id: 'lookup-id',
+        name: 'lookup_name',
+        bounded: true,
+        deterministic: true,
+        tags: [],
+        metadata: {
+          description: 'lookup test',
+          version: '0.1.0',
+          inputs: [],
+          outputs: [],
+          requiredTools: [],
+          requiredResources: [],
+          validationChecks: [],
+          failureHandling: { retryable: false, maxRetries: 0 },
+          approval: { required: false },
+        },
+      },
+      () => ({ ok: true }),
+    );
+
+    expect(registry.get('lookup_name')?.id).toBe('lookup-id');
+  });
 });
 
 describe('createFoundationalSkillRegistry', () => {

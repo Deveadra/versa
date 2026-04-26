@@ -50,6 +50,9 @@ importers:
       '@versa/logging':
         specifier: workspace:*
         version: link:../../packages/logging
+      '@versa/skills':
+        specifier: workspace:*
+        version: link:../../packages/skills
       express:
         specifier: ^4.21.2
         version: 4.22.1
@@ -145,6 +148,12 @@ importers:
       zod:
         specifier: ^3.24.2
         version: 3.25.76
+
+  packages/skills:
+    dependencies:
+      '@versa/shared':
+        specifier: workspace:*
+        version: link:../shared
 
   packages/testing: {}
 

@@ -8,8 +8,8 @@ Execute this task card only. Stay in scope. Read the issue and task card first, 
 
 ---
 
-Issue: `https://github.com/Deveadra/versa/issues/50`
-Task card: docs/task-cards/active/ws05-issue-50-workspace-state.md
+Issue: `https://github.com/Deveadra/versa/issues/51`
+Task card: docs/task-cards/active/ws06-issue-51-skills-engine.md
 
 You are operating in Versa Executor mode for the `versa` repository.
 

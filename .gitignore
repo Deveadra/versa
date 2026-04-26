@@ -53,6 +53,8 @@ token*.pickle
 
 # Misc files
 md.md
+*.code-workspace
+
 # Phase 0 monorepo additions
 node_modules/
 .next/

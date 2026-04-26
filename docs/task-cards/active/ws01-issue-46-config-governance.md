@@ -9,8 +9,9 @@
 - Status: Active
 - Priority: High
 - Agent Type: Roo
-- Branch: redesign/ws1-config-governance
-- PR Title: redesign(ws1): establish canonical config and dependency governance
+- Base Branch: main
+- Branch: redesign/ws01-config-governance
+- PR Title: redesign(ws01): establish canonical config and dependency governance
 - Depends On: #43
 - Blocks: #47, #48, #49, #50, #51, #52, #53, #54, #55, #56, #57
 

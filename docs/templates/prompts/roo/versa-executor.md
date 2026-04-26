@@ -8,7 +8,6 @@ Execute this task card only. Stay in scope. Read the issue and task card first, 
 
 Issue: https://github.com/Deveadra/versa/issues/43
 Task card: docs/task-cards/active/ws00-issue-43-architecture-baseline.md
-Branch: redesign/ws0-architecture-baseline
 
 You are operating in Versa Executor mode for the `versa` repository.
 
@@ -36,3 +35,12 @@ Hard constraints:
 - Do not commit, push, or open a PR unless I explicitly ask.
 
 Begin now by reading the issue and task card, switching to the target branch, and then giving the minimal plan before editing.
+
+---
+---
+---
+---
+---
+
+
+

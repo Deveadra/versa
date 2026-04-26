@@ -132,6 +132,7 @@ export const createMemoryGateway = (
         provenance: {
           ...parsed.metadata.provenance,
           sourceMemoryIds: parsed.sourceMemoryIds,
+          notes: parsed.reason,
         },
       },
     });

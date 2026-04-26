@@ -380,33 +380,34 @@ export const memoryRepo = (db: Database.Database) => ({
 
   list: (input?: MemoryReadRequest): MemoryRecord[] => {
     const parsed = MemoryReadRequestSchema.parse(input ?? {});
-    const rows = db.prepare('SELECT * FROM memories ORDER BY updated_at DESC LIMIT ?').all(parsed.limit) as Array<
-      Record<string, unknown>
-    >;
-
-    let items = rows.map(parseMemoryRow);
+    const whereClauses: string[] = [];
+    const params: Array<string | number> = [];
 
     if (parsed.tiers && parsed.tiers.length > 0) {
-      const tiers = new Set(parsed.tiers);
-      items = items.filter((item) => tiers.has(item.tier));
+      const placeholders = parsed.tiers.map(() => '?').join(', ');
+      whereClauses.push(`tier IN (${placeholders})`);
+      params.push(...parsed.tiers);
     }
 
     if (parsed.minConfidence !== undefined) {
-      const minConfidence = parsed.minConfidence;
-      items = items.filter((item) => item.metadata.confidence >= minConfidence);
+      whereClauses.push('CAST(json_extract(metadata_json, \'$.confidence\') AS REAL) >= ?');
+      params.push(parsed.minConfidence);
     }
 
     if (parsed.text) {
-      const q = parsed.text.trim().toLowerCase();
-      items = items.filter((item) => {
-        const summary = item.summary.toLowerCase();
-        const content = JSON.stringify(item.content).toLowerCase();
-        const tags = item.metadata.tags.join(' ').toLowerCase();
-        return summary.includes(q) || content.includes(q) || tags.includes(q);
-      });
+      whereClauses.push(
+        '(lower(summary) LIKE ? OR lower(content_json) LIKE ? OR lower(json_extract(metadata_json, \'$.tags\')) LIKE ?)',
+      );
+      const like = `%${parsed.text.trim().toLowerCase()}%`;
+      params.push(like, like, like);
     }
 
-    return items;
+    const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+    const rows = db
+      .prepare(`SELECT * FROM memories ${whereSql} ORDER BY updated_at DESC LIMIT ?`)
+      .all(...params, parsed.limit) as Array<Record<string, unknown>>;
+
+    return rows.map(parseMemoryRow);
   },
 
   consolidate: (input: MemoryConsolidationRequest): MemoryRecord => {

@@ -20,7 +20,8 @@ import {
   getTelemetryContext,
 } from '@versa/logging';
 import { createMemoryGateway } from '@versa/memory';
-import type { TraceContext } from '@versa/shared';
+import { MemoryTierEnum, type TraceContext } from '@versa/shared';
+import { ZodError } from 'zod';
 import { generateDailyPlan } from './planner';
 
 declare global {
@@ -57,6 +58,19 @@ const logger = createLogger({
 
 const asString = (value: unknown) =>
   Array.isArray(value) ? String(value[0]) : String(value ?? '');
+
+const sendValidationError = (res: Response, error: unknown) => {
+  if (error instanceof ZodError) {
+    return res.status(400).json({
+      error: 'invalid request payload',
+      details: error.issues,
+    });
+  }
+
+  return res.status(400).json({
+    error: error instanceof Error ? error.message : 'invalid request payload',
+  });
+};
 
 const requestContext = (req: Request): Partial<TraceContext> => getTelemetryContext(req);
 
@@ -299,54 +313,82 @@ app.get('/events', (req: Request, res: Response) => {
 app.get('/memory', (req: Request, res: Response) => {
   const queryText = typeof req.query.q === 'string' ? req.query.q : undefined;
   const tier = typeof req.query.tier === 'string' ? req.query.tier : undefined;
+  const parsedTier = tier ? MemoryTierEnum.safeParse(tier) : null;
+  if (parsedTier && !parsedTier.success) {
+    return res.status(400).json({
+      error: 'invalid tier value',
+      details: parsedTier.error.issues,
+    });
+  }
+
   const minConfidence =
     typeof req.query.minConfidence === 'string' ? Number(req.query.minConfidence) : undefined;
+  if (typeof req.query.minConfidence === 'string' && !Number.isFinite(minConfidence)) {
+    return res.status(400).json({ error: 'minConfidence must be a valid number' });
+  }
+
   const limit = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined;
+  const hasValidLimit = limit !== undefined && Number.isFinite(limit) && limit >= 1;
+  if (typeof req.query.limit === 'string' && !hasValidLimit) {
+    return res.status(400).json({ error: 'limit must be a positive number' });
+  }
 
-  const data = memoryGateway.read({
-    text: queryText,
-    tiers: tier ? [tier as 'session' | 'episodic' | 'semantic' | 'procedural'] : undefined,
-    minConfidence: Number.isFinite(minConfidence) ? minConfidence : undefined,
-    limit: Number.isFinite(limit) && limit ? limit : 20,
-  });
+  try {
+    const data = memoryGateway.read({
+      text: queryText,
+      tiers: parsedTier?.success ? [parsedTier.data] : undefined,
+      minConfidence,
+      limit: hasValidLimit ? limit : 20,
+    });
 
-  res.json({ data });
+    return res.json({ data });
+  } catch (error) {
+    return sendValidationError(res, error);
+  }
 });
 
 app.post('/memory', (req: Request, res: Response) => {
-  const memory = memoryGateway.write(req.body);
-  emit(
-    'memory.note.recorded',
-    'memory',
-    String(memory.id),
-    {
-      tier: memory.tier,
-      confidence: memory.metadata.confidence,
-      source: memory.metadata.source,
-    },
-    'core',
-    requestContext(req),
-  );
+  try {
+    const memory = memoryGateway.write(req.body);
+    emit(
+      'memory.note.recorded',
+      'memory',
+      String(memory.id),
+      {
+        tier: memory.tier,
+        confidence: memory.metadata.confidence,
+        source: memory.metadata.source,
+      },
+      'core',
+      requestContext(req),
+    );
 
-  res.status(201).json({ data: memory });
+    return res.status(201).json({ data: memory });
+  } catch (error) {
+    return sendValidationError(res, error);
+  }
 });
 
 app.post('/memory/consolidate', (req: Request, res: Response) => {
-  const result = memoryGateway.consolidate(req.body);
-  emit(
-    'memory.note.recorded',
-    'memory',
-    String(result.promotedMemory.id),
-    {
-      tier: result.promotedMemory.tier,
-      linkedSourceCount: result.linkedSourceCount,
-      sourceMemoryIds: result.promotedMemory.metadata.provenance.sourceMemoryIds ?? [],
-    },
-    'core',
-    requestContext(req),
-  );
+  try {
+    const result = memoryGateway.consolidate(req.body);
+    emit(
+      'memory.note.recorded',
+      'memory',
+      String(result.promotedMemory.id),
+      {
+        tier: result.promotedMemory.tier,
+        linkedSourceCount: result.linkedSourceCount,
+        sourceMemoryIds: result.promotedMemory.metadata.provenance.sourceMemoryIds ?? [],
+      },
+      'core',
+      requestContext(req),
+    );
 
-  res.status(201).json({ data: result });
+    return res.status(201).json({ data: result });
+  } catch (error) {
+    return sendValidationError(res, error);
+  }
 });
 
 app.post('/quick-capture', (req: Request, res: Response) => {

@@ -1,4 +1,4 @@
-gitimport express, { Request, Response } from 'express';
+import express, { Request, Response } from 'express';
 import cors from 'cors';
 import { randomUUID } from 'node:crypto';
 import { loadConfig } from '@versa/config';

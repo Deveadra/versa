@@ -738,6 +738,93 @@ export const SkillExecutionResultSchema = z.object({
   error: SkillErrorSchema.optional(),
 });
 
+export const TrustLevelEnum = z.enum([
+  'observe',
+  'propose',
+  'draft',
+  'safe-act',
+  'bounded-autonomous',
+]);
+
+export const ActionImpactEnum = z.enum(['low', 'medium', 'high', 'critical']);
+
+export const ActionClassificationSchema = z.object({
+  id: z.string().min(1),
+  category: z.enum(['read', 'write', 'execute', 'integration', 'system']),
+  impact: ActionImpactEnum,
+  reversible: z.boolean(),
+  requiresNetwork: z.boolean().default(false),
+  description: z.string().optional(),
+});
+
+export const ApprovalAuditMetadataSchema = z.object({
+  traceId: z.string().min(1),
+  correlationId: z.string().min(1).optional(),
+  requestId: z.string().min(1).optional(),
+  source: z.string().min(1),
+  timestamp: TimestampSchema,
+});
+
+export const ApprovalRequestSchema = z.object({
+  requestId: z.string().min(1),
+  requestedAt: TimestampSchema,
+  actor: z.string().min(1),
+  trustLevel: TrustLevelEnum,
+  action: z.string().min(1),
+  classification: ActionClassificationSchema,
+  audit: ApprovalAuditMetadataSchema,
+  context: z.record(z.any()).default({}),
+});
+
+export const ApprovalDecisionEnum = z.enum([
+  'approved',
+  'denied',
+  'auto_approved',
+  'requires_operator',
+]);
+
+export const ApprovalDecisionRecordSchema = z.object({
+  decisionId: z.string().min(1),
+  requestId: z.string().min(1),
+  decision: ApprovalDecisionEnum,
+  decidedAt: TimestampSchema,
+  decidedBy: z.string().min(1),
+  reason: z.string().min(1),
+  policyRuleId: z.string().min(1).optional(),
+  audit: ApprovalAuditMetadataSchema,
+});
+
+export const ApprovalOutcomeEnum = z.enum(['allow', 'require_approval', 'deny']);
+
+export const ActionPolicyRuleSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().min(1),
+  actionPattern: z.string().min(1).default('*'),
+  minTrustLevel: TrustLevelEnum.default('observe'),
+  maxTrustLevel: TrustLevelEnum.optional(),
+  appliesToImpact: z.array(ActionImpactEnum).default([]),
+  outcome: ApprovalOutcomeEnum,
+  requiresApproval: z.boolean().default(false),
+  rationale: z.string().min(1),
+  enabled: z.boolean().default(true),
+});
+
+export const ApprovalResultSchema = z.object({
+  requestId: z.string().min(1),
+  outcome: ApprovalOutcomeEnum,
+  reason: z.string().min(1),
+  policyRuleId: z.string().min(1).optional(),
+  evaluatedAt: TimestampSchema,
+  requiresApproval: z.boolean().default(false),
+});
+
+export const ApprovalEnforcementOutcomeSchema = z.object({
+  request: ApprovalRequestSchema,
+  result: ApprovalResultSchema,
+  decision: ApprovalDecisionRecordSchema.optional(),
+});
+
 export type Task = z.infer<typeof TaskSchema>;
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
 export type TraceContext = z.infer<typeof TraceContextSchema>;
@@ -804,3 +891,30 @@ export type SkillExecutionRequest = z.infer<typeof SkillExecutionRequestSchema>;
 export type SkillValidationResult = z.infer<typeof SkillValidationResultSchema>;
 export type SkillError = z.infer<typeof SkillErrorSchema>;
 export type SkillExecutionResult = z.infer<typeof SkillExecutionResultSchema>;
+export type TrustLevel = z.infer<typeof TrustLevelEnum>;
+export type ActionImpact = z.infer<typeof ActionImpactEnum>;
+export type ActionClassification = z.infer<typeof ActionClassificationSchema>;
+export type ApprovalAuditMetadata = z.infer<typeof ApprovalAuditMetadataSchema>;
+export type ApprovalRequest = z.infer<typeof ApprovalRequestSchema>;
+export type ApprovalDecision = z.infer<typeof ApprovalDecisionEnum>;
+export type ApprovalDecisionRecord = z.infer<typeof ApprovalDecisionRecordSchema>;
+export type ApprovalOutcome = z.infer<typeof ApprovalOutcomeEnum>;
+export type ActionPolicyRule = z.infer<typeof ActionPolicyRuleSchema>;
+export type ApprovalResult = z.infer<typeof ApprovalResultSchema>;
+export type ApprovalEnforcementOutcome = z.infer<typeof ApprovalEnforcementOutcomeSchema>;
+
+const TrustLevelOrder: TrustLevel[] = [
+  'observe',
+  'propose',
+  'draft',
+  'safe-act',
+  'bounded-autonomous',
+];
+
+export const trustLevelRank = (level: TrustLevel): number => TrustLevelOrder.indexOf(level);
+
+export const isTrustLevelAtLeast = (level: TrustLevel, minimum: TrustLevel): boolean =>
+  trustLevelRank(level) >= trustLevelRank(minimum);
+
+export const isTrustLevelAtMost = (level: TrustLevel, maximum: TrustLevel): boolean =>
+  trustLevelRank(level) <= trustLevelRank(maximum);

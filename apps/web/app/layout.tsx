@@ -10,6 +10,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <nav style={{ padding: 16, borderRight: '1px solid #334155' }}>
             <h3>Versa</h3>
             <ul style={navStyle}>
+              <li><Link href="/console">Operator Console</Link></li>
               <li><Link href="/today">Command Deck</Link></li>
               <li><Link href="/tasks">Tasks</Link></li>
               <li><Link href="/goals">Goals</Link></li>

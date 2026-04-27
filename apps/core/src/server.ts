@@ -420,14 +420,6 @@ app.post('/environments', (req: Request, res: Response) => {
   }
 });
 
-app.get('/environments/*', (req: Request, res: Response) => {
-  const environment = environmentGateway.getBySlug(environmentSlugFromRequest(req));
-  if (!environment) {
-    return res.status(404).json({ error: 'environment not found' });
-  }
-  return res.json({ data: environment });
-});
-
 app.put('/environments/*/records', (req: Request, res: Response) => {
   try {
     const record = environmentGateway.upsertRecord(environmentSlugFromRequest(req), req.body);
@@ -494,6 +486,14 @@ app.get('/environments/*/context', (req: Request, res: Response) => {
     return res.status(404).json({ error: 'environment not found' });
   }
   return res.json({ data: context });
+});
+
+app.get('/environments/*', (req: Request, res: Response) => {
+  const environment = environmentGateway.getBySlug(environmentSlugFromRequest(req));
+  if (!environment) {
+    return res.status(404).json({ error: 'environment not found' });
+  }
+  return res.json({ data: environment });
 });
 
 app.get('/memory', (req: Request, res: Response) => {

@@ -422,6 +422,153 @@ export const WorkspaceContextBundleSchema = z.object({
   recentCheckpoints: z.array(WorkspaceCheckpointSchema).default([]),
 });
 
+export const EnvironmentEntityKindEnum = z.enum([
+  'machine',
+  'service',
+  'dashboard',
+  'repository',
+  'access_path',
+  'command',
+  'procedure',
+  'environment',
+]);
+
+export const EnvironmentRecordSchema = z.object({
+  id: IdSchema,
+  environmentId: IdSchema,
+  kind: EnvironmentEntityKindEnum,
+  name: z.string().min(1),
+  description: z.string().optional(),
+  attributes: z.record(z.any()).default({}),
+  metadata: z.object({
+    source: SourceEnum.default('manual'),
+    tags: z.array(z.string().min(1)).default([]),
+    confidence: z.number().min(0).max(1).default(0.8),
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+    validatedAt: TimestampSchema.optional(),
+  }),
+});
+
+export const EnvironmentRelationshipSchema = z.object({
+  id: IdSchema,
+  environmentId: IdSchema,
+  fromEntityId: IdSchema,
+  toEntityId: IdSchema,
+  relation: z.enum([
+    'hosts',
+    'depends_on',
+    'owned_by',
+    'observed_in',
+    'accessed_via',
+    'documents',
+    'mirrors',
+    'runs_on',
+  ]),
+  direction: z.enum(['directed', 'bidirectional']).default('directed'),
+  notes: z.string().optional(),
+  createdAt: TimestampSchema,
+});
+
+export const EnvironmentAccessPathSchema = z.object({
+  id: IdSchema,
+  environmentId: IdSchema,
+  entityId: IdSchema,
+  name: z.string().min(1),
+  method: z.enum(['ssh', 'http', 'https', 'cli', 'vpn', 'rdp', 'other']),
+  endpoint: z.string().min(1),
+  prerequisites: z.array(z.string().min(1)).default([]),
+  commandRefIds: z.array(IdSchema).default([]),
+  notes: z.string().optional(),
+  createdAt: TimestampSchema,
+  validatedAt: TimestampSchema.optional(),
+});
+
+export const EnvironmentProcedureStepSchema = z.object({
+  order: z.number().int().min(1),
+  instruction: z.string().min(1),
+  commandRefId: IdSchema.optional(),
+  expectedOutcome: z.string().optional(),
+  onFailure: z.string().optional(),
+});
+
+export const EnvironmentProcedureSchema = z.object({
+  id: IdSchema,
+  environmentId: IdSchema,
+  name: z.string().min(1),
+  intent: z.string().min(1),
+  targetEntityIds: z.array(IdSchema).default([]),
+  steps: z.array(EnvironmentProcedureStepSchema).min(1),
+  lastValidatedAt: TimestampSchema.optional(),
+  owner: z.string().min(1).optional(),
+  tags: z.array(z.string().min(1)).default([]),
+  createdAt: TimestampSchema,
+  updatedAt: TimestampSchema,
+});
+
+export const EnvironmentMetadataSchema = z.object({
+  owner: z.string().min(1).optional(),
+  tags: z.array(z.string().min(1)).default([]),
+  source: SourceEnum.default('manual'),
+  createdAt: TimestampSchema,
+  updatedAt: TimestampSchema,
+  lastValidatedAt: TimestampSchema.optional(),
+});
+
+export const EnvironmentTwinRecordSchema = z.object({
+  id: IdSchema,
+  slug: z.string().min(2).regex(/^[a-z0-9][a-z0-9._/-]*$/),
+  name: z.string().min(1),
+  metadata: EnvironmentMetadataSchema,
+});
+
+export const EnvironmentTwinCreateRequestSchema = z.object({
+  slug: EnvironmentTwinRecordSchema.shape.slug,
+  name: EnvironmentTwinRecordSchema.shape.name,
+  metadata: z
+    .object({
+      owner: EnvironmentMetadataSchema.shape.owner,
+      tags: EnvironmentMetadataSchema.shape.tags,
+      source: EnvironmentMetadataSchema.shape.source,
+      lastValidatedAt: EnvironmentMetadataSchema.shape.lastValidatedAt,
+    })
+    .default({}),
+});
+
+export const EnvironmentSummarySchema = z.object({
+  id: IdSchema,
+  slug: EnvironmentTwinRecordSchema.shape.slug,
+  name: EnvironmentTwinRecordSchema.shape.name,
+  owner: z.string().optional(),
+  recordCount: z.number().int().min(0),
+  relationshipCount: z.number().int().min(0),
+  procedureCount: z.number().int().min(0),
+  updatedAt: TimestampSchema,
+  lastValidatedAt: TimestampSchema.optional(),
+});
+
+export const EnvironmentContextBundleSchema = z.object({
+  environment: EnvironmentTwinRecordSchema,
+  records: z.array(EnvironmentRecordSchema).default([]),
+  relationships: z.array(EnvironmentRelationshipSchema).default([]),
+  accessPaths: z.array(EnvironmentAccessPathSchema).default([]),
+  procedures: z.array(EnvironmentProcedureSchema).default([]),
+});
+
+export const normalizeEnvironmentItemLimit = (
+  limit?: number,
+  fallback = 50,
+  max = 200,
+) => {
+  const normalizedFallback = Number.isFinite(fallback) ? Math.max(1, Math.floor(fallback)) : 50;
+  const normalizedMax = Number.isFinite(max)
+    ? Math.max(normalizedFallback, Math.floor(max))
+    : normalizedFallback;
+  if (limit === undefined) return normalizedFallback;
+  if (!Number.isFinite(limit)) return normalizedFallback;
+  return Math.min(normalizedMax, Math.max(1, Math.floor(limit)));
+};
+
 export const MemoryTierEnum = z.enum(['session', 'episodic', 'semantic', 'procedural']);
 export const MemoryRetentionStrategyEnum = z.enum(['session', 'ttl', 'durable']);
 
@@ -623,6 +770,17 @@ export type WorkspaceCheckpointCreateRequest = z.infer<
 >;
 export type WorkspaceSummary = z.infer<typeof WorkspaceSummarySchema>;
 export type WorkspaceContextBundle = z.infer<typeof WorkspaceContextBundleSchema>;
+export type EnvironmentEntityKind = z.infer<typeof EnvironmentEntityKindEnum>;
+export type EnvironmentRecord = z.infer<typeof EnvironmentRecordSchema>;
+export type EnvironmentRelationship = z.infer<typeof EnvironmentRelationshipSchema>;
+export type EnvironmentAccessPath = z.infer<typeof EnvironmentAccessPathSchema>;
+export type EnvironmentProcedureStep = z.infer<typeof EnvironmentProcedureStepSchema>;
+export type EnvironmentProcedure = z.infer<typeof EnvironmentProcedureSchema>;
+export type EnvironmentMetadata = z.infer<typeof EnvironmentMetadataSchema>;
+export type EnvironmentTwinRecord = z.infer<typeof EnvironmentTwinRecordSchema>;
+export type EnvironmentTwinCreateRequest = z.infer<typeof EnvironmentTwinCreateRequestSchema>;
+export type EnvironmentSummary = z.infer<typeof EnvironmentSummarySchema>;
+export type EnvironmentContextBundle = z.infer<typeof EnvironmentContextBundleSchema>;
 export type MemoryTier = z.infer<typeof MemoryTierEnum>;
 export type MemoryRetentionStrategy = z.infer<typeof MemoryRetentionStrategyEnum>;
 export type MemoryProvenance = z.infer<typeof MemoryProvenanceSchema>;

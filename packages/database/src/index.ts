@@ -6,6 +6,13 @@ import { fileURLToPath } from 'node:url';
 import {
   deriveWorkspaceSummary,
   DomainEventSchema,
+  EnvironmentAccessPathSchema,
+  EnvironmentProcedureSchema,
+  EnvironmentRecordSchema,
+  EnvironmentRelationshipSchema,
+  EnvironmentSummarySchema,
+  EnvironmentTwinCreateRequestSchema,
+  EnvironmentTwinRecordSchema,
   MemoryConsolidationRequestSchema,
   MemoryReadRequestSchema,
   MemoryRecordSchema,
@@ -16,7 +23,15 @@ import {
   WorkspaceRecordSchema,
   WorkspaceStatePatchSchema,
   WorkspaceSummarySchema,
+  normalizeEnvironmentItemLimit,
   normalizeWorkspaceCheckpointLimit,
+  type EnvironmentAccessPath,
+  type EnvironmentProcedure,
+  type EnvironmentRecord,
+  type EnvironmentRelationship,
+  type EnvironmentSummary,
+  type EnvironmentTwinCreateRequest,
+  type EnvironmentTwinRecord,
   type MemoryConsolidationRequest,
   type MemoryReadRequest,
   type MemoryRecord,
@@ -472,6 +487,103 @@ const parseWorkspaceCheckpointRow = (row: Record<string, unknown>): WorkspaceChe
     createdBy: row.created_by,
   });
 
+const parseEnvironmentRow = (row: Record<string, unknown>): EnvironmentTwinRecord =>
+  EnvironmentTwinRecordSchema.parse({
+    id: row.id,
+    slug: row.slug,
+    name: row.name,
+    metadata: JSON.parse(String(row.metadata_json)),
+  });
+
+const parseEnvironmentRecordRow = (row: Record<string, unknown>): EnvironmentRecord =>
+  EnvironmentRecordSchema.parse({
+    id: row.id,
+    environmentId: row.environment_id,
+    kind: row.kind,
+    name: row.name,
+    description: row.description ?? undefined,
+    attributes: JSON.parse(String(row.attributes_json)),
+    metadata: JSON.parse(String(row.metadata_json)),
+  });
+
+const parseEnvironmentRelationshipRow = (row: Record<string, unknown>): EnvironmentRelationship =>
+  EnvironmentRelationshipSchema.parse({
+    id: row.id,
+    environmentId: row.environment_id,
+    fromEntityId: row.from_entity_id,
+    toEntityId: row.to_entity_id,
+    relation: row.relation,
+    direction: row.direction,
+    notes: row.notes ?? undefined,
+    createdAt: row.created_at,
+  });
+
+const parseEnvironmentAccessPathRow = (row: Record<string, unknown>): EnvironmentAccessPath =>
+  EnvironmentAccessPathSchema.parse({
+    id: row.id,
+    environmentId: row.environment_id,
+    entityId: row.entity_id,
+    name: row.name,
+    method: row.method,
+    endpoint: row.endpoint,
+    prerequisites: JSON.parse(String(row.prerequisites_json)),
+    commandRefIds: JSON.parse(String(row.command_ref_ids_json)),
+    notes: row.notes ?? undefined,
+    createdAt: row.created_at,
+    validatedAt: row.validated_at ?? undefined,
+  });
+
+const parseEnvironmentProcedureRow = (row: Record<string, unknown>): EnvironmentProcedure =>
+  EnvironmentProcedureSchema.parse({
+    id: row.id,
+    environmentId: row.environment_id,
+    name: row.name,
+    intent: row.intent,
+    targetEntityIds: JSON.parse(String(row.target_entity_ids_json)),
+    steps: JSON.parse(String(row.steps_json)),
+    lastValidatedAt: row.last_validated_at ?? undefined,
+    owner: row.owner ?? undefined,
+    tags: JSON.parse(String(row.tags_json)),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  });
+
+const pickLatestTimestamp = (left?: string, right?: string): string | undefined => {
+  if (!left) return right;
+  if (!right) return left;
+  return right > left ? right : left;
+};
+
+const touchEnvironmentMetadata = (
+  db: Database.Database,
+  environment: EnvironmentTwinRecord,
+  options?: {
+    lastValidatedAt?: string;
+  },
+) => {
+  const updatedMeta = {
+    ...environment.metadata,
+    updatedAt: now(),
+    lastValidatedAt: pickLatestTimestamp(
+      environment.metadata.lastValidatedAt,
+      options?.lastValidatedAt,
+    ),
+  };
+
+  db.prepare(
+    `UPDATE environments
+     SET metadata_json = @metadata_json,
+         updated_at = @updated_at,
+         last_validated_at = @last_validated_at
+     WHERE id = @id`,
+  ).run({
+    id: environment.id,
+    metadata_json: JSON.stringify(updatedMeta),
+    updated_at: updatedMeta.updatedAt,
+    last_validated_at: updatedMeta.lastValidatedAt ?? null,
+  });
+};
+
 export const workspaceRepo = (db: Database.Database) => ({
   create: (input: WorkspaceCreateRequest): WorkspaceRecord => {
     const parsed = WorkspaceCreateRequestSchema.parse(input);
@@ -659,6 +771,283 @@ export const workspaceRepo = (db: Database.Database) => ({
       .all(workspaceId, parsedLimit) as Array<Record<string, unknown>>;
 
     return rows.map(parseWorkspaceCheckpointRow);
+  },
+});
+
+export const environmentRepo = (db: Database.Database) => ({
+  create: (input: EnvironmentTwinCreateRequest): EnvironmentTwinRecord => {
+    const parsed = EnvironmentTwinCreateRequestSchema.parse(input);
+    const existing = db.prepare('SELECT id FROM environments WHERE slug = ?').get(parsed.slug);
+    if (existing) {
+      throw new Error(`environment slug already exists: ${parsed.slug}`);
+    }
+
+    const timestamp = now();
+    const record = EnvironmentTwinRecordSchema.parse({
+      id: id('env'),
+      slug: parsed.slug,
+      name: parsed.name,
+      metadata: {
+        owner: parsed.metadata.owner,
+        tags: parsed.metadata.tags ?? [],
+        source: parsed.metadata.source ?? 'manual',
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        lastValidatedAt: parsed.metadata.lastValidatedAt,
+      },
+    });
+
+    db.prepare(
+      `INSERT INTO environments (id,slug,name,metadata_json,created_at,updated_at,last_validated_at)
+       VALUES (@id,@slug,@name,@metadata_json,@created_at,@updated_at,@last_validated_at)`,
+    ).run({
+      id: record.id,
+      slug: record.slug,
+      name: record.name,
+      metadata_json: JSON.stringify(record.metadata),
+      created_at: record.metadata.createdAt,
+      updated_at: record.metadata.updatedAt,
+      last_validated_at: record.metadata.lastValidatedAt ?? null,
+    });
+
+    return record;
+  },
+
+  list: (): EnvironmentSummary[] => {
+    const rows = db
+      .prepare('SELECT * FROM environments ORDER BY updated_at DESC')
+      .all() as Array<Record<string, unknown>>;
+
+    return rows.map((row) => {
+      const env = parseEnvironmentRow(row);
+      const recordCount =
+        (db
+          .prepare('SELECT COUNT(*) as count FROM environment_records WHERE environment_id = ?')
+          .get(env.id) as { count: number })?.count ?? 0;
+      const relationshipCount =
+        (db
+          .prepare('SELECT COUNT(*) as count FROM environment_relationships WHERE environment_id = ?')
+          .get(env.id) as { count: number })?.count ?? 0;
+      const procedureCount =
+        (db
+          .prepare('SELECT COUNT(*) as count FROM environment_procedures WHERE environment_id = ?')
+          .get(env.id) as { count: number })?.count ?? 0;
+
+      return EnvironmentSummarySchema.parse({
+        id: env.id,
+        slug: env.slug,
+        name: env.name,
+        owner: env.metadata.owner,
+        recordCount,
+        relationshipCount,
+        procedureCount,
+        updatedAt: env.metadata.updatedAt,
+        lastValidatedAt: env.metadata.lastValidatedAt,
+      });
+    });
+  },
+
+  getBySlug: (slug: string): EnvironmentTwinRecord | null => {
+    const row = db.prepare('SELECT * FROM environments WHERE slug = ?').get(slug) as
+      | Record<string, unknown>
+      | undefined;
+    if (!row) return null;
+    return parseEnvironmentRow(row);
+  },
+
+  upsertRecord: (environmentId: string, record: EnvironmentRecord): EnvironmentRecord | null => {
+    const envRow = db.prepare('SELECT * FROM environments WHERE id = ?').get(environmentId) as
+      | Record<string, unknown>
+      | undefined;
+    if (!envRow) return null;
+
+    const parsed = EnvironmentRecordSchema.parse(record);
+    if (parsed.environmentId !== environmentId) {
+      throw new Error('record.environmentId must match route environment id');
+    }
+
+    db.prepare(
+      `INSERT INTO environment_records
+       (id,environment_id,kind,name,description,attributes_json,metadata_json,created_at,updated_at,validated_at)
+       VALUES (@id,@environment_id,@kind,@name,@description,@attributes_json,@metadata_json,@created_at,@updated_at,@validated_at)
+       ON CONFLICT(id) DO UPDATE SET
+         kind=excluded.kind,
+         name=excluded.name,
+         description=excluded.description,
+         attributes_json=excluded.attributes_json,
+         metadata_json=excluded.metadata_json,
+         updated_at=excluded.updated_at,
+         validated_at=excluded.validated_at`,
+    ).run({
+      id: parsed.id,
+      environment_id: environmentId,
+      kind: parsed.kind,
+      name: parsed.name,
+      description: parsed.description ?? null,
+      attributes_json: JSON.stringify(parsed.attributes),
+      metadata_json: JSON.stringify(parsed.metadata),
+      created_at: parsed.metadata.createdAt,
+      updated_at: parsed.metadata.updatedAt,
+      validated_at: parsed.metadata.validatedAt ?? null,
+    });
+
+    const env = parseEnvironmentRow(envRow);
+    touchEnvironmentMetadata(db, env, {
+      lastValidatedAt: parsed.metadata.validatedAt,
+    });
+
+    const row = db.prepare('SELECT * FROM environment_records WHERE id = ?').get(parsed.id) as
+      | Record<string, unknown>
+      | undefined;
+    if (!row) return null;
+    return parseEnvironmentRecordRow(row);
+  },
+
+  listRecords: (environmentId: string, limit = 50): EnvironmentRecord[] => {
+    const parsedLimit = normalizeEnvironmentItemLimit(limit, 50, 200);
+    const rows = db
+      .prepare(
+        'SELECT * FROM environment_records WHERE environment_id = ? ORDER BY updated_at DESC LIMIT ?',
+      )
+      .all(environmentId, parsedLimit) as Array<Record<string, unknown>>;
+
+    return rows.map(parseEnvironmentRecordRow);
+  },
+
+  addRelationship: (
+    environmentId: string,
+    input: EnvironmentRelationship,
+  ): EnvironmentRelationship | null => {
+    const envRow = db.prepare('SELECT * FROM environments WHERE id = ?').get(environmentId) as
+      | Record<string, unknown>
+      | undefined;
+    if (!envRow) return null;
+
+    const parsed = EnvironmentRelationshipSchema.parse(input);
+    if (parsed.environmentId !== environmentId) {
+      throw new Error('relationship.environmentId must match route environment id');
+    }
+
+    db.prepare(
+      `INSERT INTO environment_relationships
+       (id,environment_id,from_entity_id,to_entity_id,relation,direction,notes,created_at)
+       VALUES (@id,@environment_id,@from_entity_id,@to_entity_id,@relation,@direction,@notes,@created_at)`,
+    ).run({
+      id: parsed.id,
+      environment_id: environmentId,
+      from_entity_id: parsed.fromEntityId,
+      to_entity_id: parsed.toEntityId,
+      relation: parsed.relation,
+      direction: parsed.direction,
+      notes: parsed.notes ?? null,
+      created_at: parsed.createdAt,
+    });
+
+    touchEnvironmentMetadata(db, parseEnvironmentRow(envRow));
+
+    return parsed;
+  },
+
+  listRelationships: (environmentId: string, limit = 50): EnvironmentRelationship[] => {
+    const parsedLimit = normalizeEnvironmentItemLimit(limit, 50, 200);
+    const rows = db
+      .prepare(
+        'SELECT * FROM environment_relationships WHERE environment_id = ? ORDER BY created_at DESC LIMIT ?',
+      )
+      .all(environmentId, parsedLimit) as Array<Record<string, unknown>>;
+    return rows.map(parseEnvironmentRelationshipRow);
+  },
+
+  addAccessPath: (environmentId: string, input: EnvironmentAccessPath): EnvironmentAccessPath | null => {
+    const envRow = db.prepare('SELECT * FROM environments WHERE id = ?').get(environmentId) as
+      | Record<string, unknown>
+      | undefined;
+    if (!envRow) return null;
+
+    const parsed = EnvironmentAccessPathSchema.parse(input);
+    if (parsed.environmentId !== environmentId) {
+      throw new Error('accessPath.environmentId must match route environment id');
+    }
+
+    db.prepare(
+      `INSERT INTO environment_access_paths
+       (id,environment_id,entity_id,name,method,endpoint,prerequisites_json,command_ref_ids_json,notes,created_at,validated_at)
+       VALUES (@id,@environment_id,@entity_id,@name,@method,@endpoint,@prerequisites_json,@command_ref_ids_json,@notes,@created_at,@validated_at)`,
+    ).run({
+      id: parsed.id,
+      environment_id: environmentId,
+      entity_id: parsed.entityId,
+      name: parsed.name,
+      method: parsed.method,
+      endpoint: parsed.endpoint,
+      prerequisites_json: JSON.stringify(parsed.prerequisites),
+      command_ref_ids_json: JSON.stringify(parsed.commandRefIds),
+      notes: parsed.notes ?? null,
+      created_at: parsed.createdAt,
+      validated_at: parsed.validatedAt ?? null,
+    });
+
+    touchEnvironmentMetadata(db, parseEnvironmentRow(envRow), {
+      lastValidatedAt: parsed.validatedAt,
+    });
+
+    return parsed;
+  },
+
+  listAccessPaths: (environmentId: string, limit = 50): EnvironmentAccessPath[] => {
+    const parsedLimit = normalizeEnvironmentItemLimit(limit, 50, 200);
+    const rows = db
+      .prepare(
+        'SELECT * FROM environment_access_paths WHERE environment_id = ? ORDER BY created_at DESC LIMIT ?',
+      )
+      .all(environmentId, parsedLimit) as Array<Record<string, unknown>>;
+    return rows.map(parseEnvironmentAccessPathRow);
+  },
+
+  addProcedure: (environmentId: string, input: EnvironmentProcedure): EnvironmentProcedure | null => {
+    const envRow = db.prepare('SELECT * FROM environments WHERE id = ?').get(environmentId) as
+      | Record<string, unknown>
+      | undefined;
+    if (!envRow) return null;
+
+    const parsed = EnvironmentProcedureSchema.parse(input);
+    if (parsed.environmentId !== environmentId) {
+      throw new Error('procedure.environmentId must match route environment id');
+    }
+
+    db.prepare(
+      `INSERT INTO environment_procedures
+       (id,environment_id,name,intent,target_entity_ids_json,steps_json,last_validated_at,owner,tags_json,created_at,updated_at)
+       VALUES (@id,@environment_id,@name,@intent,@target_entity_ids_json,@steps_json,@last_validated_at,@owner,@tags_json,@created_at,@updated_at)`,
+    ).run({
+      id: parsed.id,
+      environment_id: environmentId,
+      name: parsed.name,
+      intent: parsed.intent,
+      target_entity_ids_json: JSON.stringify(parsed.targetEntityIds),
+      steps_json: JSON.stringify(parsed.steps),
+      last_validated_at: parsed.lastValidatedAt ?? null,
+      owner: parsed.owner ?? null,
+      tags_json: JSON.stringify(parsed.tags),
+      created_at: parsed.createdAt,
+      updated_at: parsed.updatedAt,
+    });
+
+    touchEnvironmentMetadata(db, parseEnvironmentRow(envRow), {
+      lastValidatedAt: parsed.lastValidatedAt,
+    });
+
+    return parsed;
+  },
+
+  listProcedures: (environmentId: string, limit = 50): EnvironmentProcedure[] => {
+    const parsedLimit = normalizeEnvironmentItemLimit(limit, 50, 200);
+    const rows = db
+      .prepare(
+        'SELECT * FROM environment_procedures WHERE environment_id = ? ORDER BY updated_at DESC LIMIT ?',
+      )
+      .all(environmentId, parsedLimit) as Array<Record<string, unknown>>;
+    return rows.map(parseEnvironmentProcedureRow);
   },
 });
 

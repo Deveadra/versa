@@ -237,3 +237,18 @@ pnpm test
 ```
 
 The existing Aerith/Ultron project structure and workflows remain intact.
+
+### Redesign hardening references (WS12)
+
+For rollout hardening guidance across redesign workstreams, use:
+
+- [`docs/redesign/ws12-rollout-hardening.md`](docs/redesign/ws12-rollout-hardening.md)
+- [`docs/local-dev-startup.md`](docs/local-dev-startup.md)
+- [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
+
+This WS12 guidance provides:
+
+- redesign validation matrix coverage (WS01–WS12)
+- migration rehearsal and local rollout checklists
+- rollback/recovery runbook steps
+- known limitations and operational boundaries

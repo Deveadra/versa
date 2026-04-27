@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
 from base.database.sqlite import SQLiteConn
+from base.self_improve.iteration_controller import (
+    IterationBudget,
+)
 from base.self_improve.iteration_controller import (
     RepoJanitorIterationController as IterationController,
 )
@@ -77,7 +79,7 @@ class PRManagerStub:
 def _mk_controller(
     tmp_path: Path, db: SQLiteConn, scoreboard: ScoreboardStub
 ) -> IterationController:
-    ctl: IterationController = IterationController.__new__(IterationController)
+    ctl = cast(Any, IterationController.__new__(IterationController))
 
     # minimal fields used by run()
     ctl.repo = tmp_path
@@ -103,7 +105,7 @@ def _mk_controller(
     # Keep reconcile calls harmless (tables exist; no fingerprints returned)
 
     # Helpers used during run()
-    ctl._artifact_relpath = lambda p: Path(p).relative_to(tmp_path).as_posix()
+    ctl._artifact_relpath = lambda path: Path(path).relative_to(tmp_path).as_posix()
 
     def _write_json(path: Path, payload: dict[str, Any]):
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -111,14 +113,17 @@ def _mk_controller(
 
     ctl._write_json = _write_json
 
-    ctl._write_attempt_summary_artifact = lambda *, run_artifact_dir, iteration, branch, stage, improved, error, attempt_artifacts, extra=None: {
-        "path": str(
-            (run_artifact_dir / f"iteration_{iteration:02d}_attempt_summary.json").resolve()
-        ),
-        "relative_path": (run_artifact_dir / f"iteration_{iteration:02d}_attempt_summary.json")
-        .relative_to(tmp_path)
-        .as_posix(),
-    }
+    def _write_attempt_summary_artifact(**kwargs: Any) -> dict[str, str]:
+        artifact_path = (
+            Path(kwargs["run_artifact_dir"])
+            / f"iteration_{int(kwargs['iteration']):02d}_attempt_summary.json"
+        )
+        return {
+            "path": str(artifact_path.resolve()),
+            "relative_path": artifact_path.relative_to(tmp_path).as_posix(),
+        }
+
+    ctl._write_attempt_summary_artifact = _write_attempt_summary_artifact
 
     # Score comparisons: prefer comparison_score if present (matches your real behavior)
     ctl._score_value = lambda res: float(getattr(res, "comparison_score", res.score()))
@@ -142,7 +147,7 @@ def _mk_controller(
 
     ctl._score_delta_summary = _score_delta_summary
 
-    return ctl
+    return cast(IterationController, ctl)
 
 
 @pytest.fixture
@@ -172,7 +177,8 @@ def test_safe_autofix_transient_improvement_is_not_error(
     )
     monkeypatch.setattr(settings, "github_default_branch", "feature/flywheel", raising=False)
 
-    # Health improves because gates drop (baseline=1 -> after=0), but worktree stays clean => transient.
+    # Health improves because gates drop (baseline=1 -> after=0),
+    # but worktree stays clean => transient.
     sb = ScoreboardStub(
         repo=tmp_path,
         results=[
@@ -185,7 +191,7 @@ def test_safe_autofix_transient_improvement_is_not_error(
 
     ctl = _mk_controller(tmp_path, db, sb)
 
-    budget = SimpleNamespace(
+    budget = IterationBudget(
         max_iterations=1,
         max_seconds=999,
         gap_limit=5,
@@ -223,7 +229,7 @@ def test_safe_autofix_no_change_is_not_error(tmp_path: Path, db: SQLiteConn, mon
 
     ctl = _mk_controller(tmp_path, db, sb)
 
-    budget = SimpleNamespace(
+    budget = IterationBudget(
         max_iterations=1,
         max_seconds=999,
         gap_limit=5,

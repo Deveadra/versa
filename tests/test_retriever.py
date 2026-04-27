@@ -1,3 +1,4 @@
+import contextlib
 import os
 import sqlite3
 import tempfile
@@ -45,10 +46,8 @@ class RetrieverTests(unittest.TestCase):
         self.conn.commit()
 
     def tearDown(self):
-        try:
-            os.unlink(self.dbfile)
-        except Exception:
-            pass
+      with contextlib.suppress(Exception):
+          os.unlink(self.dbfile)
 
     def test_query_matches(self):
         class ConnWrapper:

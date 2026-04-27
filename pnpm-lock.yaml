@@ -44,6 +44,9 @@ importers:
 
   apps/ai:
     dependencies:
+      '@versa/approvals':
+        specifier: workspace:*
+        version: link:../../packages/approvals
       '@versa/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -108,6 +111,12 @@ importers:
       '@types/react-dom':
         specifier: ^19.0.4
         version: 19.2.3(@types/react@19.2.14)
+
+  packages/approvals:
+    dependencies:
+      '@versa/shared':
+        specifier: workspace:*
+        version: link:../shared
 
   packages/config:
     dependencies:

@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ActionPolicyRuleSchema,
+  ApprovalDecisionRecordSchema,
+  ApprovalEnforcementOutcomeSchema,
+  ApprovalRequestSchema,
   EnvironmentContextBundleSchema,
   EnvironmentTwinCreateRequestSchema,
   DoctrineSchema,
   DomainEventSchema,
+  isTrustLevelAtLeast,
+  isTrustLevelAtMost,
   MemoryConsolidationRequestSchema,
   MemoryReadRequestSchema,
   MemoryWriteRequestSchema,
@@ -11,6 +17,7 @@ import {
   SkillExecutionRequestSchema,
   SkillExecutionResultSchema,
   TelemetryEventSchema,
+  TrustLevelEnum,
   WorkspaceCheckpointCreateRequestSchema,
   WorkspaceCreateRequestSchema,
   WorkspaceStatePatchSchema,
@@ -382,5 +389,81 @@ describe('Skill contracts', () => {
 
     expect(request.skillId).toBe('repo-inspection');
     expect(result.status).toBe('succeeded');
+  });
+});
+
+describe('Approval and trust-ladder contracts', () => {
+  it('validates trust level enum and ordering helpers', () => {
+    const trust = TrustLevelEnum.parse('safe-act');
+
+    expect(trust).toBe('safe-act');
+    expect(isTrustLevelAtLeast('safe-act', 'draft')).toBe(true);
+    expect(isTrustLevelAtMost('propose', 'safe-act')).toBe(true);
+    expect(isTrustLevelAtLeast('observe', 'propose')).toBe(false);
+  });
+
+  it('validates approval request, policy rule, and enforcement outcome contracts', () => {
+    const request = ApprovalRequestSchema.parse({
+      requestId: 'apr_12345678',
+      requestedAt: new Date().toISOString(),
+      actor: 'ai-service',
+      trustLevel: 'draft',
+      action: 'skills.execute',
+      classification: {
+        id: 'cls_skill_execute',
+        category: 'execute',
+        impact: 'medium',
+        reversible: true,
+        requiresNetwork: false,
+      },
+      audit: {
+        traceId: 'trace-approval-1',
+        source: 'apps.ai',
+        timestamp: new Date().toISOString(),
+      },
+      context: {
+        skillId: 'repo-inspection',
+      },
+    });
+
+    const rule = ActionPolicyRuleSchema.parse({
+      id: 'policy-skill-exec-medium',
+      name: 'Skill execution medium impact',
+      description: 'Medium-impact execute actions at draft trust require operator approval.',
+      actionPattern: 'skills.execute',
+      minTrustLevel: 'draft',
+      appliesToImpact: ['medium', 'high', 'critical'],
+      outcome: 'require_approval',
+      requiresApproval: true,
+      rationale: 'Execution can produce side effects and must be reviewed at this trust level.',
+      enabled: true,
+    });
+
+    const decision = ApprovalDecisionRecordSchema.parse({
+      decisionId: 'apd_12345678',
+      requestId: request.requestId,
+      decision: 'requires_operator',
+      decidedAt: new Date().toISOString(),
+      decidedBy: 'policy-engine',
+      reason: 'Operator approval required by policy.',
+      policyRuleId: rule.id,
+      audit: request.audit,
+    });
+
+    const enforcement = ApprovalEnforcementOutcomeSchema.parse({
+      request,
+      result: {
+        requestId: request.requestId,
+        outcome: 'require_approval',
+        reason: decision.reason,
+        policyRuleId: rule.id,
+        evaluatedAt: new Date().toISOString(),
+        requiresApproval: true,
+      },
+      decision,
+    });
+
+    expect(enforcement.result.outcome).toBe('require_approval');
+    expect(enforcement.decision?.decision).toBe('requires_operator');
   });
 });

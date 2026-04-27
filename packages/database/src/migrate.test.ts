@@ -33,18 +33,24 @@ const logNativeModuleDiagnostics = (env: NodeJS.ProcessEnv) => {
 };
 
 const ensureBetterSqlite3ForActiveNode = (env: NodeJS.ProcessEnv) => {
-  try {
+  const verifyLoad = () => {
     execSync("node -e \"require('better-sqlite3');\"", {
       cwd: repoRoot,
       env,
       stdio: 'pipe',
     });
+  };
+
+  try {
+    verifyLoad();
   } catch {
-    execSync('pnpm rebuild better-sqlite3 --filter @versa/database', {
+    execSync('pnpm --filter @versa/database rebuild better-sqlite3', {
       cwd: repoRoot,
       env,
       stdio: 'pipe',
     });
+
+    verifyLoad();
   }
 };
 

@@ -213,6 +213,93 @@ export const TelemetryEventSchema = z.object({
   attributes: z.record(z.any()).default({}),
 });
 
+export const McpTransportEnum = z.enum(['stdio', 'http']);
+
+export const CapabilityKindEnum = z.enum(['resource', 'tool', 'prompt', 'workflow']);
+
+const JsonSchemaShape = z.object({
+  type: z.string().min(1),
+  properties: z.record(z.any()).default({}),
+  required: z.array(z.string().min(1)).optional(),
+});
+
+export const McpResourceDefinitionSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().min(1),
+  uriTemplate: z.string().min(1),
+  methods: z.array(z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])).min(1),
+  transport: McpTransportEnum,
+});
+
+export const McpToolDefinitionSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().min(1),
+  inputSchema: JsonSchemaShape,
+  outputSchema: JsonSchemaShape,
+  sideEffectLevel: z.enum(['read', 'bounded_write', 'blocked']),
+  approvalsRequired: z.boolean().default(true),
+});
+
+export const McpPromptDefinitionSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().min(1),
+  inputSchema: JsonSchemaShape,
+  outputSchema: JsonSchemaShape,
+  requiresApproval: z.boolean().default(true),
+});
+
+export const CapabilityApprovalMetadataSchema = z.object({
+  required: z.boolean().default(true),
+  policyRef: z.string().min(1),
+  writeAllowed: z.boolean().default(false),
+});
+
+export const CapabilityMetadataSchema = z.object({
+  title: z.string().min(1),
+  summary: z.string().min(1),
+  owner: z.string().min(1),
+  lifecycle: z.enum(['active', 'deprecated', 'experimental']).default('active'),
+  sensitivity: SensitivityEnum.default('internal'),
+  tags: z.array(z.string().min(1)).default([]),
+  approvals: CapabilityApprovalMetadataSchema,
+});
+
+export const CapabilityRegistryEntrySchema = z.object({
+  capabilityId: z.string().min(1),
+  kind: CapabilityKindEnum,
+  metadata: CapabilityMetadataSchema,
+  resources: z.array(McpResourceDefinitionSchema).default([]),
+  tools: z.array(McpToolDefinitionSchema).default([]),
+  prompts: z.array(McpPromptDefinitionSchema).default([]),
+  status: z.enum(['active', 'disabled']).default('active'),
+});
+
+export const GatewayHealthStatusSchema = z.object({
+  service: z.string().min(1),
+  status: z.enum(['ok', 'degraded', 'down']),
+  transport: McpTransportEnum,
+  uptimeMs: z.number().int().min(0),
+  registeredCapabilities: z.number().int().min(0),
+  telemetryEnabled: z.boolean(),
+  approvalsRequiredByDefault: z.boolean(),
+  timestamp: TimestampSchema,
+});
+
+export const CapabilityRegistrationResultSchema = z.object({
+  registered: z.array(CapabilityRegistryEntrySchema),
+  count: z.number().int().min(0),
+  status: z.enum(['ok', 'partial', 'error']).default('ok'),
+});
+
+export const CapabilityLookupResultSchema = z.object({
+  capabilityId: z.string().min(1),
+  found: z.boolean(),
+  entry: CapabilityRegistryEntrySchema.optional(),
+});
+
 export const DoctrineDecisionPriorityEnum = z.enum([
   'operator_safety',
   'mission_alignment',
@@ -831,6 +918,17 @@ export type TraceContext = z.infer<typeof TraceContextSchema>;
 export type TelemetryActor = z.infer<typeof TelemetryActorSchema>;
 export type TelemetryLevel = z.infer<typeof TelemetryLevelEnum>;
 export type TelemetryEvent = z.infer<typeof TelemetryEventSchema>;
+export type McpTransport = z.infer<typeof McpTransportEnum>;
+export type CapabilityKind = z.infer<typeof CapabilityKindEnum>;
+export type McpResourceDefinition = z.infer<typeof McpResourceDefinitionSchema>;
+export type McpToolDefinition = z.infer<typeof McpToolDefinitionSchema>;
+export type McpPromptDefinition = z.infer<typeof McpPromptDefinitionSchema>;
+export type CapabilityApprovalMetadata = z.infer<typeof CapabilityApprovalMetadataSchema>;
+export type CapabilityMetadata = z.infer<typeof CapabilityMetadataSchema>;
+export type CapabilityRegistryEntry = z.infer<typeof CapabilityRegistryEntrySchema>;
+export type GatewayHealthStatus = z.infer<typeof GatewayHealthStatusSchema>;
+export type CapabilityRegistrationResult = z.infer<typeof CapabilityRegistrationResultSchema>;
+export type CapabilityLookupResult = z.infer<typeof CapabilityLookupResultSchema>;
 export type DoctrineDecisionPriority = z.infer<typeof DoctrineDecisionPriorityEnum>;
 export type DoctrineEscalationSeverity = z.infer<typeof DoctrineEscalationSeverityEnum>;
 export type DoctrineResponseStyle = z.infer<typeof DoctrineResponseStyleSchema>;

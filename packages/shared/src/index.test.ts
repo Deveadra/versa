@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   ActionPolicyRuleSchema,
+  CapabilityLookupResultSchema,
+  CapabilityRegistrationResultSchema,
+  CapabilityRegistryEntrySchema,
   ApprovalDecisionRecordSchema,
   ApprovalEnforcementOutcomeSchema,
   ApprovalRequestSchema,
   EnvironmentContextBundleSchema,
   EnvironmentTwinCreateRequestSchema,
+  GatewayHealthStatusSchema,
   DoctrineSchema,
   DomainEventSchema,
   isTrustLevelAtLeast,
@@ -68,6 +72,68 @@ describe('TelemetryEventSchema', () => {
 
     expect(parsed.context.traceId).toBe('trace-123');
     expect(parsed.level).toBe('info');
+  });
+});
+
+describe('MCP gateway contracts', () => {
+  it('validates foundational capability registry and health contracts', () => {
+    const entry = CapabilityRegistryEntrySchema.parse({
+      capabilityId: 'cap.memory.read',
+      kind: 'resource',
+      metadata: {
+        title: 'Memory read',
+        summary: 'Read memory through MCP gateway.',
+        owner: 'versa-platform',
+        lifecycle: 'active',
+        sensitivity: 'internal',
+        tags: ['ws09'],
+        approvals: {
+          required: true,
+          policyRef: 'ws08.approvals.default',
+          writeAllowed: false,
+        },
+      },
+      resources: [
+        {
+          id: 'resource.memory.read',
+          name: 'memory.read',
+          description: 'Read-only memory resource',
+          uriTemplate: '/memory?q={text}',
+          methods: ['GET'],
+          transport: 'http',
+        },
+      ],
+      tools: [],
+      prompts: [],
+      status: 'active',
+    });
+
+    const registration = CapabilityRegistrationResultSchema.parse({
+      registered: [entry],
+      count: 1,
+      status: 'ok',
+    });
+
+    const lookup = CapabilityLookupResultSchema.parse({
+      capabilityId: entry.capabilityId,
+      found: true,
+      entry,
+    });
+
+    const health = GatewayHealthStatusSchema.parse({
+      service: 'mcp-gateway',
+      status: 'ok',
+      transport: 'http',
+      uptimeMs: 1200,
+      registeredCapabilities: registration.count,
+      telemetryEnabled: true,
+      approvalsRequiredByDefault: true,
+      timestamp: new Date().toISOString(),
+    });
+
+    expect(registration.count).toBe(1);
+    expect(lookup.entry?.capabilityId).toBe('cap.memory.read');
+    expect(health.service).toBe('mcp-gateway');
   });
 });
 

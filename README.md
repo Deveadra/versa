@@ -221,6 +221,7 @@ This repository now also includes a TypeScript monorepo foundation under:
 - `apps/web` (Next.js shell)
 - `apps/core` (core API)
 - `apps/ai` (AI adapter boundary)
+- `apps/mcp-gateway` (canonical MCP gateway + capability registry edge surface)
 - `packages/*` shared packages (`shared`, `database`, `config`, `security`, etc.)
 
 Use these root workspace commands for the new stack:

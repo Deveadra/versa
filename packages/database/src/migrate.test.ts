@@ -8,13 +8,65 @@ const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = resolve(packageRoot, '../..');
 const testDatabaseUrl = resolve(packageRoot, 'data/test.db');
 
+<<<<<<< Updated upstream
+=======
+const logNativeModuleDiagnostics = (env: NodeJS.ProcessEnv) => {
+  const runtime = execSync("node -p \"process.version + ' modules=' + process.versions.modules\"", {
+    cwd: repoRoot,
+    env,
+    stdio: 'pipe',
+  })
+    .toString()
+    .trim();
+
+  const nativeBinaryPath = execSync(
+    "node -e \"const path=require('node:path'); const pkg=require.resolve('better-sqlite3/package.json'); const dir=path.dirname(pkg); console.log(path.join(dir, 'build/Release/better_sqlite3.node'));\"",
+    {
+      cwd: repoRoot,
+      env,
+      stdio: 'pipe',
+    },
+  )
+    .toString()
+    .trim();
+
+  console.info('[migration smoke] Node runtime:', runtime);
+  console.info('[migration smoke] better-sqlite3 binary:', nativeBinaryPath);
+};
+
+const ensureBetterSqlite3ForActiveNode = (env: NodeJS.ProcessEnv) => {
+  try {
+    execSync("node -e \"require('better-sqlite3');\"", {
+      cwd: repoRoot,
+      env,
+      stdio: 'pipe',
+    });
+  } catch {
+    execSync('pnpm rebuild better-sqlite3 --filter @versa/database', {
+      cwd: repoRoot,
+      env,
+      stdio: 'pipe',
+    });
+  }
+};
+
+>>>>>>> Stashed changes
 describe('migration smoke', () => {
   it('creates tasks table', () => {
     const env = {
       ...process.env,
       DATABASE_URL: testDatabaseUrl,
+<<<<<<< Updated upstream
     };
 
+=======
+      npm_config_nodedir: '/usr',
+    };
+
+    logNativeModuleDiagnostics(env);
+    ensureBetterSqlite3ForActiveNode(env);
+
+>>>>>>> Stashed changes
     execSync('pnpm --filter @versa/database reset', {
       cwd: repoRoot,
       env,
@@ -84,5 +136,9 @@ describe('migration smoke', () => {
     expect(environmentProcedureRow?.name).toBe('environment_procedures');
 
     db.close();
+<<<<<<< Updated upstream
   });
+=======
+  }, 30_000);
+>>>>>>> Stashed changes
 });

@@ -49,6 +49,13 @@ The matrix below maps each workstream surface to concrete validation paths avail
 
 Use this sequence to rehearse migration + baseline startup from a clean local state:
 
+Script source-of-truth note:
+
+- The DB commands below intentionally match root scripts in `package.json`:
+  - `db:reset` → `pnpm --filter @versa/database reset`
+  - `db:migrate` → `pnpm --filter @versa/database migrate`
+  - `db:seed` → `pnpm --filter @versa/database seed`
+
 1. Install dependencies:
    - `pnpm install`
 2. Reset and rebuild local DB state:
@@ -62,11 +69,18 @@ Use this sequence to rehearse migration + baseline startup from a clean local st
 4. Optional runtime startup checks:
    - `pnpm --filter @versa/core dev`
    - `pnpm --filter @versa/ai dev`
+   - `pnpm --filter @versa/mcp-gateway dev` (when validating MCP HTTP surfaces)
    - `pnpm --filter @versa/web dev`
 5. Verify core operational routes manually:
    - Core: `/health`, `/events`, `/workspaces`, `/memory`, `/environments`
-   - AI: `/health`, `/skills`, `/bridge/health`, `/bridge/capabilities`
+   - AI: `/health`, `/skills`, `/bridge/health`, `/bridge/capabilities`, `/ai/execute` (POST)
    - MCP gateway: `/health`, `/mcp/health`, `/mcp/capabilities`
+
+Route verification source-of-truth note:
+
+- Core routes above are implemented in `apps/core/src/server.ts`.
+- AI routes above are implemented in `apps/ai/src/server.ts`.
+- MCP gateway routes above are implemented in `apps/mcp-gateway/src/server.ts`.
 
 ## Rollout checklist
 
@@ -99,7 +113,10 @@ If post-change validation fails or local state becomes inconsistent:
 
 ## Known limitations and blockers
 
-- CI currently has both `ci.yml` (TypeScript/pnpm quality path) and `ci.yaml` (Python quality path). They represent different validation surfaces and can cause operational ambiguity.
+- CI authority is consolidated in `ci.yml` for both surfaces:
+  - TypeScript/Node quality: `node-quality` job
+  - Python quality: `python-lint` and `python-test` jobs
+- Python lint scope is currently constrained to stable quality targets (`tests`, `scripts`) to avoid failing every PR on broader legacy lint debt.
 - Top-level `README.md` still contains substantial legacy Python-first guidance; redesign hardening guidance is additive rather than a full documentation rewrite.
 - WS12 does not implement new runtime features; it formalizes validation and operational safety guidance for already-delivered workstreams.
 

@@ -7,6 +7,9 @@ import threading
 import time
 
 
+MIN_WAIT_TIME = 0.1  # seconds
+
+
 def test_busy_timeout_is_configured(db) -> None:
     ms = db.conn.execute("PRAGMA busy_timeout;").fetchone()[0]
     assert ms >= 1000, f"busy_timeout too low: {ms}ms (expected >= 1000ms)"
@@ -74,7 +77,7 @@ def test_concurrent_writer_waits_then_succeeds(tmp_path) -> None:
     t1.join(timeout=5)
 
     assert result.get("ok") is True, f"Writer failed unexpectedly: {err.get('e')}"
-    assert float(result.get("elapsed", 0.0)) >= 0.1  # it waited at least a bit
+    assert float(result.get("elapsed", 0.0)) >= MIN_WAIT_TIME  # it waited at least a bit
 
 
 def test_concurrent_writer_times_out(tmp_path) -> None:

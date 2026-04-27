@@ -1,5 +1,7 @@
 # ADR index
 
+Operational hardening and rollout guidance for redesign workstreams is documented in [`docs/redesign/ws12-rollout-hardening.md`](../redesign/ws12-rollout-hardening.md).
+
 - ADR-001 Monorepo inside versa
 - ADR-002 Local-first architecture
 - ADR-003 apps/ai adapter boundary

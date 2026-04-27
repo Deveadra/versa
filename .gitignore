@@ -39,21 +39,22 @@ aerith.db-shm
 
 # tests/
 reports/
-*reports/
 base/agents/orchestrator1.py
 orchestrator_feedback.patch
 apply_orchestrator_feedback.py
 base/agents/orchestrator.py.bak
 protect-main.sh
+artifacts/quality/
 
 # Secrets
-/.env/
 .env
 config/client_secret_*.json
 token*.pickle
 
-# Random files
+# Misc files
 md.md
+*.code-workspace
+
 # Phase 0 monorepo additions
 node_modules/
 .next/

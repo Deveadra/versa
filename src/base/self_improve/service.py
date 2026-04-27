@@ -13,6 +13,7 @@ from loguru import logger
 
 from base.quality.policy import RepairPolicy
 from base.quality.repair_service import QualityRepairService
+from base.quality.residual import ResidualRepairRequest, build_residual_repair_instruction
 from base.self_improve.iteration_controller import (
     IterationBudget,
     LeashPolicy,
@@ -299,6 +300,88 @@ class SelfImproveService:
     def _quality_gate_passed(report: dict[str, Any]) -> bool:
         final_snapshot = report.get("final_snapshot") or {}
         return int(final_snapshot.get("total_diagnostics", 0)) == 0
+
+    def _run_residual_quality_repair(
+        self,
+        *,
+        quality_report: dict[str, Any],
+        status_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        blocked = quality_report.get("blocked") or []
+        files_in_scope = quality_report.get("files_in_scope") or []
+        report_dir = quality_report.get("report_dir")
+
+        if not blocked or not files_in_scope:
+            return {"applied": False, "reason": "no residual diagnostics"}
+
+        diagnostics = []
+        from base.quality.models import Diagnostic, Severity, ToolName
+
+        for item in blocked:
+            tool = (
+                ToolName(item["tool"])
+                if item.get("tool") in {t.value for t in ToolName}
+                else ToolName.SYSTEM
+            )
+            severity = (
+                Severity(item["severity"])
+                if item.get("severity") in {s.value for s in Severity}
+                else Severity.ERROR
+            )
+            diagnostics.append(
+                Diagnostic(
+                    tool=tool,
+                    code=str(item.get("code") or "UNKNOWN"),
+                    message=str(item.get("message") or ""),
+                    severity=severity,
+                    path=Path(item["path"]) if item.get("path") else None,
+                    line=item.get("line"),
+                    column=item.get("column"),
+                    end_line=item.get("end_line"),
+                    end_column=item.get("end_column"),
+                    fixable=bool(item.get("fixable")),
+                )
+            )
+
+        instruction = build_residual_repair_instruction(
+            ResidualRepairRequest(
+                files=tuple(Path(path) for path in files_in_scope),
+                diagnostics=tuple(diagnostics),
+                report_dir=report_dir,
+            )
+        )
+
+        self._emit_status(
+            status_callback,
+            phase="residual_repair",
+            state="start",
+            message="Running LLM residual quality repair",
+            pct=83,
+            branch=self._current_branch(),
+        )
+
+        proposal = self.proposal_engine.propose(instruction, index_md=self._index_md())
+        apply_results = self.proposal_engine.apply_proposal(proposal)
+
+        applied_any = any(ok for (_, ok, _) in apply_results)
+        self._emit_status(
+            status_callback,
+            phase="residual_repair",
+            state="complete",
+            message="LLM residual quality repair finished",
+            pct=87,
+            branch=self._current_branch(),
+            outcome="applied" if applied_any else "no_changes",
+        )
+
+        return {
+            "applied": applied_any,
+            "proposal_title": getattr(proposal, "title", ""),
+            "apply_results": [
+                {"path": change.path, "ok": ok, "message": message}
+                for (change, ok, message) in apply_results
+            ],
+        }
 
     def _changed_files_since_base(self, base: str) -> list[str]:
         out = self._git(["diff", "--name-only", f"{base}..HEAD"], check=False).stdout or ""
@@ -635,12 +718,26 @@ class SelfImproveService:
             result["quality_report"] = quality_report
 
             if not self._quality_gate_passed(quality_report):
-                result["quality_gate_failed"] = True
-                result["quality_report_dir"] = quality_report.get("report_dir")
-                result["improved"] = False
-                logger.warning(
-                    "[self-improve] quality repair gate blocked promotion; changed files remain dirty"
+                residual_result = self._run_residual_quality_repair(
+                    quality_report=quality_report,
+                    status_callback=cfg.status_callback,
                 )
+                result["residual_quality_repair"] = residual_result
+
+                if residual_result.get("applied"):
+                    quality_report = self._run_quality_gate(
+                        scope="changed_files",
+                        status_callback=cfg.status_callback,
+                    )
+                    result["quality_report_after_residual"] = quality_report
+
+                if not self._quality_gate_passed(quality_report):
+                    result["quality_gate_failed"] = True
+                    result["quality_report_dir"] = quality_report.get("report_dir")
+                    result["improved"] = False
+                    logger.warning(
+                        "[self-improve] quality repair gate blocked promotion after residual repair"
+                    )
 
         pr_url = result.get("pr_url")
         promotion_branch = str(result.get("branch") or branch)

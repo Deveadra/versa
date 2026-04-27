@@ -47,6 +47,12 @@ importers:
       '@versa/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@versa/logging':
+        specifier: workspace:*
+        version: link:../../packages/logging
+      '@versa/skills':
+        specifier: workspace:*
+        version: link:../../packages/skills
       express:
         specifier: ^4.21.2
         version: 4.22.1
@@ -59,12 +65,21 @@ importers:
       '@versa/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@versa/environment':
+        specifier: workspace:*
+        version: link:../../packages/environment
       '@versa/logging':
         specifier: workspace:*
         version: link:../../packages/logging
+      '@versa/memory':
+        specifier: workspace:*
+        version: link:../../packages/memory
       '@versa/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@versa/workspaces':
+        specifier: workspace:*
+        version: link:../../packages/workspaces
       cors:
         specifier: ^2.8.5
         version: 2.8.6
@@ -109,9 +124,31 @@ importers:
         specifier: ^11.8.1
         version: 11.10.0
 
+  packages/doctrine:
+    dependencies:
+      '@versa/shared':
+        specifier: workspace:*
+        version: link:../shared
+
+  packages/environment:
+    dependencies:
+      '@versa/shared':
+        specifier: workspace:*
+        version: link:../shared
+
   packages/integrations: {}
 
-  packages/logging: {}
+  packages/logging:
+    dependencies:
+      '@versa/shared':
+        specifier: workspace:*
+        version: link:../shared
+
+  packages/memory:
+    dependencies:
+      '@versa/shared':
+        specifier: workspace:*
+        version: link:../shared
 
   packages/security: {}
 
@@ -121,9 +158,24 @@ importers:
         specifier: ^3.24.2
         version: 3.25.76
 
+  packages/skills:
+    dependencies:
+      '@versa/shared':
+        specifier: workspace:*
+        version: link:../shared
+      zod:
+        specifier: ^3.24.2
+        version: 3.25.76
+
   packages/testing: {}
 
   packages/ui: {}
+
+  packages/workspaces:
+    dependencies:
+      '@versa/shared':
+        specifier: workspace:*
+        version: link:../shared
 
 packages:
 

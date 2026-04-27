@@ -4,6 +4,17 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
+PYTHON_EXTENSIONS: tuple[str, ...] = (".py",)
+TYPESCRIPT_EXTENSIONS: tuple[str, ...] = (
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+)
+REPAIRABLE_EXTENSIONS: tuple[str, ...] = PYTHON_EXTENSIONS + TYPESCRIPT_EXTENSIONS
+
 
 class RepairScopeMode(StrEnum):
     CHANGED_FILES = "changed_files"
@@ -18,7 +29,7 @@ class RepairPolicy:
     base_ref: str = "main"
     head_ref: str = "HEAD"
     include_untracked: bool = True
-    file_extensions: tuple[str, ...] = (".py",)
+    file_extensions: tuple[str, ...] = REPAIRABLE_EXTENSIONS
 
     auto_format: bool = True
     auto_fix_ruff: bool = True
@@ -29,6 +40,7 @@ class RepairPolicy:
     max_rounds: int = 3
     max_repairs_per_round: int = 25
     fail_on_unresolved: bool = True
+    fail_on_unsupported_files: bool = False
 
     report_root: Path = Path("artifacts/quality")
     allowed_rule_codes: frozenset[str] = field(default_factory=lambda: frozenset({"B904", "E722"}))
@@ -36,13 +48,22 @@ class RepairPolicy:
     ruff_binary: str = "ruff"
     pyright_binary: str = "pyright"
     pytest_binary: str = "pytest"
+    pnpm_binary: str = "pnpm"
+
+    @property
+    def python_extensions(self) -> tuple[str, ...]:
+        return PYTHON_EXTENSIONS
+
+    @property
+    def typescript_extensions(self) -> tuple[str, ...]:
+        return TYPESCRIPT_EXTENSIONS
 
     @classmethod
-    def for_changed_files(cls) -> RepairPolicy:
+    def for_changed_files(cls) -> "RepairPolicy":
         return cls(scope_mode=RepairScopeMode.CHANGED_FILES)
 
     @classmethod
-    def for_branch_delta(cls, base_ref: str, head_ref: str = "HEAD") -> RepairPolicy:
+    def for_branch_delta(cls, base_ref: str, head_ref: str = "HEAD") -> "RepairPolicy":
         return cls(
             scope_mode=RepairScopeMode.BRANCH_DELTA,
             base_ref=base_ref,
@@ -50,5 +71,5 @@ class RepairPolicy:
         )
 
     @classmethod
-    def for_full_repo(cls) -> RepairPolicy:
+    def for_full_repo(cls) -> "RepairPolicy":
         return cls(scope_mode=RepairScopeMode.FULL_REPO, include_untracked=False)

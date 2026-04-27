@@ -1,16 +1,88 @@
-import { describe, expect, it } from 'vitest';
 import { execSync } from 'node:child_process';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it } from 'vitest';
 import { connectDb } from './index';
+
+const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const repoRoot = resolve(packageRoot, '../..');
+const testDatabaseUrl = resolve(packageRoot, 'data/test.db');
 
 describe('migration smoke', () => {
   it('creates tasks table', () => {
-    process.env.DATABASE_URL = 'data/test.db';
-    execSync('pnpm --filter @versa/database reset', { stdio: 'pipe' });
-    execSync('pnpm --filter @versa/database migrate', { stdio: 'pipe' });
-    const db = connectDb(process.env.DATABASE_URL);
-    const row = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='tasks'").get() as
-      | { name: string }
-      | undefined;
+    const env = {
+      ...process.env,
+      DATABASE_URL: testDatabaseUrl,
+    };
+
+    execSync('pnpm --filter @versa/database reset', {
+      cwd: repoRoot,
+      env,
+      stdio: 'pipe',
+    });
+
+    execSync('pnpm --filter @versa/database migrate', {
+      cwd: repoRoot,
+      env,
+      stdio: 'pipe',
+    });
+
+    const db = connectDb(testDatabaseUrl);
+
+    const row = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='tasks'")
+      .get() as { name: string } | undefined;
+
     expect(row?.name).toBe('tasks');
+
+    const memoryRow = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='memories'")
+      .get() as { name: string } | undefined;
+
+    expect(memoryRow?.name).toBe('memories');
+
+    const workspaceRow = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='workspaces'")
+      .get() as { name: string } | undefined;
+
+    expect(workspaceRow?.name).toBe('workspaces');
+
+    const workspaceCheckpointRow = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='workspace_checkpoints'")
+      .get() as { name: string } | undefined;
+
+    expect(workspaceCheckpointRow?.name).toBe('workspace_checkpoints');
+
+    const environmentRow = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='environments'")
+      .get() as { name: string } | undefined;
+
+    expect(environmentRow?.name).toBe('environments');
+
+    const environmentRecordRow = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='environment_records'")
+      .get() as { name: string } | undefined;
+
+    expect(environmentRecordRow?.name).toBe('environment_records');
+
+    const environmentRelationshipRow = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='environment_relationships'")
+      .get() as { name: string } | undefined;
+
+    expect(environmentRelationshipRow?.name).toBe('environment_relationships');
+
+    const environmentAccessPathRow = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='environment_access_paths'")
+      .get() as { name: string } | undefined;
+
+    expect(environmentAccessPathRow?.name).toBe('environment_access_paths');
+
+    const environmentProcedureRow = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='environment_procedures'")
+      .get() as { name: string } | undefined;
+
+    expect(environmentProcedureRow?.name).toBe('environment_procedures');
+
+    db.close();
   });
 });

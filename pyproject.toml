@@ -16,6 +16,8 @@ dependencies = [
   "defusedxml",
   "faiss-cpu>=1.7.4",
   "loguru>=0.7.2",
+  "nodejs",
+  "npm",
   "psutil",
   "pydantic>=2.11.9",
   "python-dateutil>=2.8.2",
@@ -65,6 +67,7 @@ dev = [
   "hypothesis",
   "ruff>=0.5.0",
   "black>=24.0",
+  "pyright[nodejs]>=1.1.408",
 ]
 
 voice = [
@@ -105,9 +108,10 @@ exclude = [".git", ".venv", "__pycache__", "aerith.db"]
 
 [tool.ruff.lint]
 select = ["E","F","W","I","B","UP","SIM","PL"]
-ignore = ["E501", "PLR0911", "PLR0912", "PLR0913", "PLR0915", "PLW0603", "SIM105", "PLR2004"]
+# ignore = ["E402", "E501", "PLR0911", "PLR0912", "PLR0913", "PLR0915", "PLW0603", "SIM105", "PLR2004"]
 
 [tool.ruff.lint.per-file-ignores]
+"scripts/*.py" = ["E402"]
 "src/base/agents/orchestrator.py" = ["PLR0911"]
 "src/base/devops/git_client.py" = ["UP022"]
 "src/base/learning/habit_miner.py" = ["PLR2004"]
@@ -118,7 +122,6 @@ ignore = ["E501", "PLR0911", "PLR0912", "PLR0913", "PLR0915", "PLW0603", "SIM105
 "src/base/self_improve/proposal_engine.py" = ["E741"]
 "src/base/self_improve/service.py" = ["PLC0415"]
 
-
 [tool.pytest.ini_options]
 addopts = "-ra --randomly-seed=1 --randomly-dont-reset-seed"
 pythonpath = ["src"]
@@ -128,6 +131,7 @@ markers = [
   "integration: tests touching multiple subsystems",
   "slow: intentionally slower tests"
 ]
+
 filterwarnings = [
   "ignore:Api key is used with an insecure connection\\.:UserWarning:base\\.memory\\.vector_backend",
   "ignore:Importing 'parser.split_arg_string' is deprecated:DeprecationWarning",

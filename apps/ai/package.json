@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@versa/config": "workspace:*",
+    "@versa/logging": "workspace:*",
+    "@versa/skills": "workspace:*",
     "express": "^4.21.2"
   }
 }

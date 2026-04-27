@@ -6,14 +6,14 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from base.quality.diff_scope import GitDiffScopeResolver
-from base.quality.policy import RepairPolicy
-from base.quality.runner import QualityRunner
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
+
+from base.quality.diff_scope import GitDiffScopeResolver
+from base.quality.policy import RepairPolicy
+from base.quality.runner import QualityRunner
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -30,6 +30,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+
+    # from base.quality.diff_scope import GitDiffScopeResolver
+    # from base.quality.policy import RepairPolicy
+    # from base.quality.runner import QualityRunner
+
     args = build_parser().parse_args()
 
     if args.scope == "changed_files":
@@ -51,7 +56,7 @@ def main() -> int:
 
     output_root = REPO_ROOT / "artifacts" / "quality"
     output_root.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%S.%fZ")
     output_path = output_root / f"verify-{timestamp}.json"
     output_path.write_text(
         json.dumps(

@@ -13,6 +13,7 @@ const booleanFromEnv = z.preprocess((value) => {
 
 const RuntimeModeSchema = z.enum(['local', 'hybrid', 'cloud']);
 const NodeEnvSchema = z.enum(['development', 'test', 'production']);
+const BridgeModeSchema = z.enum(['disabled', 'shadow', 'primary']);
 
 const ConfigSchema = z.object({
   CORE_PORT: z.coerce.number().default(4000),
@@ -45,9 +46,14 @@ const ConfigSchema = z.object({
   TELEMETRY_SERVICE_NAME: z.string().default('versa'),
 
   BRIDGE_ENABLED: booleanFromEnv.default(false),
+  BRIDGE_MODE: BridgeModeSchema.default('disabled'),
+  BRIDGE_LEGACY_RUNTIME_URL: z.string().url().default('http://127.0.0.1:8000'),
   BRIDGE_CORE_URL: z.string().url().default('http://127.0.0.1:4000'),
   BRIDGE_AI_URL: z.string().url().default('http://127.0.0.1:4010'),
   BRIDGE_TIMEOUT_MS: z.coerce.number().int().positive().default(4000),
+  BRIDGE_HEALTH_PATH: z.string().default('/health'),
+  BRIDGE_CAPABILITIES_PATH: z.string().default('/capabilities'),
+  BRIDGE_INVOKE_PATH: z.string().default('/invoke'),
 });
 
 export type VersaConfig = z.infer<typeof ConfigSchema>;

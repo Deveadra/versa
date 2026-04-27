@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@versa/approvals": "workspace:*",
+    "@versa/bridge": "workspace:*",
     "@versa/config": "workspace:*",
     "@versa/logging": "workspace:*",
     "@versa/shared": "workspace:*",

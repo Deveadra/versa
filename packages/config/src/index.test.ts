@@ -23,6 +23,11 @@ describe('parseConfig', () => {
     expect(parsed.MCP_ENABLED).toBe(false);
     expect(parsed.TELEMETRY_ENABLED).toBe(false);
     expect(parsed.BRIDGE_ENABLED).toBe(false);
+    expect(parsed.BRIDGE_MODE).toBe('disabled');
+    expect(parsed.BRIDGE_LEGACY_RUNTIME_URL).toBe('http://127.0.0.1:8000');
+    expect(parsed.BRIDGE_HEALTH_PATH).toBe('/health');
+    expect(parsed.BRIDGE_CAPABILITIES_PATH).toBe('/capabilities');
+    expect(parsed.BRIDGE_INVOKE_PATH).toBe('/invoke');
   });
 
   it('coerces booleans, numbers, and validates enums', () => {
@@ -35,7 +40,12 @@ describe('parseConfig', () => {
       MCP_ENABLED: '1',
       TELEMETRY_OTLP_ENABLED: 'yes',
       BRIDGE_ENABLED: 'on',
+      BRIDGE_MODE: 'shadow',
+      BRIDGE_LEGACY_RUNTIME_URL: 'http://127.0.0.1:18000',
       BRIDGE_TIMEOUT_MS: '9000',
+      BRIDGE_HEALTH_PATH: '/runtime/health',
+      BRIDGE_CAPABILITIES_PATH: '/runtime/capabilities',
+      BRIDGE_INVOKE_PATH: '/runtime/invoke',
       MCP_TRANSPORT: 'http',
     });
 
@@ -47,13 +57,20 @@ describe('parseConfig', () => {
     expect(parsed.MCP_ENABLED).toBe(true);
     expect(parsed.TELEMETRY_OTLP_ENABLED).toBe(true);
     expect(parsed.BRIDGE_ENABLED).toBe(true);
+    expect(parsed.BRIDGE_MODE).toBe('shadow');
+    expect(parsed.BRIDGE_LEGACY_RUNTIME_URL).toBe('http://127.0.0.1:18000');
     expect(parsed.BRIDGE_TIMEOUT_MS).toBe(9000);
+    expect(parsed.BRIDGE_HEALTH_PATH).toBe('/runtime/health');
+    expect(parsed.BRIDGE_CAPABILITIES_PATH).toBe('/runtime/capabilities');
+    expect(parsed.BRIDGE_INVOKE_PATH).toBe('/runtime/invoke');
     expect(parsed.MCP_TRANSPORT).toBe('http');
   });
 
   it('rejects invalid values', () => {
     expect(() => parseConfig({ RUNTIME_MODE: 'legacy' })).toThrow();
+    expect(() => parseConfig({ BRIDGE_MODE: 'legacy' })).toThrow();
     expect(() => parseConfig({ BRIDGE_CORE_URL: 'not-a-url' })).toThrow();
+    expect(() => parseConfig({ BRIDGE_LEGACY_RUNTIME_URL: 'not-a-url' })).toThrow();
     expect(() => parseConfig({ FEATURE_MEMORY_ENABLED: 'definitely' })).toThrow();
   });
 });

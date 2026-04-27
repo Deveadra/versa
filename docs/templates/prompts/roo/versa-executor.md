@@ -8,8 +8,8 @@ Execute this task card only. Stay in scope. Read the issue and task card first, 
 
 ---
 
-Issue: `https://github.com/Deveadra/versa/issues/53`
-Task card: docs/task-cards/active/ws08-issue-53-approvals-trust-ladder.md
+Issue: `https://github.com/Deveadra/versa/issues/55`
+Task card: docs/task-cards/active/ws10-issue-55-ai-convergence-bridge.md
 
 You are operating in Versa Executor mode for the `versa` repository.
 
@@ -39,7 +39,9 @@ Required workflow:
 
 Hard constraints:
 
-- Do not work outside this issue/task card.
+- It is allowed and approved to fix any validation tests that may be failing due to changes being made.
+- You must pass all validation tests in order to keep the code in a stable condition.
+- Do not work outside this issue/task card unless it is to fix validation testing.
 - Do not perform unrelated cleanup.
 - Do not delete or heavily rewrite legacy Python runtime code unless the issue explicitly authorizes it.
 - Do not create the work branch from the currently checked-out branch unless it exactly matches the task card’s Base Branch.

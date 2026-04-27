@@ -47,6 +47,9 @@ importers:
       '@versa/approvals':
         specifier: workspace:*
         version: link:../../packages/approvals
+      '@versa/bridge':
+        specifier: workspace:*
+        version: link:../../packages/bridge
       '@versa/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -131,6 +134,12 @@ importers:
         version: 19.2.3(@types/react@19.2.14)
 
   packages/approvals:
+    dependencies:
+      '@versa/shared':
+        specifier: workspace:*
+        version: link:../shared
+
+  packages/bridge:
     dependencies:
       '@versa/shared':
         specifier: workspace:*

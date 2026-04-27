@@ -3,7 +3,6 @@ import type { AiSkillSummary } from '../../lib/api';
 
 export type ApprovalVisibilitySnapshot = {
   governedSkillCount: number;
-  requireApprovalSkillCount: number;
   approvalRelatedEventCount: number;
 };
 
@@ -13,17 +12,20 @@ export const deriveApprovalVisibilitySnapshot = (
 ): ApprovalVisibilitySnapshot => {
   const governedSkills = skills.filter((skill) => skill.metadata.approval.required);
   const requireApprovalEvents = events.filter((event) => {
-    const payload = event.payload as Record<string, unknown>;
+    const payload = event.payload;
+    const hasApprovalSignals =
+      typeof payload === 'object' &&
+      payload !== null &&
+      ('approval' in payload || 'requiresApproval' in payload);
+
     return (
       event.eventType.toLowerCase().includes('approval') ||
-      'approval' in payload ||
-      'requiresApproval' in payload
+      hasApprovalSignals
     );
   });
 
   return {
     governedSkillCount: governedSkills.length,
-    requireApprovalSkillCount: governedSkills.length,
     approvalRelatedEventCount: requireApprovalEvents.length,
   };
 };

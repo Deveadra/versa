@@ -24,12 +24,12 @@ The navigation entry is added in [`apps/web/app/layout.tsx`](../../apps/web/app/
 The web API client in [`apps/web/lib/api.ts`](../../apps/web/lib/api.ts) is extended with typed operator-console fetchers:
 
 - core health (`GET /health`)
-- core-to-ai probe (`GET /ai/health`)
+- core-to-AI probe (`GET /ai/health`)
 - events (`GET /events`)
 - workspaces (`GET /workspaces`)
 - memory (`GET /memory`)
 - environments (`GET /environments`)
-- ai health (`GET /health` on AI service)
+- AI health (`GET /health` on AI service)
 - bridge health (`GET /bridge/health`)
 - skills summary (`GET /skills`)
 
@@ -55,4 +55,3 @@ Foundational console behavior coverage is added in [`apps/web/app/console/model.
 - No broad backend rewrites for frontend convenience
 - No legacy Python runtime deletion or heavy rewrite
 - No unrelated repository cleanup
-

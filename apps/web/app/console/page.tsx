@@ -79,20 +79,27 @@ export default function OperatorConsolePage() {
           fallback: T,
         ): T => (result.status === 'fulfilled' ? result.value : fallback);
 
+        const bridge = settledValue(bridgeHealth, bridgeHealthFallback);
+        const workspaceList = settledValue(workspaces, { data: [] });
+        const memoryList = settledValue(memory, { data: [] });
+        const eventList = settledValue(events, { data: [] });
+        const environmentList = settledValue(environments, { data: [] });
+        const skillList = settledValue(skills, { data: [] });
+
         setData({
           coreHealth: settledValue(coreHealth, { ok: false }),
           aiHealth: settledValue(aiHealth, { ok: false }),
           coreAiHealth: settledValue(coreAiHealth, { ok: false, fallback: 'probe unavailable' }),
           bridgeHealth: {
-            service: settledValue(bridgeHealth, bridgeHealthFallback).data.service,
-            status: settledValue(bridgeHealth, bridgeHealthFallback).data.status,
-            mode: settledValue(bridgeHealth, bridgeHealthFallback).data.mode,
+            service: bridge.data.service,
+            status: bridge.data.status,
+            mode: bridge.data.mode,
           },
-          workspaces: settledValue(workspaces, { data: [] }).data,
-          memory: settledValue(memory, { data: [] }).data,
-          events: settledValue(events, { data: [] }).data,
-          environments: settledValue(environments, { data: [] }).data,
-          skills: settledValue(skills, { data: [] }).data,
+          workspaces: workspaceList.data,
+          memory: memoryList.data,
+          events: eventList.data,
+          environments: environmentList.data,
+          skills: skillList.data,
         });
       } catch (err) {
         setError((err as Error).message);
@@ -168,7 +175,6 @@ export default function OperatorConsolePage() {
           <h3>Approvals visibility</h3>
           <ul>
             <li>Governed skills: {approvalView.governedSkillCount}</li>
-            <li>Skills requiring approval metadata: {approvalView.requireApprovalSkillCount}</li>
             <li>Approval-related events in sample: {approvalView.approvalRelatedEventCount}</li>
           </ul>
         </article>

@@ -8,6 +8,10 @@ Execute this task card only. Stay in scope. Read the issue and task card first, 
 
 ---
 
+Fix and Resolve all comments and their suggestions.
+
+---
+
 Issue: `https://github.com/Deveadra/versa/issues/56`
 Task card: docs/task-cards/active/ws11-issue-56-operator-console.md
 

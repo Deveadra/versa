@@ -63,7 +63,6 @@ describe('deriveApprovalVisibilitySnapshot', () => {
     );
 
     expect(snapshot.governedSkillCount).toBe(1);
-    expect(snapshot.requireApprovalSkillCount).toBe(1);
     expect(snapshot.approvalRelatedEventCount).toBe(1);
   });
 });

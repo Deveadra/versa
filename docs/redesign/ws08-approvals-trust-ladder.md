@@ -44,7 +44,7 @@ Ordering helpers (`trustLevelRank`, `isTrustLevelAtLeast`, `isTrustLevelAtMost`)
 - `defaultApprovalPolicyRules`
   - deny critical-impact actions by default
   - require approval for high-impact execution paths
-  - allow bounded medium execution only at/above `safe-act`
+  - allow bounded medium execution only at or above `safe-act`
 
 This foundational model is intentionally strict and conservative.
 

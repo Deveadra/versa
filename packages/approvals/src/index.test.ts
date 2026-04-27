@@ -29,7 +29,7 @@ describe('approvals package', () => {
     });
 
     expect(evaluated.result.outcome).toBe('require_approval');
-    expect(evaluated.decision).toBeNull();
+    expect(evaluated.decision).toBeUndefined();
   });
 
   it('auto-approves safe-act trust medium-impact skill execution', () => {

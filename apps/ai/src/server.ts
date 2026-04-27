@@ -1,14 +1,16 @@
+import { randomUUID } from 'node:crypto';
 import express, { Request, Response } from 'express';
 import { loadConfig } from '@versa/config';
 import { classifySkillExecution, createApprovalPolicyEngine } from '@versa/approvals';
 import {
   createLogger,
+  getTelemetryContext,
   createNdjsonFileSink,
   createRequestTelemetryMiddleware,
   createTelemetrySink,
 } from '@versa/logging';
 import { createFoundationalSkillRegistry, type SkillDefinition } from '@versa/skills';
-import { getTelemetryContext } from '@versa/logging';
+import { TrustLevelEnum } from '@versa/shared';
 
 const app = express();
 const cfg = loadConfig();
@@ -51,7 +53,7 @@ app.get('/skills', (_req: Request, res: Response) =>
 );
 
 app.post('/skills/execute', (req: Request, res: Response) => {
-  const requestId = `apr_${Date.now()}`;
+  const requestId = randomUUID();
   const trace = getTelemetryContext(req);
 
   if (cfg.FEATURE_APPROVALS_ENABLED) {
@@ -62,12 +64,18 @@ app.post('/skills/execute', (req: Request, res: Response) => {
       typeof req.body.input === 'object' &&
       ((req.body.input as Record<string, unknown>).risky === true ||
         (req.body.input as Record<string, unknown>).destructive === true);
+    const trustLevelInput =
+      req.body?.context && typeof req.body.context === 'object'
+        ? (req.body.context as Record<string, unknown>).trustLevel
+        : undefined;
+    const parsedTrustLevel = TrustLevelEnum.safeParse(trustLevelInput);
+    const trustLevel = parsedTrustLevel.success ? parsedTrustLevel.data : 'safe-act';
 
     const approval = approvalPolicy.decide({
       requestId,
       requestedAt: new Date().toISOString(),
       actor: 'ai-service',
-      trustLevel: 'draft',
+      trustLevel,
       action: 'skills.execute',
       classification: classifySkillExecution({
         action: 'skills.execute',

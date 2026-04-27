@@ -8,8 +8,6 @@ const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = resolve(packageRoot, '../..');
 const testDatabaseUrl = resolve(packageRoot, 'data/test.db');
 
-<<<<<<< Updated upstream
-=======
 const logNativeModuleDiagnostics = (env: NodeJS.ProcessEnv) => {
   const runtime = execSync("node -p \"process.version + ' modules=' + process.versions.modules\"", {
     cwd: repoRoot,
@@ -50,23 +48,17 @@ const ensureBetterSqlite3ForActiveNode = (env: NodeJS.ProcessEnv) => {
   }
 };
 
->>>>>>> Stashed changes
 describe('migration smoke', () => {
   it('creates tasks table', () => {
     const env = {
       ...process.env,
       DATABASE_URL: testDatabaseUrl,
-<<<<<<< Updated upstream
-    };
-
-=======
       npm_config_nodedir: '/usr',
     };
 
     logNativeModuleDiagnostics(env);
     ensureBetterSqlite3ForActiveNode(env);
 
->>>>>>> Stashed changes
     execSync('pnpm --filter @versa/database reset', {
       cwd: repoRoot,
       env,
@@ -136,9 +128,5 @@ describe('migration smoke', () => {
     expect(environmentProcedureRow?.name).toBe('environment_procedures');
 
     db.close();
-<<<<<<< Updated upstream
-  });
-=======
   }, 30_000);
->>>>>>> Stashed changes
 });

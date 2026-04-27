@@ -11,15 +11,15 @@ import {
   type ApprovalResult,
 } from '@versa/shared';
 
-export type PolicyEvaluationInput = ApprovalRequest;
+export type PolicyEvaluationInput = unknown;
 
 export type PolicyEvaluationResult = ApprovalResult;
 
 export type ApprovalPolicyEngine = {
-  evaluate(input: PolicyEvaluationInput): PolicyEvaluationResult;
+  evaluate(request: ApprovalRequest): PolicyEvaluationResult;
   decide(input: PolicyEvaluationInput): {
     result: PolicyEvaluationResult;
-    decision: ApprovalDecisionRecord | null;
+    decision?: ApprovalDecisionRecord;
   };
   listRules(): ActionPolicyRule[];
 };
@@ -100,8 +100,7 @@ const decideOutcomeToDecision = (
 export const createApprovalPolicyEngine = (rules: ActionPolicyRule[] = defaultApprovalPolicyRules) => {
   const normalizedRules = rules.map((rule) => ActionPolicyRuleSchema.parse(rule));
 
-  const evaluate = (input: PolicyEvaluationInput): PolicyEvaluationResult => {
-    const request = ApprovalRequestSchema.parse(input);
+  const evaluate = (request: ApprovalRequest): PolicyEvaluationResult => {
     const matchedRule = normalizedRules.find(
       (rule) =>
         rule.enabled &&
@@ -130,41 +129,34 @@ export const createApprovalPolicyEngine = (rules: ActionPolicyRule[] = defaultAp
     });
   };
 
+  const buildDecision = (
+    request: ApprovalRequest,
+    result: PolicyEvaluationResult,
+  ): ApprovalDecisionRecord =>
+    ApprovalDecisionRecordSchema.parse({
+      decisionId: `apd_${request.requestId}`,
+      requestId: request.requestId,
+      decision: decideOutcomeToDecision(result.outcome),
+      decidedAt: result.evaluatedAt,
+      decidedBy: 'approval-policy-engine',
+      reason: result.reason,
+      policyRuleId: result.policyRuleId,
+      audit: request.audit,
+    });
+
   const decide = (input: PolicyEvaluationInput) => {
     const request = ApprovalRequestSchema.parse(input);
     const result = evaluate(request);
 
     if (result.outcome === 'allow') {
-      const autoDecision = ApprovalDecisionRecordSchema.parse({
-        decisionId: `apd_${request.requestId}`,
-        requestId: request.requestId,
-        decision: decideOutcomeToDecision(result.outcome),
-        decidedAt: result.evaluatedAt,
-        decidedBy: 'approval-policy-engine',
-        reason: result.reason,
-        policyRuleId: result.policyRuleId,
-        audit: request.audit,
-      });
-
-      return { result, decision: autoDecision };
+      return { result, decision: buildDecision(request, result) };
     }
 
     if (result.outcome === 'deny') {
-      const denyDecision = ApprovalDecisionRecordSchema.parse({
-        decisionId: `apd_${request.requestId}`,
-        requestId: request.requestId,
-        decision: decideOutcomeToDecision(result.outcome),
-        decidedAt: result.evaluatedAt,
-        decidedBy: 'approval-policy-engine',
-        reason: result.reason,
-        policyRuleId: result.policyRuleId,
-        audit: request.audit,
-      });
-
-      return { result, decision: denyDecision };
+      return { result, decision: buildDecision(request, result) };
     }
 
-    return { result, decision: null };
+    return { result };
   };
 
   return {

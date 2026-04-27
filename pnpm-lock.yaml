@@ -53,6 +53,9 @@ importers:
       '@versa/logging':
         specifier: workspace:*
         version: link:../../packages/logging
+      '@versa/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@versa/skills':
         specifier: workspace:*
         version: link:../../packages/skills

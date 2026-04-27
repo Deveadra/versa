@@ -54,6 +54,8 @@ const capabilities = {
 const shouldUseLegacyBridge = (capabilityId: string, requestedTarget?: string) =>
   requestedTarget === 'legacy_python_runtime' || capabilityId.startsWith('legacy.');
 
+const bridgeInvocationTrustLevel = TrustLevelEnum.parse('safe-act');
+
 app.use(express.json());
 app.use(createRequestTelemetryMiddleware(logger));
 
@@ -98,7 +100,7 @@ app.post('/bridge/invoke', (req: Request, res: Response) => {
       requestId,
       requestedAt: new Date().toISOString(),
       actor: 'ai-service',
-      trustLevel: 'safe-act',
+      trustLevel: bridgeInvocationTrustLevel,
       action: 'bridge.invoke',
       classification: {
         id: parsedRequest.capabilityId,

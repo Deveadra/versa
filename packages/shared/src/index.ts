@@ -217,11 +217,13 @@ export const McpTransportEnum = z.enum(['stdio', 'http']);
 
 export const CapabilityKindEnum = z.enum(['resource', 'tool', 'prompt', 'workflow']);
 
-const JsonSchemaShape = z.object({
+const JsonSchemaShape = z
+  .object({
   type: z.string().min(1),
   properties: z.record(z.any()).default({}),
   required: z.array(z.string().min(1)).optional(),
-});
+  })
+  .passthrough();
 
 export const McpResourceDefinitionSchema = z.object({
   id: z.string().min(1),

@@ -135,6 +135,63 @@ describe('MCP gateway contracts', () => {
     expect(lookup.entry?.capabilityId).toBe('cap.memory.read');
     expect(health.service).toBe('mcp-gateway');
   });
+
+  it('preserves additional JSON schema keywords in MCP tool definitions', () => {
+    const entry = CapabilityRegistryEntrySchema.parse({
+      capabilityId: 'cap.tool.schema-extended',
+      kind: 'tool',
+      metadata: {
+        title: 'Schema extended tool',
+        summary: 'Tool with extended JSON schema keywords.',
+        owner: 'versa-platform',
+        lifecycle: 'active',
+        sensitivity: 'internal',
+        tags: ['ws09'],
+        approvals: {
+          required: true,
+          policyRef: 'ws08.approvals.default',
+          writeAllowed: false,
+        },
+      },
+      resources: [],
+      tools: [
+        {
+          id: 'tool.schema.extended',
+          name: 'schema.extended',
+          description: 'Tool with JSON schema extensions',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              values: {
+                type: 'array',
+                items: { type: 'string' },
+                minItems: 1,
+              },
+            },
+            required: ['values'],
+            additionalProperties: false,
+            oneOf: [{ required: ['values'] }],
+          },
+          outputSchema: {
+            type: 'object',
+            properties: {
+              ok: { type: 'boolean', enum: [true] },
+            },
+            additionalProperties: false,
+          },
+          sideEffectLevel: 'read',
+          approvalsRequired: true,
+        },
+      ],
+      prompts: [],
+      status: 'active',
+    });
+
+    const tool = entry.tools[0]!;
+    expect((tool.inputSchema as Record<string, unknown>).additionalProperties).toBe(false);
+    expect((tool.inputSchema as Record<string, unknown>).oneOf).toBeDefined();
+    expect((tool.outputSchema as Record<string, unknown>).additionalProperties).toBe(false);
+  });
 });
 
 describe('DoctrineSchema', () => {

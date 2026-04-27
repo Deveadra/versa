@@ -30,13 +30,14 @@ app.use(express.json());
 app.use(createRequestTelemetryMiddleware(logger));
 
 const buildHealth = () => buildGatewayHealth(cfg, process.uptime() * 1000);
+const healthResponse = () => ({ ok: true, data: buildHealth() });
 
 app.get('/health', (_req: Request, res: Response) => {
-  res.json({ ok: true, data: buildHealth() });
+  res.json(healthResponse());
 });
 
 app.get('/mcp/health', (_req: Request, res: Response) => {
-  res.json({ data: buildHealth() });
+  res.json(healthResponse());
 });
 
 app.get('/mcp/capabilities', (req: Request, res: Response) => {
@@ -64,16 +65,32 @@ app.get('/mcp/capabilities/:capabilityId', (req: Request, res: Response) => {
   return res.json({ data: result });
 });
 
-const server = app.listen(cfg.MCP_GATEWAY_PORT, () => {
-  logger.info('app.started', 'mcp gateway server started', {
-    port: cfg.MCP_GATEWAY_PORT,
+const shouldStartHttpListener = cfg.MCP_TRANSPORT === 'http';
+
+const server = shouldStartHttpListener
+  ? app.listen(cfg.MCP_GATEWAY_PORT, () => {
+      logger.info('app.started', 'mcp gateway server started', {
+        port: cfg.MCP_GATEWAY_PORT,
+        transport: cfg.MCP_TRANSPORT,
+        mcpEnabled: cfg.MCP_ENABLED,
+      });
+    })
+  : null;
+
+if (!shouldStartHttpListener) {
+  logger.info('app.started', 'mcp gateway started in stdio mode without http listener', {
     transport: cfg.MCP_TRANSPORT,
     mcpEnabled: cfg.MCP_ENABLED,
   });
-});
+}
 
 const handleShutdown = (signal: string) => {
   logger.info('app.shutdown.requested', 'mcp gateway shutdown requested', { signal });
+  if (!server) {
+    logger.info('app.stopped', 'mcp gateway stopped', { signal });
+    return;
+  }
+
   server.close(() => {
     logger.info('app.stopped', 'mcp gateway stopped', { signal });
   });

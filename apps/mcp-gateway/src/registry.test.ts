@@ -34,4 +34,17 @@ describe('mcp gateway foundational registry', () => {
     expect(health.transport).toBe('http');
     expect(health.approvalsRequiredByDefault).toBe(true);
   });
+
+  it('supports stdio transport in runtime health typing', () => {
+    const health = buildGatewayHealth(
+      {
+        MCP_ENABLED: true,
+        MCP_TRANSPORT: 'stdio',
+        TELEMETRY_ENABLED: false,
+      },
+      250,
+    );
+
+    expect(health.transport).toBe('stdio');
+  });
 });

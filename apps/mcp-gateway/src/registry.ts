@@ -10,12 +10,13 @@ import {
   type GatewayHealthStatus,
   type McpPromptDefinition,
   type McpResourceDefinition,
+  type McpTransport,
   type McpToolDefinition,
 } from '@versa/shared';
 
 type GatewayRuntimeConfig = {
   MCP_ENABLED: boolean;
-  MCP_TRANSPORT: 'stdio' | 'http';
+  MCP_TRANSPORT: McpTransport;
   TELEMETRY_ENABLED: boolean;
 };
 
@@ -189,6 +190,8 @@ export const buildGatewayHealth = (cfg: GatewayRuntimeConfig, uptimeMs: number):
     uptimeMs: Math.max(0, Math.round(uptimeMs)),
     registeredCapabilities: foundationalRegistryEntries.length,
     telemetryEnabled: cfg.TELEMETRY_ENABLED,
-    approvalsRequiredByDefault: true,
+    approvalsRequiredByDefault: foundationalRegistryEntries.every(
+      (entry) => entry.metadata.approvals.required,
+    ),
     timestamp: new Date().toISOString(),
   });

@@ -53,6 +53,36 @@ describe('migration smoke', () => {
 
     expect(workspaceCheckpointRow?.name).toBe('workspace_checkpoints');
 
+    const environmentRow = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='environments'")
+      .get() as { name: string } | undefined;
+
+    expect(environmentRow?.name).toBe('environments');
+
+    const environmentRecordRow = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='environment_records'")
+      .get() as { name: string } | undefined;
+
+    expect(environmentRecordRow?.name).toBe('environment_records');
+
+    const environmentRelationshipRow = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='environment_relationships'")
+      .get() as { name: string } | undefined;
+
+    expect(environmentRelationshipRow?.name).toBe('environment_relationships');
+
+    const environmentAccessPathRow = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='environment_access_paths'")
+      .get() as { name: string } | undefined;
+
+    expect(environmentAccessPathRow?.name).toBe('environment_access_paths');
+
+    const environmentProcedureRow = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='environment_procedures'")
+      .get() as { name: string } | undefined;
+
+    expect(environmentProcedureRow?.name).toBe('environment_procedures');
+
     db.close();
   });
 });

@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { loadConfig } from '@versa/config';
 import {
   connectDb,
+  environmentRepo,
   eventRepo,
   goalRepo,
   jobRepo,
@@ -20,6 +21,7 @@ import {
   createTelemetrySink,
   getTelemetryContext,
 } from '@versa/logging';
+import { createEnvironmentGateway } from '@versa/environment';
 import { createMemoryGateway } from '@versa/memory';
 import { createWorkspaceGateway } from '@versa/workspaces';
 import { MemoryTierEnum, type TraceContext } from '@versa/shared';
@@ -44,8 +46,10 @@ const study = studyRepo(db);
 const jobs = jobRepo(db);
 const memories = memoryRepo(db);
 const workspaces = workspaceRepo(db);
+const environments = environmentRepo(db);
 const memoryGateway = createMemoryGateway({ repository: memories });
 const workspaceGateway = createWorkspaceGateway({ repository: workspaces });
+const environmentGateway = createEnvironmentGateway({ repository: environments });
 const events = eventRepo(db);
 
 const telemetryFileSink = createNdjsonFileSink('artifacts/telemetry.ndjson');
@@ -391,6 +395,103 @@ app.get('/workspaces/*/context', (req: Request, res: Response) => {
   );
   if (!context) {
     return res.status(404).json({ error: 'workspace not found' });
+  }
+  return res.json({ data: context });
+});
+
+const environmentSlugFromRequest = (req: Request): string => {
+  const wildcard = req.params[0];
+  if (typeof wildcard === 'string' && wildcard.length > 0) {
+    return decodeURIComponent(wildcard);
+  }
+  return decodeURIComponent(asString(req.params.slug));
+};
+
+app.get('/environments', (_req: Request, res: Response) => {
+  return res.json({ data: environmentGateway.list() });
+});
+
+app.post('/environments', (req: Request, res: Response) => {
+  try {
+    const environment = environmentGateway.create(req.body);
+    return res.status(201).json({ data: environment });
+  } catch (error) {
+    return sendValidationError(res, error);
+  }
+});
+
+app.get('/environments/*', (req: Request, res: Response) => {
+  const environment = environmentGateway.getBySlug(environmentSlugFromRequest(req));
+  if (!environment) {
+    return res.status(404).json({ error: 'environment not found' });
+  }
+  return res.json({ data: environment });
+});
+
+app.put('/environments/*/records', (req: Request, res: Response) => {
+  try {
+    const record = environmentGateway.upsertRecord(environmentSlugFromRequest(req), req.body);
+    if (!record) {
+      return res.status(404).json({ error: 'environment not found' });
+    }
+    return res.json({ data: record });
+  } catch (error) {
+    return sendValidationError(res, error);
+  }
+});
+
+app.post('/environments/*/relationships', (req: Request, res: Response) => {
+  try {
+    const relationship = environmentGateway.addRelationship(environmentSlugFromRequest(req), req.body);
+    if (!relationship) {
+      return res.status(404).json({ error: 'environment not found' });
+    }
+    return res.status(201).json({ data: relationship });
+  } catch (error) {
+    return sendValidationError(res, error);
+  }
+});
+
+app.post('/environments/*/access-paths', (req: Request, res: Response) => {
+  try {
+    const accessPath = environmentGateway.addAccessPath(environmentSlugFromRequest(req), req.body);
+    if (!accessPath) {
+      return res.status(404).json({ error: 'environment not found' });
+    }
+    return res.status(201).json({ data: accessPath });
+  } catch (error) {
+    return sendValidationError(res, error);
+  }
+});
+
+app.post('/environments/*/procedures', (req: Request, res: Response) => {
+  try {
+    const procedure = environmentGateway.addProcedure(environmentSlugFromRequest(req), req.body);
+    if (!procedure) {
+      return res.status(404).json({ error: 'environment not found' });
+    }
+    return res.status(201).json({ data: procedure });
+  } catch (error) {
+    return sendValidationError(res, error);
+  }
+});
+
+app.get('/environments/*/context', (req: Request, res: Response) => {
+  const rawLimit = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined;
+  if (typeof req.query.limit === 'string' && !Number.isFinite(rawLimit)) {
+    return res.status(400).json({ error: 'limit must be a valid number' });
+  }
+
+  if (rawLimit !== undefined && rawLimit < 1) {
+    return res.status(400).json({ error: 'limit must be a positive number' });
+  }
+
+  const context = environmentGateway.getContextBundle(
+    environmentSlugFromRequest(req),
+    rawLimit !== undefined ? Math.floor(rawLimit) : 10,
+  );
+  if (!context) {
+    return res.status(404).json({ error: 'environment not found' });
   }
   return res.json({ data: context });
 });

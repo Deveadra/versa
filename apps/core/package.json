@@ -13,6 +13,7 @@
   "dependencies": {
     "@versa/config": "workspace:*",
     "@versa/database": "workspace:*",
+    "@versa/environment": "workspace:*",
     "@versa/logging": "workspace:*",
     "@versa/memory": "workspace:*",
     "@versa/shared": "workspace:*",

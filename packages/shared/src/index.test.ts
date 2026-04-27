@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  EnvironmentContextBundleSchema,
+  EnvironmentTwinCreateRequestSchema,
   DoctrineSchema,
   DomainEventSchema,
   MemoryConsolidationRequestSchema,
@@ -205,6 +207,100 @@ describe('Workspace contracts', () => {
     expect(create.slug).toBe('deveadra/versa');
     expect(patch.nextRecommendedActions?.[0]?.priority).toBe('high');
     expect(checkpoint.createdBy).toBe('orion');
+  });
+});
+
+describe('Environment twin contracts', () => {
+  it('validates environment twin create and context bundle contracts', () => {
+    const create = EnvironmentTwinCreateRequestSchema.parse({
+      slug: 'prod/us-east-1',
+      name: 'Production US East',
+      metadata: {
+        owner: 'platform',
+        tags: ['production', 'ws07'],
+        source: 'manual',
+      },
+    });
+
+    const context = EnvironmentContextBundleSchema.parse({
+      environment: {
+        id: 'env_12345678',
+        slug: create.slug,
+        name: create.name,
+        metadata: {
+          owner: 'platform',
+          tags: ['production'],
+          source: 'manual',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      },
+      records: [
+        {
+          id: 'enr_12345678',
+          environmentId: 'env_12345678',
+          kind: 'service',
+          name: 'core-api',
+          attributes: {
+            port: 4010,
+          },
+          metadata: {
+            source: 'manual',
+            tags: ['core', 'api'],
+            confidence: 0.9,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+        },
+      ],
+      relationships: [
+        {
+          id: 'enl_12345678',
+          environmentId: 'env_12345678',
+          fromEntityId: 'enr_12345678',
+          toEntityId: 'enr_87654321',
+          relation: 'depends_on',
+          direction: 'directed',
+          createdAt: new Date().toISOString(),
+        },
+      ],
+      accessPaths: [
+        {
+          id: 'eap_12345678',
+          environmentId: 'env_12345678',
+          entityId: 'enr_12345678',
+          name: 'core api local',
+          method: 'http',
+          endpoint: 'http://localhost:4010/health',
+          prerequisites: ['core server running'],
+          commandRefIds: [],
+          createdAt: new Date().toISOString(),
+        },
+      ],
+      procedures: [
+        {
+          id: 'epr_12345678',
+          environmentId: 'env_12345678',
+          name: 'restart core api',
+          intent: 'recover core service after config update',
+          targetEntityIds: ['enr_12345678'],
+          steps: [
+            {
+              order: 1,
+              instruction: 'run pnpm --filter @versa/core dev',
+              expectedOutcome: 'core service starts and health endpoint returns ok',
+            },
+          ],
+          tags: ['recovery'],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ],
+    });
+
+    expect(create.slug).toBe('prod/us-east-1');
+    expect(context.records[0]?.kind).toBe('service');
+    expect(context.procedures[0]?.steps[0]?.order).toBe(1);
   });
 });
 

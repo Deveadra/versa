@@ -302,6 +302,102 @@ export const CapabilityLookupResultSchema = z.object({
   entry: CapabilityRegistryEntrySchema.optional(),
 });
 
+export const BridgeExecutionModeEnum = z.enum(['disabled', 'shadow', 'primary']);
+
+export const BridgeTargetRuntimeEnum = z.enum(['legacy_python']);
+
+export const BridgeOperationEnum = z.enum(['health', 'capabilities', 'invoke']);
+
+export const BridgeCapabilitySchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().min(1),
+  version: z.string().min(1).default('legacy'),
+  owner: z.enum(['legacy_python_runtime', 'typescript_platform']).default('legacy_python_runtime'),
+  status: z.enum(['available', 'unavailable']).default('available'),
+  metadata: z.record(z.any()).default({}),
+});
+
+export const BridgeHealthStatusSchema = z.object({
+  service: z.string().min(1),
+  status: z.enum(['ok', 'degraded', 'down']),
+  mode: BridgeExecutionModeEnum,
+  targetRuntime: BridgeTargetRuntimeEnum,
+  endpoint: z.string().min(1).optional(),
+  latencyMs: z.number().int().min(0).optional(),
+  lastCheckedAt: TimestampSchema,
+  details: z.record(z.any()).default({}),
+});
+
+export const BridgeRequestContextSchema = TraceContextSchema.partial().extend({
+  actor: z.string().min(1).optional(),
+  source: z.string().min(1).optional(),
+});
+
+export const LegacyBridgeRequestSchema = z
+  .object({
+    requestId: z.string().min(1),
+    operation: BridgeOperationEnum,
+    capabilityId: z.string().min(1).optional(),
+    payload: z.record(z.any()).default({}),
+    context: BridgeRequestContextSchema.default({}),
+  })
+  .refine((value) => value.operation !== 'invoke' || Boolean(value.capabilityId), {
+    message: 'capabilityId is required for invoke operation',
+  });
+
+export const LegacyBridgeErrorSchema = z.object({
+  code: z.string().min(1),
+  message: z.string().min(1),
+  details: z.record(z.any()).optional(),
+});
+
+export const LegacyBridgeResponseSchema = z.object({
+  requestId: z.string().min(1),
+  operation: BridgeOperationEnum,
+  status: z.enum(['ok', 'unavailable', 'error']),
+  targetRuntime: BridgeTargetRuntimeEnum.default('legacy_python'),
+  capabilityId: z.string().min(1).optional(),
+  data: z.record(z.any()).default({}),
+  error: LegacyBridgeErrorSchema.optional(),
+});
+
+export const AiServiceExecutionTargetEnum = z.enum([
+  'typescript_service',
+  'legacy_python_runtime',
+]);
+
+export const AiServiceRequestSchema = z.object({
+  requestId: z.string().min(1),
+  capabilityId: z.string().min(1),
+  input: z.record(z.any()).default({}),
+  target: AiServiceExecutionTargetEnum.default('typescript_service'),
+  trace: TraceContextSchema.partial().default({}),
+});
+
+export const AiServiceResponseSchema = z.object({
+  requestId: z.string().min(1),
+  capabilityId: z.string().min(1),
+  target: AiServiceExecutionTargetEnum,
+  status: z.enum(['succeeded', 'failed', 'unavailable', 'blocked']),
+  output: z.record(z.any()).default({}),
+  error: z
+    .object({
+      code: z.string().min(1),
+      message: z.string().min(1),
+      details: z.record(z.any()).optional(),
+    })
+    .optional(),
+});
+
+export const BridgeAdapterResultSchema = z.object({
+  bridgeEnabled: z.boolean(),
+  mode: BridgeExecutionModeEnum,
+  attempted: z.boolean(),
+  response: LegacyBridgeResponseSchema.optional(),
+  fallbackTarget: AiServiceExecutionTargetEnum.optional(),
+});
+
 export const DoctrineDecisionPriorityEnum = z.enum([
   'operator_safety',
   'mission_alignment',
@@ -931,6 +1027,19 @@ export type CapabilityRegistryEntry = z.infer<typeof CapabilityRegistryEntrySche
 export type GatewayHealthStatus = z.infer<typeof GatewayHealthStatusSchema>;
 export type CapabilityRegistrationResult = z.infer<typeof CapabilityRegistrationResultSchema>;
 export type CapabilityLookupResult = z.infer<typeof CapabilityLookupResultSchema>;
+export type BridgeExecutionMode = z.infer<typeof BridgeExecutionModeEnum>;
+export type BridgeTargetRuntime = z.infer<typeof BridgeTargetRuntimeEnum>;
+export type BridgeOperation = z.infer<typeof BridgeOperationEnum>;
+export type BridgeCapability = z.infer<typeof BridgeCapabilitySchema>;
+export type BridgeHealthStatus = z.infer<typeof BridgeHealthStatusSchema>;
+export type BridgeRequestContext = z.infer<typeof BridgeRequestContextSchema>;
+export type LegacyBridgeRequest = z.infer<typeof LegacyBridgeRequestSchema>;
+export type LegacyBridgeError = z.infer<typeof LegacyBridgeErrorSchema>;
+export type LegacyBridgeResponse = z.infer<typeof LegacyBridgeResponseSchema>;
+export type AiServiceExecutionTarget = z.infer<typeof AiServiceExecutionTargetEnum>;
+export type AiServiceRequest = z.infer<typeof AiServiceRequestSchema>;
+export type AiServiceResponse = z.infer<typeof AiServiceResponseSchema>;
+export type BridgeAdapterResult = z.infer<typeof BridgeAdapterResultSchema>;
 export type DoctrineDecisionPriority = z.infer<typeof DoctrineDecisionPriorityEnum>;
 export type DoctrineEscalationSeverity = z.infer<typeof DoctrineEscalationSeverityEnum>;
 export type DoctrineResponseStyle = z.infer<typeof DoctrineResponseStyleSchema>;

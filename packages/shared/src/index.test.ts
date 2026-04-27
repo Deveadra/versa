@@ -4,6 +4,13 @@ import {
   CapabilityLookupResultSchema,
   CapabilityRegistrationResultSchema,
   CapabilityRegistryEntrySchema,
+  BridgeAdapterResultSchema,
+  BridgeCapabilitySchema,
+  BridgeHealthStatusSchema,
+  LegacyBridgeRequestSchema,
+  LegacyBridgeResponseSchema,
+  AiServiceRequestSchema,
+  AiServiceResponseSchema,
   ApprovalDecisionRecordSchema,
   ApprovalEnforcementOutcomeSchema,
   ApprovalRequestSchema,
@@ -191,6 +198,118 @@ describe('MCP gateway contracts', () => {
     expect((tool.inputSchema as Record<string, unknown>).additionalProperties).toBe(false);
     expect((tool.inputSchema as Record<string, unknown>).oneOf).toBeDefined();
     expect((tool.outputSchema as Record<string, unknown>).additionalProperties).toBe(false);
+  });
+});
+
+describe('AI convergence bridge contracts', () => {
+  it('validates bridge health/capabilities/request/response contracts', () => {
+    const capability = BridgeCapabilitySchema.parse({
+      id: 'legacy.summarize_day',
+      name: 'summarize_day',
+      description: 'Summarize the operator day using legacy runtime behavior.',
+      version: 'legacy-v1',
+      owner: 'legacy_python_runtime',
+      status: 'available',
+      metadata: {
+        domain: 'daily-ops',
+      },
+    });
+
+    const health = BridgeHealthStatusSchema.parse({
+      service: 'legacy-python-bridge',
+      status: 'ok',
+      mode: 'primary',
+      targetRuntime: 'legacy_python',
+      endpoint: 'http://127.0.0.1:8000',
+      latencyMs: 22,
+      lastCheckedAt: new Date().toISOString(),
+      details: {
+        capabilityCount: 1,
+      },
+    });
+
+    const request = LegacyBridgeRequestSchema.parse({
+      requestId: 'breq_12345678',
+      operation: 'invoke',
+      capabilityId: capability.id,
+      payload: {
+        text: 'summarize today',
+      },
+      context: {
+        traceId: 'trace-bridge-1',
+        actor: 'ai-service',
+        source: 'apps.ai',
+      },
+    });
+
+    const response = LegacyBridgeResponseSchema.parse({
+      requestId: request.requestId,
+      operation: request.operation,
+      status: 'ok',
+      targetRuntime: 'legacy_python',
+      capabilityId: request.capabilityId,
+      data: {
+        summary: 'today summary',
+      },
+    });
+
+    expect(capability.owner).toBe('legacy_python_runtime');
+    expect(health.mode).toBe('primary');
+    expect(request.operation).toBe('invoke');
+    expect(response.status).toBe('ok');
+  });
+
+  it('requires capabilityId for invoke bridge operation', () => {
+    expect(() =>
+      LegacyBridgeRequestSchema.parse({
+        requestId: 'breq_missing',
+        operation: 'invoke',
+        payload: {},
+        context: {},
+      }),
+    ).toThrow('capabilityId is required for invoke operation');
+  });
+
+  it('validates AI service request/response and bridge adapter result contracts', () => {
+    const request = AiServiceRequestSchema.parse({
+      requestId: 'air_12345678',
+      capabilityId: 'legacy.summarize_day',
+      input: {
+        date: '2026-04-27',
+      },
+      target: 'legacy_python_runtime',
+      trace: {
+        traceId: 'trace-ai-bridge-1',
+      },
+    });
+
+    const response = AiServiceResponseSchema.parse({
+      requestId: request.requestId,
+      capabilityId: request.capabilityId,
+      target: request.target,
+      status: 'succeeded',
+      output: {
+        summary: 'daily summary',
+      },
+    });
+
+    const adapterResult = BridgeAdapterResultSchema.parse({
+      bridgeEnabled: true,
+      mode: 'primary',
+      attempted: true,
+      response: {
+        requestId: request.requestId,
+        operation: 'invoke',
+        status: 'ok',
+        targetRuntime: 'legacy_python',
+        capabilityId: request.capabilityId,
+        data: response.output,
+      },
+    });
+
+    expect(response.target).toBe('legacy_python_runtime');
+    expect(adapterResult.attempted).toBe(true);
+    expect(adapterResult.response?.status).toBe('ok');
   });
 });
 

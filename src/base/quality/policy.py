@@ -59,11 +59,11 @@ class RepairPolicy:
         return TYPESCRIPT_EXTENSIONS
 
     @classmethod
-    def for_changed_files(cls) -> "RepairPolicy":
+    def for_changed_files(cls) -> RepairPolicy:
         return cls(scope_mode=RepairScopeMode.CHANGED_FILES)
 
     @classmethod
-    def for_branch_delta(cls, base_ref: str, head_ref: str = "HEAD") -> "RepairPolicy":
+    def for_branch_delta(cls, base_ref: str, head_ref: str = "HEAD") -> RepairPolicy:
         return cls(
             scope_mode=RepairScopeMode.BRANCH_DELTA,
             base_ref=base_ref,
@@ -71,5 +71,5 @@ class RepairPolicy:
         )
 
     @classmethod
-    def for_full_repo(cls) -> "RepairPolicy":
+    def for_full_repo(cls) -> RepairPolicy:
         return cls(scope_mode=RepairScopeMode.FULL_REPO, include_untracked=False)

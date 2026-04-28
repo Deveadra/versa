@@ -25,6 +25,7 @@ dependencies = [
   "requests>=2.32.0",
   "rich>=13.7.1",
   "setuptools<82",
+  "simpleaudio>=1.0.0",
   "tqdm",
   "click",
 

@@ -38,10 +38,44 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev
       - name: Install
         run: |
           python -m pip install --upgrade pip
+          # Ensure CPU-only PyTorch wheels are selected in CI to avoid CUDA-linked runtime crashes.
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple torch
           python -m pip install -e ".[dev]"
+      - name: Verify Python dependency surface
+        run: |
+          python - <<'PY'
+          import importlib
+          required = [
+              'pytest',
+              'apscheduler',
+              'openai',
+              'faiss',
+              'qdrant_client',
+              'sentence_transformers',
+              'spacy',
+              'torch',
+          ]
+          missing = []
+          for module in required:
+              try:
+                  importlib.import_module(module)
+              except Exception as exc:
+                  missing.append((module, exc))
+
+          if missing:
+              for module, exc in missing:
+                  print(f"MISSING_OR_BROKEN {module}: {exc}")
+              raise SystemExit(1)
+
+          print('Python dependency verification passed')
+          PY
       - name: Ruff
         run: python -m ruff check tests scripts
       - name: Black
@@ -62,7 +96,37 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
+          # Ensure CPU-only PyTorch wheels are selected in CI to avoid CUDA-linked runtime crashes.
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple torch
           python -m pip install -e ".[dev]"
+      - name: Verify Python dependency surface
+        run: |
+          python - <<'PY'
+          import importlib
+          required = [
+              'pytest',
+              'apscheduler',
+              'openai',
+              'faiss',
+              'qdrant_client',
+              'sentence_transformers',
+              'spacy',
+              'torch',
+          ]
+          missing = []
+          for module in required:
+              try:
+                  importlib.import_module(module)
+              except Exception as exc:
+                  missing.append((module, exc))
+
+          if missing:
+              for module, exc in missing:
+                  print(f"MISSING_OR_BROKEN {module}: {exc}")
+              raise SystemExit(1)
+
+          print('Python dependency verification passed')
+          PY
       - name: Compile (syntax gate)
         run: python -m compileall -q .
       - name: Pytest

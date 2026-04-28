@@ -46,8 +46,8 @@ class RetrieverTests(unittest.TestCase):
         self.conn.commit()
 
     def tearDown(self):
-      with contextlib.suppress(Exception):
-          os.unlink(self.dbfile)
+        with contextlib.suppress(Exception):
+            os.unlink(self.dbfile)
 
     def test_query_matches(self):
         class ConnWrapper:

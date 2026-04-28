@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import os
 import shutil
 from pathlib import Path
@@ -11,21 +12,16 @@ def resolve_binary(repo_root: Path, *names: str) -> str | None:
         repo_root / ".venv" / "bin",
     ]
 
-    if os.name == "nt":
-        suffixes = (".cmd", ".exe", ".bat", "")
-    else:
-        suffixes = ("",)
+    suffixes = (".cmd", ".exe", ".bat", "") if os.name == "nt" else ("",)
 
     for directory in search_dirs:
-        for name in names:
-            for suffix in suffixes:
-                candidate = directory / f"{name}{suffix}"
-                if candidate.exists() and candidate.is_file():
-                    return str(candidate)
+        for name, suffix in itertools.product(names, suffixes):
+            candidate = directory / f"{name}{suffix}"
+            if candidate.exists() and candidate.is_file():
+                return str(candidate)
 
     for name in names:
-        resolved = shutil.which(name)
-        if resolved:
+        if resolved := shutil.which(name):
             return resolved
 
     return None

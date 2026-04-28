@@ -6,7 +6,6 @@ import sqlite3
 import threading
 import time
 
-
 MIN_WAIT_TIME = 0.1  # seconds
 
 

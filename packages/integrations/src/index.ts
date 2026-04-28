@@ -117,8 +117,8 @@ const SUGGESTED_PR_TITLE_PATTERNS: LabeledValuePattern = {
 
 const LABLED_VALUE_BOUNDARY_LINES: RegExp[] = [
   /^##+\s+/,
-  /^Suggested\s+branch$/i,
-  /^Suggested\s+PR\s+title$/i,
+  /^Suggested\s+branch\s*:/i,
+  /^Suggested\s+PR\s+title\s*:/i,
   /^Depends\s+On\s*:/i,
   /^Blocks?\s*:/i,
   /^Parent\s+epic\s*:/i,
@@ -159,11 +159,9 @@ function parseBulletList(value: string): string[] {
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
 
-  const bullets = lines
-    .map((line) => line.replace(/^[-*]\s+/, '').trim())
-    .filter((line) => line.length > 0);
-
-  return bullets;
+  return lines
+      .map((line) => line.replace(/^[-*]\s+/, '').trim())
+      .filter((line) => line.length > 0);
 }
 
 function parseSectionMap(body: string): Map<string, string> {

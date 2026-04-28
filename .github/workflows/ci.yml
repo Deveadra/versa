@@ -130,6 +130,8 @@ jobs:
       - name: Compile (syntax gate)
         run: python -m compileall -q .
       - name: Pytest
+        env:
+          OPENAI_API_KEY: sk-test-dummy-key-for-ci
         run: |
           mkdir -p reports/pytest
           python -m pytest -q --junitxml=reports/pytest/junit.xml

@@ -100,17 +100,49 @@ function parseIssueReferences(value: string | null): number[] {
   return Array.from(value.matchAll(/#(\d+)/g), (match) => Number(match[1]));
 }
 
-function parseLabeledValue(body: string, label: string): string | null {
-  const inline = body.match(new RegExp(`${label}\\s*:\\s*(.+)`, 'i'));
+interface LabeledValuePattern {
+  inline: RegExp;
+  block: RegExp;
+}
+
+const SUGGESTED_BRANCH_PATTERNS: LabeledValuePattern = {
+  inline: /Suggested\s+branch\s*:\s*(.+)/i,
+  block: /^Suggested\s+branch$/i,
+};
+
+const SUGGESTED_PR_TITLE_PATTERNS: LabeledValuePattern = {
+  inline: /Suggested\s+PR\s+title\s*:\s*(.+)/i,
+  block: /^Suggested\s+PR\s+title$/i,
+};
+
+const LABLED_VALUE_BOUNDARY_LINES: RegExp[] = [
+  /^##+\s+/,
+  /^Suggested\s+branch$/i,
+  /^Suggested\s+PR\s+title$/i,
+  /^Depends\s+On\s*:/i,
+  /^Blocks?\s*:/i,
+  /^Parent\s+epic\s*:/i,
+];
+
+function isLabeledValueBoundaryLine(line: string): boolean {
+  return LABLED_VALUE_BOUNDARY_LINES.some((pattern) => pattern.test(line));
+}
+
+function parseLabeledValue(body: string, patterns: LabeledValuePattern): string | null {
+  const inline = body.match(patterns.inline);
   if (inline && inline[1]) {
     return inline[1].trim();
   }
 
   const lines = body.split(/\r?\n/);
   for (let index = 0; index < lines.length; index += 1) {
-    if (new RegExp(`^${label}\\s*$`, 'i').test(lines[index].trim())) {
+    if (patterns.block.test(lines[index].trim())) {
       for (let next = index + 1; next < lines.length; next += 1) {
         const value = lines[next].trim();
+        if (isLabeledValueBoundaryLine(value)) {
+          return null;
+        }
+
         if (value.length > 0) {
           return value;
         }
@@ -198,8 +230,8 @@ export function extractIssueRequirements(body: string): IssueIntakeRequirements 
     expectedCodeChanges: parseBulletList(firstSectionValue(sections, SECTION_EXPECTED_CHANGES) ?? ''),
     acceptanceCriteria: parseBulletList(firstSectionValue(sections, SECTION_ACCEPTANCE) ?? ''),
     constraints: parseBulletList(firstSectionValue(sections, SECTION_CONSTRAINTS) ?? ''),
-    suggestedBranch: parseLabeledValue(body, 'Suggested\\s+branch'),
-    suggestedPrTitle: parseLabeledValue(body, 'Suggested\\s+PR\\s+title'),
+    suggestedBranch: parseLabeledValue(body, SUGGESTED_BRANCH_PATTERNS),
+    suggestedPrTitle: parseLabeledValue(body, SUGGESTED_PR_TITLE_PATTERNS),
     dependencies: parseIssueReferences(dependsOnMatch ? dependsOnMatch[1] : null),
     blockers: parseIssueReferences(blockersMatch ? blockersMatch[1] : null),
   };

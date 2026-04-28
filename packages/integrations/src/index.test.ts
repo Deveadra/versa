@@ -41,6 +41,22 @@ describe('extractIssueRequirements', () => {
     expect(parsed.blockers).toEqual([]);
     expect(parsed.acceptanceCriteria.length).toBeGreaterThan(0);
   });
+
+  it('does not consume following labels when labeled value is blank', () => {
+    const parsed = extractIssueRequirements(`## Goal
+
+Small objective
+
+Suggested branch
+
+Suggested PR title
+
+Depends On: #77`);
+
+    expect(parsed.suggestedBranch).toBeNull();
+    expect(parsed.suggestedPrTitle).toBeNull();
+    expect(parsed.dependencies).toEqual([77]);
+  });
 });
 
 describe('normalizeGitHubIssue', () => {

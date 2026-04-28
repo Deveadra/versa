@@ -12,8 +12,8 @@ Fix and Resolve all comments and their suggestions.
 
 ---
 
-Issue: `https://github.com/Deveadra/versa/issues/78`
-Task card: docs/task-cards/active/ws13-issue-78-github-issue-intake.md
+Issue: `https://github.com/Deveadra/versa/issues/79`
+Task card: docs/task-cards/active/ws14-issue-79-task-card-generator.md
 
 You are operating in Versa Executor mode for the `versa` repository.
 

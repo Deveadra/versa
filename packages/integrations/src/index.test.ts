@@ -1,14 +1,20 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildTaskCardFileName,
+  buildTaskCardPath,
+  createTaskCardRenderModel,
   extractIssueRequirements,
   GitHubIssueIntakeService,
   normalizeGitHubIssue,
+  refreshTaskCardMarkdown,
+  renderTaskCardMarkdown,
   type GitHubIssueReader,
 } from './index';
 import {
   EPIC_ISSUE_FIXTURE,
   MINIMAL_ISSUE_FIXTURE,
+  WS14_TASK_CARD_ISSUE_FIXTURE,
   WORKSTREAM_ISSUE_FIXTURE,
 } from './fixtures/github-issues';
 
@@ -99,5 +105,87 @@ describe('GitHubIssueIntakeService', () => {
     expect(calls).toEqual([{ repo: 'Deveadra/versa', issueNumber: 78 }]);
     expect(intake.metadata.title).toContain('GitHub issue intake');
     expect(intake.requirements.dependencies).toEqual([77]);
+  });
+});
+
+describe('task-card generation (WS14)', () => {
+  const intake = normalizeGitHubIssue(WS14_TASK_CARD_ISSUE_FIXTURE);
+
+  const model = createTaskCardRenderModel({
+    intake,
+    workstreamId: 'WS14',
+    taskCardName: 'task-card-generator',
+    baseBranch: 'main',
+    branch: 'orchestrator/ws14-task-card-generator',
+    prTitle: 'orchestrator(ws14): add task-card generation and refresh workflow',
+    dependsOn: ['#81'],
+    inScope: ['Add deterministic task-card generation from normalized issue intake data'],
+    outOfScope: ['Roo handoff generation'],
+    filesToInspectFirst: ['docs/templates/agent-task-card.md', 'packages/integrations/src/'],
+    requiredApproach: ['Inspect current repo state before editing.', 'Keep implementation additive and bounded.'],
+    requiredValidation: ['pnpm install', 'pnpm lint', 'pnpm typecheck', 'pnpm test'],
+    noTouchConstraints: ['Do not delete or rewrite the legacy Python runtime'],
+    notesForAgent: ['This workstream is bounded to task-card generation and refresh only.'],
+  });
+
+  it('builds canonical task-card filename and path', () => {
+    expect(buildTaskCardFileName('WS14', 79, 'task-card-generator')).toBe(
+      'ws14-issue-79-task-card-generator.md',
+    );
+    expect(buildTaskCardPath('WS14', 79, 'task-card-generator')).toBe(
+      'docs/task-cards/active/ws14-issue-79-task-card-generator.md',
+    );
+  });
+
+  it('renders required task-card sections from intake + config', () => {
+    const markdown = renderTaskCardMarkdown(model);
+
+    expect(markdown).toContain('# Agent Task Card');
+    expect(markdown).toContain('- Issue: #79');
+    expect(markdown).toContain('- Base Branch: main');
+    expect(markdown).toContain('- Branch: orchestrator/ws14-task-card-generator');
+    expect(markdown).toContain('- PR Title: orchestrator(ws14): add task-card generation and refresh workflow');
+    expect(markdown).toContain('## Objective');
+    expect(markdown).toContain('## In Scope');
+    expect(markdown).toContain('## Required Validation');
+    expect(markdown).toContain('## No-Touch Constraints');
+    expect(markdown).toContain('## Acceptance Criteria');
+    expect(markdown).toContain('## Notes for Agent');
+  });
+
+  it('refresh preserves manual notes by default', () => {
+    const existing = renderTaskCardMarkdown(model).replace(
+      /## Notes for Agent\n\n[\s\S]*$/,
+      '## Notes for Agent\n\nHuman note: keep this context.\n',
+    );
+
+    const refreshed = refreshTaskCardMarkdown(existing, {
+      ...model,
+      objective: 'Updated objective text',
+      notesForAgent: ['Generated replacement notes'],
+    });
+
+    expect(refreshed).toContain('Updated objective text');
+    expect(refreshed).toContain('Human note: keep this context.');
+    expect(refreshed).not.toContain('Generated replacement notes');
+  });
+
+  it('refresh can overwrite notes when explicitly requested', () => {
+    const existing = renderTaskCardMarkdown(model).replace(
+      /## Notes for Agent\n\n[\s\S]*$/,
+      '## Notes for Agent\n\nHuman note: keep this context.\n',
+    );
+
+    const refreshed = refreshTaskCardMarkdown(
+      existing,
+      {
+        ...model,
+        notesForAgent: ['Generated replacement notes'],
+      },
+      { overwriteNotesForAgent: true },
+    );
+
+    expect(refreshed).toContain('Generated replacement notes');
+    expect(refreshed).not.toContain('Human note: keep this context.');
   });
 });

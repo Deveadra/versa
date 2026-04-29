@@ -493,6 +493,7 @@ function parseBulletedSection(source: string, heading: string): string[] {
 
   for (let index = startIndex; index < lines.length; index += 1) {
     const line = lines[index].trim();
+    const normalizedLine = line.toLowerCase().replace(/:$/, '');
 
     if (/^[-*]\s+/.test(line)) {
       encounteredBullet = true;
@@ -508,7 +509,19 @@ function parseBulletedSection(source: string, heading: string): string[] {
       continue;
     }
 
+    if (!encounteredBullet && normalizedLine === heading.trim().toLowerCase()) {
+      break;
+    }
+
+    if (!encounteredBullet && /^(files changed|commands run|validation results|blockers, if any|pr-ready summary)\b/.test(normalizedLine)) {
+      break;
+    }
+
     if (encounteredBullet) {
+      break;
+    }
+
+    if (!encounteredBullet) {
       break;
     }
   }
@@ -516,11 +529,25 @@ function parseBulletedSection(source: string, heading: string): string[] {
   return bullets.filter((line) => line.length > 0 && line.toLowerCase() !== 'none');
 }
 
+function parseExplicitStatus(rawOutput: string): RooRunStatus | null {
+  const match = rawOutput.match(/^status:\s*(succeeded|failed|blocked|partial|needs-review)\s*$/im);
+  if (!match) {
+    return null;
+  }
+
+  return match[1].toLowerCase() as RooRunStatus;
+}
+
 export function classifyRooRunStatus(input: {
   rawOutput: string;
   validation: RooValidationResult[];
   blockers: string[];
 }): RooRunStatus {
+  const explicitStatus = parseExplicitStatus(input.rawOutput);
+  if (explicitStatus) {
+    return explicitStatus;
+  }
+
   const normalized = input.rawOutput.toLowerCase();
 
   if (input.blockers.length > 0 || normalized.includes('blocked')) {

@@ -5,16 +5,29 @@ import logging
 import os
 import threading
 from collections.abc import Iterable
+from typing import Any, cast
 
-import simpleaudio as sa
-from elevenlabs.client import (
-    ElevenLabs,  # <- matches the documented SDK usage :contentReference[oaicite:1]{index=1}
-)
+try:
+    import simpleaudio as sa
+except ModuleNotFoundError:  # optional dependency for voice integrations
+    sa = None  # type: ignore[assignment]
+try:
+    from elevenlabs.client import (
+        ElevenLabs,  # <- matches the documented SDK usage :contentReference[oaicite:1]{index=1}
+    )
+except ModuleNotFoundError:  # optional dependency for voice integrations
+    ElevenLabs = None  # type: ignore[assignment]
 
 from config.config import settings
 
 BytesLike = bytes | bytearray | memoryview
 log = logging.getLogger(__name__)
+
+
+def _require_simpleaudio() -> Any:
+    if sa is None:
+        raise RuntimeError("simpleaudio not installed")
+    return cast(Any, sa)
 
 # class Voice:
 #     _instance: Voice | None = None
@@ -51,10 +64,15 @@ log = logging.getLogger(__name__)
 
 class Voice:
     _instance: Voice | None = None
-    _current_playback: sa.PlayObject | None = None
+    _current_playback: sa.PlayObject | None = None  # type: ignore[name-defined]
     _lock = threading.Lock()
 
     def __init__(self, model_id: str | None = None, output_format: str | None = None):
+        _require_simpleaudio()
+
+        if ElevenLabs is None:
+            raise RuntimeError("ElevenLabs SDK not installed")
+
         if not settings.eleven_api_key or not settings.eleven_voice_id:
             raise RuntimeError("ElevenLabs API key/voice id not configured")
 
@@ -103,9 +121,12 @@ class Voice:
 
         def _play():
             try:
+                simpleaudio = _require_simpleaudio()
                 with self._lock:
-                    Voice._current_playback = sa.play_buffer(audio_bytes, 1, 2, 16000)
-                Voice._current_playback.wait_done()
+                    Voice._current_playback = simpleaudio.play_buffer(audio_bytes, 1, 2, 16000)
+                playback = Voice._current_playback
+                if playback is not None:
+                    playback.wait_done()
             except Exception as e:
                 print(f"[TTS Async] Failed to play audio: {e}")
             finally:
@@ -129,7 +150,8 @@ class Voice:
         """
         audio_bytes = self.synth(text)
         try:
-            play_obj = sa.play_buffer(audio_bytes, 1, 2, 16000)
+            simpleaudio = _require_simpleaudio()
+            play_obj = simpleaudio.play_buffer(audio_bytes, 1, 2, 16000)
             play_obj.wait_done()
         except Exception as e:
             print(f"[TTS Blocking] Failed to play audio: {e}")
@@ -140,7 +162,8 @@ class Voice:
         """
         audio_bytes = self.synth(text)
         try:
-            play_obj = sa.play_buffer(audio_bytes, 1, 2, 16000)
+            simpleaudio = _require_simpleaudio()
+            play_obj = simpleaudio.play_buffer(audio_bytes, 1, 2, 16000)
             play_obj.wait_done()
         except Exception as e:
             print(f"[TTS] Failed to play audio: {e}")

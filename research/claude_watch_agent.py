@@ -10,15 +10,15 @@ import re
 import sqlite3
 import subprocess
 import sys
-import textwrap
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
-UTC = dt.timezone.utc
+UTC = dt.UTC
 DEFAULT_USER_AGENT = "AerithUltronClaudeWatch/0.1 (+local-monitor)"
 KEYWORD_WEIGHTS = {
     "dream": 5,

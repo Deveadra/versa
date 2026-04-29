@@ -170,8 +170,7 @@ class QualityRunner:
         self,
         files: tuple[Path, ...],
     ) -> tuple[CommandRun, tuple[Diagnostic, ...]]:
-        prettier = self._resolve_node_tool("prettier")
-        if prettier:
+        if prettier := self._resolve_node_tool("prettier"):
             command = self.run_command(
                 CommandSpec(
                     name=prettier,
@@ -182,8 +181,7 @@ class QualityRunner:
             )
             return command, self._parse_prettier_output(command, files)
 
-        pnpm = self._resolve_pnpm()
-        if pnpm:
+        if pnpm := self._resolve_pnpm():
             argv = ("exec", "prettier", "--check", *(path.as_posix() for path in files))
             command = self.run_command(
                 CommandSpec(
@@ -213,8 +211,7 @@ class QualityRunner:
         )
 
     def run_prettier_write(self, files: tuple[Path, ...]) -> CommandRun:
-        prettier = self._resolve_node_tool("prettier")
-        if prettier:
+        if prettier := self._resolve_node_tool("prettier"):
             return self.run_command(
                 CommandSpec(
                     name=prettier,
@@ -252,8 +249,7 @@ class QualityRunner:
         self,
         package_root: Path,
     ) -> tuple[CommandRun, tuple[Diagnostic, ...]]:
-        tsc = self._resolve_node_tool("tsc")
-        if tsc:
+        if tsc := self._resolve_node_tool("tsc"):
             command = self.run_command(
                 CommandSpec(
                     name=tsc,
@@ -264,8 +260,7 @@ class QualityRunner:
             )
             return command, self._parse_tsc_output(command.stdout)
 
-        pnpm = self._resolve_pnpm()
-        if pnpm:
+        if pnpm := self._resolve_pnpm():
             command = self.run_command(
                 CommandSpec(
                     name=pnpm,
@@ -336,10 +331,7 @@ class QualityRunner:
                 duration_seconds=time.perf_counter() - started,
             )
         except OSError as exc:
-            if exc.errno == errno.ENOENT:
-                returncode = 127
-            else:
-                returncode = 126
+            returncode = 127 if exc.errno == errno.ENOENT else 126
 
             return CommandRun(
                 spec=spec,
@@ -534,7 +526,7 @@ class QualityRunner:
             absolute = (self.repo_root / path).resolve()
             current = absolute.parent
 
-            while current != self.repo_root and current != current.parent:
+            while current not in (self.repo_root, current.parent):
                 if (current / "package.json").exists() and (current / "tsconfig.json").exists():
                     package_roots.add(current.relative_to(self.repo_root))
                     break

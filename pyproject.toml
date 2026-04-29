@@ -25,6 +25,7 @@ dependencies = [
   "requests>=2.32.0",
   "rich>=13.7.1",
   "setuptools<82",
+  "simpleaudio>=1.0.0",
   "tqdm",
   "click",
 
@@ -108,7 +109,7 @@ exclude = [".git", ".venv", "__pycache__", "aerith.db"]
 
 [tool.ruff.lint]
 select = ["E","F","W","I","B","UP","SIM","PL"]
-# ignore = ["E402", "E501", "PLR0911", "PLR0912", "PLR0913", "PLR0915", "PLW0603", "SIM105", "PLR2004"]
+ignore = ["E402", "E501", "PLR0911", "PLR0912", "PLR0913", "PLR0915", "PLW0603", "SIM105", "PLR2004"]
 
 [tool.ruff.lint.per-file-ignores]
 "scripts/*.py" = ["E402"]

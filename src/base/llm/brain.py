@@ -42,7 +42,11 @@ class Brain:
     def __init__(self, client: OpenAI | None = None, model: str | None = None):
         self.client = client or _CLIENT
         self.model = model or _MODEL
-        self.voice = Voice.get_instance()
+        try:
+            self.voice = Voice.get_instance()
+        except Exception as exc:
+            logger.warning("Voice disabled: optional TTS dependencies unavailable (%s)", exc)
+            self.voice = None
 
     # ---------- helpers ----------
     def _set_system_prompt(self, prompt: str) -> None:

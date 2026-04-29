@@ -262,3 +262,261 @@ export class GitHubIssueIntakeService {
     return normalizeGitHubIssue(issue);
   }
 }
+
+export interface TaskCardGeneratorInput {
+  intake: IssueIntake;
+  workstreamId: string;
+  taskCardName: string;
+  baseBranch: string;
+  branch: string;
+  prTitle: string;
+  status?: string;
+  priority?: string;
+  agentType?: string;
+  dependsOn?: string[];
+  inScope: string[];
+  outOfScope: string[];
+  filesToInspectFirst: string[];
+  requiredApproach: string[];
+  requiredValidation: string[];
+  noTouchConstraints: string[];
+  notesForAgent: string[];
+}
+
+export interface TaskCardRenderModel {
+  issueUrl: string;
+  issueNumber: number;
+  issueTitle: string;
+  parentEpic: number | null;
+  workstreamId: string;
+  taskCardId: string;
+  taskCardName: string;
+  taskCardSlug: string;
+  taskCardFileName: string;
+  taskCardPath: string;
+  status: string;
+  priority: string;
+  agentType: string;
+  baseBranch: string;
+  branch: string;
+  prTitle: string;
+  dependsOn: string[];
+  objective: string;
+  inScope: string[];
+  outOfScope: string[];
+  filesToInspectFirst: string[];
+  requiredApproach: string[];
+  requiredValidation: string[];
+  deliverables: string[];
+  noTouchConstraints: string[];
+  acceptanceCriteria: string[];
+  notesForAgent: string[];
+}
+
+export interface TaskCardRefreshOptions {
+  overwriteNotesForAgent?: boolean;
+}
+
+function toKebabCase(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-');
+}
+
+function normalizeWorkstreamId(value: string): string {
+  const match = value.trim().toUpperCase().match(/^WS(\d{1,2})$/);
+  if (!match) {
+    throw new Error(`Invalid workstreamId: ${value}. Expected format WSXX.`);
+  }
+
+  return `WS${match[1].padStart(2, '0')}`;
+}
+
+function toTaskCardSlug(taskCardName: string): string {
+  const slug = toKebabCase(taskCardName);
+  if (slug.length === 0) {
+    throw new Error(`Invalid taskCardName: ${taskCardName}. Could not derive a non-empty slug.`);
+  }
+
+  return slug;
+}
+
+export function buildTaskCardFileName(workstreamId: string, issueNumber: number, taskCardName: string): string {
+  const normalizedWs = normalizeWorkstreamId(workstreamId).toLowerCase();
+  const slug = toTaskCardSlug(taskCardName);
+  return `${normalizedWs}-issue-${issueNumber}-${slug}.md`;
+}
+
+export function buildTaskCardPath(workstreamId: string, issueNumber: number, taskCardName: string): string {
+  return `docs/task-cards/active/${buildTaskCardFileName(workstreamId, issueNumber, taskCardName)}`;
+}
+
+export function createTaskCardRenderModel(input: TaskCardGeneratorInput): TaskCardRenderModel {
+  const workstreamId = normalizeWorkstreamId(input.workstreamId);
+  const issueNumber = input.intake.metadata.number;
+  const taskCardSlug = toTaskCardSlug(input.taskCardName);
+  const fileName = buildTaskCardFileName(workstreamId, issueNumber, input.taskCardName);
+
+  return {
+    issueUrl: input.intake.metadata.url,
+    issueNumber,
+    issueTitle: input.intake.metadata.title,
+    parentEpic: input.intake.requirements.parentEpic,
+    workstreamId,
+    taskCardId: `${workstreamId}-ISSUE${issueNumber}`,
+    taskCardName: input.taskCardName.trim(),
+    taskCardSlug,
+    taskCardFileName: fileName,
+    taskCardPath: `docs/task-cards/active/${fileName}`,
+    status: input.status ?? 'Active',
+    priority: input.priority ?? 'High',
+    agentType: input.agentType ?? 'Roo',
+    baseBranch: input.baseBranch,
+    branch: input.branch,
+    prTitle: input.prTitle,
+    dependsOn: input.dependsOn ?? [],
+    objective: input.intake.requirements.objective ?? 'TBD',
+    inScope: input.inScope,
+    outOfScope: input.outOfScope,
+    filesToInspectFirst: input.filesToInspectFirst,
+    requiredApproach: input.requiredApproach,
+    requiredValidation: input.requiredValidation,
+    deliverables: input.intake.requirements.deliverables,
+    noTouchConstraints: input.noTouchConstraints,
+    acceptanceCriteria: input.intake.requirements.acceptanceCriteria,
+    notesForAgent: input.notesForAgent,
+  };
+}
+
+function renderBulletLines(values: string[]): string {
+  if (values.length === 0) {
+    return '- None';
+  }
+
+  return values.map((entry) => `- ${entry}`).join('\n');
+}
+
+function renderQuotedPaths(values: string[]): string {
+  if (values.length === 0) {
+    return '- `None`';
+  }
+
+  return values.map((entry) => `- \`${entry}\``).join('\n');
+}
+
+export function renderTaskCardMarkdown(model: TaskCardRenderModel): string {
+  const parentEpic = model.parentEpic === null ? 'None' : `#${model.parentEpic}`;
+  const dependsOn = model.dependsOn.length > 0 ? model.dependsOn.join(', ') : 'None';
+
+  return `# Agent Task Card
+
+- Issue URL: ${model.issueUrl}
+- Issue: #${model.issueNumber}
+- Issue Title: ${model.issueTitle}
+- Parent Epic: ${parentEpic}
+- Workstream: ${model.workstreamId}
+
+- Task Card ID: ${model.taskCardId}
+- Task Card Name: ${model.taskCardName}
+- Task Card Slug: ${model.taskCardSlug}
+- Task Card File Name: ${model.taskCardFileName}
+- Task Card Path: ${model.taskCardPath}
+
+- Status: ${model.status}
+- Priority: ${model.priority}
+- Agent Type: ${model.agentType}
+
+- Base Branch: ${model.baseBranch}
+- Branch: ${model.branch}
+- PR Title: ${model.prTitle}
+
+- Depends On: ${dependsOn}
+
+## Objective
+
+${model.objective}
+
+## In Scope
+
+${renderBulletLines(model.inScope)}
+
+## Out of Scope
+
+${renderBulletLines(model.outOfScope)}
+
+## Files/Areas to Inspect First
+
+${renderQuotedPaths(model.filesToInspectFirst)}
+
+## Required Approach
+
+${renderBulletLines(model.requiredApproach)}
+
+## Required Validation
+
+${renderBulletLines(model.requiredValidation)}
+
+## Deliverables
+
+${renderBulletLines(model.deliverables)}
+
+## No-Touch Constraints
+
+${renderBulletLines(model.noTouchConstraints)}
+
+## ${TASK_SECTION_HEADINGS.acceptanceCriteria}
+
+${renderBulletLines(model.acceptanceCriteria)}
+
+## ${TASK_SECTION_HEADINGS.notesForAgent}
+
+${model.notesForAgent.join('\n\n')}
+`;
+}
+
+const TASK_SECTION_HEADINGS = {
+  acceptanceCriteria: 'Acceptance Criteria',
+  notesForAgent: 'Notes for Agent',
+} as const;
+
+function buildSectionPattern(heading: string): RegExp {
+  const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^##\\s+${escaped}\\r?\\n\\r?\\n([\\s\\S]*?)(?=^##\\s+|$)`, 'm');
+}
+
+function extractSection(markdown: string, heading: string): string | null {
+  const pattern = buildSectionPattern(heading);
+  const match = markdown.match(pattern);
+  if (!match || !match[1]) {
+    return null;
+  }
+
+  return match[1].trimEnd();
+}
+
+function replaceSection(markdown: string, heading: string, content: string): string {
+  const pattern = buildSectionPattern(heading);
+  return markdown.replace(pattern, `## ${heading}\n\n${content}\n`);
+}
+
+export function refreshTaskCardMarkdown(
+  existingMarkdown: string,
+  nextModel: TaskCardRenderModel,
+  options: TaskCardRefreshOptions = {},
+): string {
+  const rendered = renderTaskCardMarkdown(nextModel);
+
+  if (options.overwriteNotesForAgent) {
+    return rendered;
+  }
+
+  const existingNotes = extractSection(existingMarkdown, TASK_SECTION_HEADINGS.notesForAgent);
+  if (!existingNotes) {
+    return rendered;
+  }
+
+  return replaceSection(rendered, TASK_SECTION_HEADINGS.notesForAgent, existingNotes);
+}

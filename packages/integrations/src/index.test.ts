@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import {
+  buildRooPrReviewPacket,
+  buildRooResultSummary,
   buildTaskCardFileName,
   buildTaskCardPath,
   createRooDispatchRunRecord,
@@ -27,6 +29,7 @@ import {
   WS17_ROO_OUTPUT_FAILED_FIXTURE,
   WS17_ROO_OUTPUT_INCOMPLETE_FIXTURE,
   WS17_ROO_OUTPUT_SUCCESS_FIXTURE,
+  WS18_ROO_OUTPUT_PARTIAL_FIXTURE,
   WORKSTREAM_ISSUE_FIXTURE,
 } from './fixtures/github-issues';
 
@@ -495,5 +498,96 @@ describe('roo dispatch and result ingestion (WS17)', () => {
     expect(ingested.status).toBe('needs-review');
     expect(ingested.validation.commands).toEqual([]);
     expect(ingested.changedFiles).toEqual([]);
+  });
+});
+
+describe('result summary and PR review packet (WS18)', () => {
+  it('builds structured result summary from ingested data', () => {
+    const ingestion = ingestRooExecutionResult({
+      runId: 'run_86_20260429010000',
+      rawOutput: WS18_ROO_OUTPUT_PARTIAL_FIXTURE,
+    });
+
+    const summary = buildRooResultSummary({
+      ingestion,
+      issueUrl: 'https://github.com/Deveadra/versa/issues/86',
+      taskCardPath: 'docs/task-cards/active/ws18-issue-86-result-summary-pr-packet.md',
+      branch: 'orchestrator/ws18-result-summary-pr-packet',
+    });
+
+    expect(summary.status).toBe('partial');
+    expect(summary.issue.number).toBe(86);
+    expect(summary.changedFiles.total).toBeGreaterThan(0);
+    expect(summary.validation.totals.failed).toBe(1);
+    expect(summary.knownFollowUps).toContain('Re-run flaky integration snapshot test in CI.');
+    expect(summary.riskMigrationNotes).toContain('No runtime migration required; contract-only additive update.');
+    expect(summary.missingData).toEqual([]);
+  });
+
+  it('builds PR packet title/body when enough data is available', () => {
+    const ingestion = ingestRooExecutionResult({
+      runId: 'run_86_20260429010000',
+      rawOutput: WS17_ROO_OUTPUT_SUCCESS_FIXTURE,
+    });
+
+    const summary = buildRooResultSummary({
+      ingestion,
+      issueUrl: 'https://github.com/Deveadra/versa/issues/86',
+      taskCardPath: 'docs/task-cards/active/ws18-issue-86-result-summary-pr-packet.md',
+      branch: 'orchestrator/ws18-result-summary-pr-packet',
+    });
+
+    const packet = buildRooPrReviewPacket({
+      summary,
+      issueTitle: '[Orchestrator][WS18] Result summary and PR review packet',
+    });
+
+    expect(packet.prTitle).toContain('(ws18)');
+    expect(packet.prBodyDraft).toContain('## Validation Results');
+    expect(packet.prBodyDraft).toContain('packages/integrations/src/index.ts');
+  });
+
+  it('flags missing data for incomplete result summaries and packets', () => {
+    const ingestion = ingestRooExecutionResult({
+      runId: 'run_86_20260429010000',
+      rawOutput: WS17_ROO_OUTPUT_INCOMPLETE_FIXTURE,
+    });
+
+    const summary = buildRooResultSummary({ ingestion });
+    const packet = buildRooPrReviewPacket({ summary });
+
+    expect(summary.status).toBe('needs-review');
+    expect(summary.missingData).toContain('issueUrl');
+    expect(summary.missingData).toContain('validation results');
+    expect(packet.prTitle).toBeNull();
+    expect(packet.prBodyDraft).toBeNull();
+    expect(packet.missingData).toContain('insufficient metadata for PR body draft');
+  });
+
+  it('keeps blocked and failed statuses in generated summaries', () => {
+    const blocked = buildRooResultSummary({
+      ingestion: ingestRooExecutionResult({
+        runId: 'run_86_20260429010000',
+        rawOutput: WS17_ROO_OUTPUT_BLOCKED_FIXTURE,
+      }),
+      issueUrl: 'https://github.com/Deveadra/versa/issues/86',
+      taskCardPath: 'docs/task-cards/active/ws18-issue-86-result-summary-pr-packet.md',
+      branch: 'orchestrator/ws18-result-summary-pr-packet',
+    });
+
+    const failed = buildRooResultSummary({
+      ingestion: ingestRooExecutionResult({
+        runId: 'run_86_20260429010000',
+        rawOutput: WS17_ROO_OUTPUT_FAILED_FIXTURE,
+      }),
+      issueUrl: 'https://github.com/Deveadra/versa/issues/86',
+      taskCardPath: 'docs/task-cards/active/ws18-issue-86-result-summary-pr-packet.md',
+      branch: 'orchestrator/ws18-result-summary-pr-packet',
+    });
+
+    expect(blocked.status).toBe('blocked');
+    expect(blocked.blockers.length).toBeGreaterThan(0);
+    expect(failed.status).toBe('failed');
+    expect(failed.validation.passed).toBe(false);
   });
 });

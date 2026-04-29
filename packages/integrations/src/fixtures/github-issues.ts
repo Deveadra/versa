@@ -279,3 +279,34 @@ export const WS17_ROO_OUTPUT_INCOMPLETE_FIXTURE = `Unstructured executor output.
 No explicit sections were provided.
 Need human follow-up before merging.
 `;
+
+export const WS18_ROO_OUTPUT_PARTIAL_FIXTURE = `files changed
+
+- packages/integrations/src/index.ts
+
+validation results
+
+- pnpm lint: passed
+- pnpm typecheck: passed
+- pnpm test: failed
+
+blockers, if any
+
+- None
+
+known follow-ups
+
+- Re-run flaky integration snapshot test in CI.
+
+risk/migration notes
+
+- No runtime migration required; contract-only additive update.
+
+review notes
+
+- Verify PR body sections align with reviewer checklist.
+
+PR-ready summary: Added WS18 result summary and PR packet generation with partial validation outcome.
+
+Status: partial
+`;

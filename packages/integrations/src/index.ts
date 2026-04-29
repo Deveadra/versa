@@ -319,6 +319,8 @@ export interface TaskCardRefreshOptions {
 
 export interface RooHandoffGeneratorInput {
   intake: IssueIntake;
+  executionModeName: string;
+  repositoryName: string;
   taskCardPath: string;
   baseBranch: string;
   branch: string;
@@ -337,6 +339,8 @@ export interface RooHandoffRenderModel {
   issueUrl: string;
   issueNumber: number;
   issueTitle: string;
+  executionModeName: string;
+  repositoryName: string;
   taskCardPath: string;
   baseBranch: string;
   branch: string;
@@ -446,6 +450,8 @@ export function createRooHandoffRenderModel(input: RooHandoffGeneratorInput): Ro
     issueUrl: input.intake.metadata.url,
     issueNumber: input.intake.metadata.number,
     issueTitle: input.intake.metadata.title,
+    executionModeName: input.executionModeName,
+    repositoryName: input.repositoryName,
     taskCardPath: input.taskCardPath,
     baseBranch: input.baseBranch,
     branch: input.branch,
@@ -461,11 +467,11 @@ export function createRooHandoffRenderModel(input: RooHandoffGeneratorInput): Ro
   };
 }
 
-export function renderRooHandoffMarkdown(model: RooHandoffRenderModel): string {
+function renderRooHandoffTemplate(model: RooHandoffRenderModel): string {
   return `Issue: \`${model.issueUrl}\`
 Task card: ${model.taskCardPath}
 
-You are operating in Versa Executor mode for the \`versa\` repository.
+You are operating in ${model.executionModeName} mode for the \`${model.repositoryName}\` repository.
 
 Required workflow:
 
@@ -543,6 +549,10 @@ Expected Final Response Format:
 
 ${renderBulletLines(model.expectedFinalResponseFormat)}
 `;
+}
+
+export function renderRooHandoffMarkdown(model: RooHandoffRenderModel): string {
+  return renderRooHandoffTemplate(model);
 }
 
 export function renderTaskCardMarkdown(model: TaskCardRenderModel): string {

@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 import {
   buildTaskCardFileName,
@@ -248,6 +250,8 @@ describe('roo handoff generation (WS15)', () => {
 
   const handoffModel = createRooHandoffRenderModel({
     intake,
+    executionModeName: 'Versa Executor',
+    repositoryName: 'versa',
     taskCardPath: 'docs/task-cards/active/ws15-issue-80-roo-handoff-generator.md',
     baseBranch: 'main',
     branch: 'orchestrator/ws15-roo-handoff-generator',
@@ -306,5 +310,12 @@ describe('roo handoff generation (WS15)', () => {
     expect(markdown).toContain('Expected Deliverables:');
     expect(markdown).toContain('Blocker Reporting Rules:');
     expect(markdown).toContain('Expected Final Response Format:');
+  });
+
+  it('matches the documented Roo handoff template example to avoid drift', () => {
+    const markdown = renderRooHandoffMarkdown(handoffModel);
+    const docsTemplate = readFileSync(resolve(__dirname, '../../../docs/templates/roo-handoff.md'), 'utf-8');
+
+    expect(markdown.trim()).toBe(docsTemplate.trim());
   });
 });

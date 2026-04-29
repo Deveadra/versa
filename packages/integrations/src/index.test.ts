@@ -10,6 +10,7 @@ import {
   extractIssueRequirements,
   GitHubIssueIntakeService,
   normalizeGitHubIssue,
+  prepareSandboxExecution,
   renderRooHandoffMarkdown,
   refreshTaskCardMarkdown,
   renderTaskCardMarkdown,
@@ -317,5 +318,113 @@ describe('roo handoff generation (WS15)', () => {
     const docsTemplate = readFileSync(resolve(__dirname, '../../../docs/templates/roo-handoff.md'), 'utf-8');
 
     expect(markdown.trim()).toBe(docsTemplate.trim());
+  });
+});
+
+describe('sandbox execution preparation (WS16)', () => {
+  it('builds a ready execution prep plan with required bounded context', () => {
+    const result = prepareSandboxExecution({
+      issueUrl: ' https://github.com/Deveadra/versa/issues/84 ',
+      issueNumber: 84,
+      taskCardPath: ' docs/task-cards/active/ws16-issue-84-sandbox-execution-prep.md ',
+      repoPath: ' /home/devaedra/projects/versa ',
+      baseBranch: ' main ',
+      branch: ' orchestrator/ws16-sandbox-execution-prep ',
+      sandboxStrategy: 'git_worktree',
+      validationCommands: ['pnpm install', 'pnpm lint', 'pnpm typecheck', 'pnpm test'],
+      commandAllowlist: ['git status --short --branch', 'pnpm lint', 'pnpm typecheck', 'pnpm test'],
+      noTouchConstraints: [
+        'Do not delete or rewrite the legacy Python runtime',
+        'Do not implement full Roo dispatch here',
+      ],
+      environmentTwinRequired: true,
+      environmentTwinSlug: 'local-dev-linux',
+      contextEmbedTargets: ['roo_handoff', 'run_record'],
+    });
+
+    expect(result.status).toBe('ready');
+    expect(result.issues).toEqual([]);
+    expect(result.plan.issueUrl).toBe('https://github.com/Deveadra/versa/issues/84');
+    expect(result.plan.baseBranch).toBe('main');
+    expect(result.plan.branch).toBe('orchestrator/ws16-sandbox-execution-prep');
+    expect(result.plan.repoPath).toBe('/home/devaedra/projects/versa');
+    expect(result.plan.sandboxStrategy).toBe('git_worktree');
+    expect(result.plan.validationCommands).toContain('pnpm test');
+    expect(result.plan.commandAllowlist).toContain('pnpm lint');
+    expect(result.plan.noTouchConstraints).toContain('Do not implement full Roo dispatch here');
+    expect(result.plan.environmentTwin).toEqual({
+      required: true,
+      compatible: true,
+      slug: 'local-dev-linux',
+    });
+  });
+
+  it('returns blocked readiness with missing required fields', () => {
+    const result = prepareSandboxExecution({
+      issueUrl: '',
+      issueNumber: 0,
+      taskCardPath: '',
+      repoPath: '',
+      baseBranch: '',
+      branch: '',
+      validationCommands: [],
+      commandAllowlist: [],
+      noTouchConstraints: [],
+      environmentTwinRequired: true,
+      environmentTwinSlug: null,
+    });
+
+    expect(result.status).toBe('blocked');
+    expect(result.issues).toContain('issueUrl is required');
+    expect(result.issues).toContain('issueNumber must be a finite positive integer');
+    expect(result.issues).toContain('taskCardPath is required');
+    expect(result.issues).toContain('repoPath is required');
+    expect(result.issues).toContain('baseBranch is required');
+    expect(result.issues).toContain('branch is required');
+    expect(result.issues).toContain('validationCommands must include at least one command');
+    expect(result.issues).toContain('commandAllowlist must include at least one safe command');
+    expect(result.issues).toContain('noTouchConstraints must include at least one boundary');
+    expect(result.issues).toContain('environmentTwinSlug is required when environmentTwinRequired is true');
+    expect(result.plan.environmentTwin).toEqual({
+      required: true,
+      compatible: false,
+      slug: null,
+    });
+  });
+
+  it('handles omitted required arrays and reports blocked readiness instead of throwing', () => {
+    const result = prepareSandboxExecution({
+      issueUrl: 'https://github.com/Deveadra/versa/issues/84',
+      issueNumber: 84,
+      taskCardPath: 'docs/task-cards/active/ws16-issue-84-sandbox-execution-prep.md',
+      repoPath: '/home/devaedra/projects/versa',
+      baseBranch: 'main',
+      branch: 'orchestrator/ws16-sandbox-execution-prep',
+      validationCommands: undefined as unknown as string[],
+      commandAllowlist: undefined as unknown as string[],
+      noTouchConstraints: undefined as unknown as string[],
+    });
+
+    expect(result.status).toBe('blocked');
+    expect(result.issues).toContain('validationCommands must include at least one command');
+    expect(result.issues).toContain('commandAllowlist must include at least one safe command');
+    expect(result.issues).toContain('noTouchConstraints must include at least one boundary');
+  });
+
+  it('rejects non-finite issue numbers', () => {
+    const result = prepareSandboxExecution({
+      issueUrl: 'https://github.com/Deveadra/versa/issues/84',
+      issueNumber: Number.NaN,
+      taskCardPath: 'docs/task-cards/active/ws16-issue-84-sandbox-execution-prep.md',
+      repoPath: '/home/devaedra/projects/versa',
+      baseBranch: 'main',
+      branch: 'orchestrator/ws16-sandbox-execution-prep',
+      validationCommands: ['pnpm test'],
+      commandAllowlist: ['pnpm test'],
+      noTouchConstraints: ['Do not delete or rewrite the legacy Python runtime'],
+    });
+
+    expect(result.status).toBe('blocked');
+    expect(result.issues).toContain('issueNumber must be a finite positive integer');
   });
 });

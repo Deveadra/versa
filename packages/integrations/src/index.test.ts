@@ -732,6 +732,30 @@ PR-ready summary: Validation failed.`,
     expect(classifications.some((row) => row.type === 'validation')).toBe(true);
   });
 
+  it('classifies CI test failure blockers as validation instead of environment', () => {
+    const summary = buildRooResultSummary({
+      ingestion: ingestRooExecutionResult({
+        runId: 'run_88_20260429030130',
+        rawOutput: `files changed
+- packages/integrations/src/index.ts
+
+validation results
+- pnpm test: failed
+
+blockers, if any
+- Tests failed in CI for integration suite.
+
+PR-ready summary: Validation failed in CI.`,
+      }),
+      issueUrl: 'https://github.com/Deveadra/versa/issues/88',
+      taskCardPath: 'docs/task-cards/active/ws20-issue-88-blocker-followup-issues.md',
+      branch: 'orchestrator/ws20-blocker-followup-issues',
+    });
+
+    const classifications = classifyRooExecutionBlockers({ summary });
+    expect(classifications[0]?.type).toBe('validation');
+  });
+
   it('generates linked follow-up issue drafts from blocked/partial summaries', () => {
     const summary = buildRooResultSummary({
       ingestion: ingestRooExecutionResult({

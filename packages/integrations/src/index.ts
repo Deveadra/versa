@@ -1051,12 +1051,12 @@ function classifyBlockerType(description: string): RooBlockerType {
     return 'missing-contract';
   }
 
-  if (/env|environment|secret|credential|token|network|ci/.test(normalized)) {
-    return 'environment';
+  if (/validation|lint|typecheck|test\s+fail|tests?\s+failed|failed\s+test|failed\s+check/.test(normalized)) {
+    return 'validation';
   }
 
-  if (/validation|lint|typecheck|test\s+fail|failed\s+check/.test(normalized)) {
-    return 'validation';
+  if (/env|environment|secret|credential|token|network|\bci\b/.test(normalized)) {
+    return 'environment';
   }
 
   return 'unknown';

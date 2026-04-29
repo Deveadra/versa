@@ -5,10 +5,12 @@ import { resolve } from 'node:path';
 import {
   buildTaskCardFileName,
   buildTaskCardPath,
+  createRooDispatchRunRecord,
   createRooHandoffRenderModel,
   createTaskCardRenderModel,
   extractIssueRequirements,
   GitHubIssueIntakeService,
+  ingestRooExecutionResult,
   normalizeGitHubIssue,
   prepareSandboxExecution,
   renderRooHandoffMarkdown,
@@ -21,6 +23,10 @@ import {
   MINIMAL_ISSUE_FIXTURE,
   WS14_TASK_CARD_ISSUE_FIXTURE,
   WS15_ROO_HANDOFF_ISSUE_FIXTURE,
+  WS17_ROO_OUTPUT_BLOCKED_FIXTURE,
+  WS17_ROO_OUTPUT_FAILED_FIXTURE,
+  WS17_ROO_OUTPUT_INCOMPLETE_FIXTURE,
+  WS17_ROO_OUTPUT_SUCCESS_FIXTURE,
   WORKSTREAM_ISSUE_FIXTURE,
 } from './fixtures/github-issues';
 
@@ -426,5 +432,68 @@ describe('sandbox execution preparation (WS16)', () => {
 
     expect(result.status).toBe('blocked');
     expect(result.issues).toContain('issueNumber must be a finite positive integer');
+  });
+});
+
+describe('roo dispatch and result ingestion (WS17)', () => {
+  it('creates a durable run record with deterministic artifact paths', () => {
+    const record = createRooDispatchRunRecord({
+      issueUrl: 'https://github.com/Deveadra/versa/issues/85',
+      issueNumber: 85,
+      taskCardPath: 'docs/task-cards/active/ws17-issue-85-roo-dispatch-result-ingestion.md',
+      baseBranch: 'main',
+      branch: 'orchestrator/ws17-roo-dispatch-result-ingestion',
+      handoffPath: 'artifacts/handoffs/ws17-issue-85.md',
+      dispatchedBy: 'ultron',
+      dispatchedAt: '2026-04-29T00:00:00.000Z',
+    });
+
+    expect(record.runId).toBe('run_85_20260429000000');
+    expect(record.artifacts.outputPath).toBe('artifacts/runs/run_85_20260429000000/roo-output.md');
+    expect(record.artifacts.resultSummaryPath).toBe('artifacts/runs/run_85_20260429000000/result-summary.json');
+  });
+
+  it('ingests successful Roo output into normalized structured result data', () => {
+    const ingested = ingestRooExecutionResult({
+      runId: 'run_85_20260429000000',
+      rawOutput: WS17_ROO_OUTPUT_SUCCESS_FIXTURE,
+    });
+
+    expect(ingested.status).toBe('succeeded');
+    expect(ingested.validation.passed).toBe(true);
+    expect(ingested.validation.commands.length).toBeGreaterThan(0);
+    expect(ingested.changedFiles).toContain('packages/integrations/src/index.ts');
+  });
+
+  it('classifies failed Roo output when validation contains failures', () => {
+    const ingested = ingestRooExecutionResult({
+      runId: 'run_85_20260429000000',
+      rawOutput: WS17_ROO_OUTPUT_FAILED_FIXTURE,
+    });
+
+    expect(ingested.status).toBe('failed');
+    expect(ingested.validation.passed).toBe(false);
+    expect(ingested.validation.commands.some((row) => row.status === 'failed')).toBe(true);
+  });
+
+  it('classifies blocked Roo output when blockers are present', () => {
+    const ingested = ingestRooExecutionResult({
+      runId: 'run_85_20260429000000',
+      rawOutput: WS17_ROO_OUTPUT_BLOCKED_FIXTURE,
+    });
+
+    expect(ingested.status).toBe('blocked');
+    expect(ingested.blockers).toContain('Missing required secret for downstream command.');
+  });
+
+  it('classifies incomplete/unstructured output as needs-review', () => {
+    const ingested = ingestRooExecutionResult({
+      runId: 'run_85_20260429000000',
+      rawOutput: WS17_ROO_OUTPUT_INCOMPLETE_FIXTURE,
+    });
+
+    expect(ingested.status).toBe('needs-review');
+    expect(ingested.validation.commands).toEqual([]);
+    expect(ingested.changedFiles).toEqual([]);
   });
 });

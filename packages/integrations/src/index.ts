@@ -396,6 +396,220 @@ export interface SandboxExecutionPrepResult {
   };
 }
 
+export type RooRunStatus = 'succeeded' | 'failed' | 'blocked' | 'partial' | 'needs-review';
+
+export interface RooDispatchRunRecordInput {
+  issueUrl: string;
+  issueNumber: number;
+  taskCardPath: string;
+  baseBranch: string;
+  branch: string;
+  handoffPath: string;
+  dispatchedBy: string;
+  dispatchedAt?: string;
+  executionMode?: string;
+}
+
+export interface RooDispatchRunRecord {
+  runId: string;
+  issueUrl: string;
+  issueNumber: number;
+  taskCardPath: string;
+  baseBranch: string;
+  branch: string;
+  executionMode: string;
+  dispatchedBy: string;
+  dispatchedAt: string;
+  artifacts: {
+    handoffPath: string;
+    outputPath: string;
+    resultSummaryPath: string;
+  };
+}
+
+export interface RooValidationResult {
+  command: string;
+  status: 'passed' | 'failed' | 'unknown';
+}
+
+export interface RooResultIngestion {
+  runId: string;
+  status: RooRunStatus;
+  summary: string;
+  validation: {
+    passed: boolean;
+    commands: RooValidationResult[];
+  };
+  changedFiles: string[];
+  blockers: string[];
+  rawOutput: string;
+}
+
+function buildRunId(issueNumber: number, dispatchedAt: string): string {
+  return `run_${issueNumber}_${dispatchedAt.replace(/[^0-9]/g, '').slice(0, 14)}`;
+}
+
+export function createRooDispatchRunRecord(input: RooDispatchRunRecordInput): RooDispatchRunRecord {
+  const dispatchedAt = input.dispatchedAt ?? new Date().toISOString();
+  const runId = buildRunId(input.issueNumber, dispatchedAt);
+
+  return {
+    runId,
+    issueUrl: input.issueUrl.trim(),
+    issueNumber: input.issueNumber,
+    taskCardPath: input.taskCardPath.trim(),
+    baseBranch: input.baseBranch.trim(),
+    branch: input.branch.trim(),
+    executionMode: input.executionMode?.trim() || 'Versa Executor',
+    dispatchedBy: input.dispatchedBy.trim(),
+    dispatchedAt,
+    artifacts: {
+      handoffPath: input.handoffPath.trim(),
+      outputPath: `artifacts/runs/${runId}/roo-output.md`,
+      resultSummaryPath: `artifacts/runs/${runId}/result-summary.json`,
+    },
+  };
+}
+
+function parseBulletedSection(source: string, heading: string): string[] {
+  const lines = source.split(/\r?\n/);
+  const normalizedHeading = heading.trim().toLowerCase();
+  let startIndex = -1;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const normalizedLine = lines[index].trim().toLowerCase().replace(/:$/, '');
+    if (normalizedLine === normalizedHeading) {
+      startIndex = index + 1;
+      break;
+    }
+  }
+
+  if (startIndex === -1) {
+    return [];
+  }
+
+  const bullets: string[] = [];
+  let encounteredBullet = false;
+
+  for (let index = startIndex; index < lines.length; index += 1) {
+    const line = lines[index].trim();
+    const normalizedLine = line.toLowerCase().replace(/:$/, '');
+
+    if (/^[-*]\s+/.test(line)) {
+      encounteredBullet = true;
+      bullets.push(line.replace(/^[-*]\s+/, '').trim());
+      continue;
+    }
+
+    if (line.length === 0) {
+      if (encounteredBullet) {
+        continue;
+      }
+
+      continue;
+    }
+
+    if (!encounteredBullet && normalizedLine === heading.trim().toLowerCase()) {
+      break;
+    }
+
+    if (!encounteredBullet && /^(files changed|commands run|validation results|blockers, if any|pr-ready summary)\b/.test(normalizedLine)) {
+      break;
+    }
+
+    if (encounteredBullet) {
+      break;
+    }
+
+    if (!encounteredBullet) {
+      break;
+    }
+  }
+
+  return bullets.filter((line) => line.length > 0 && line.toLowerCase() !== 'none');
+}
+
+function parseExplicitStatus(rawOutput: string): RooRunStatus | null {
+  const match = rawOutput.match(/^status:\s*(succeeded|failed|blocked|partial|needs-review)\s*$/im);
+  if (!match) {
+    return null;
+  }
+
+  return match[1].toLowerCase() as RooRunStatus;
+}
+
+export function classifyRooRunStatus(input: {
+  rawOutput: string;
+  validation: RooValidationResult[];
+  blockers: string[];
+}): RooRunStatus {
+  const explicitStatus = parseExplicitStatus(input.rawOutput);
+  if (explicitStatus) {
+    return explicitStatus;
+  }
+
+  const normalized = input.rawOutput.toLowerCase();
+
+  if (input.blockers.length > 0 || normalized.includes('blocked')) {
+    return 'blocked';
+  }
+
+  const hasFailedValidation = input.validation.some((row) => row.status === 'failed');
+  if (hasFailedValidation || normalized.includes('validation failed') || normalized.includes('failed')) {
+    return 'failed';
+  }
+
+  if (normalized.includes('partial')) {
+    return 'partial';
+  }
+
+  if (normalized.includes('succeeded') || normalized.includes('completed')) {
+    return 'succeeded';
+  }
+
+  return 'needs-review';
+}
+
+export function ingestRooExecutionResult(input: { runId: string; rawOutput: string }): RooResultIngestion {
+  const raw = input.rawOutput;
+  const summaryMatch = raw.match(/PR-ready summary:[\t ]*(.+)/i);
+  const summary = summaryMatch?.[1]?.trim() ?? 'No explicit PR-ready summary found.';
+  const changedFiles = parseBulletedSection(raw, 'files changed');
+  const blockers = parseBulletedSection(raw, 'blockers, if any');
+  const validationLines = parseBulletedSection(raw, 'validation results');
+
+  const validation = validationLines.map((line) => {
+    const lowered = line.toLowerCase();
+    let status: RooValidationResult['status'] = 'unknown';
+    if (lowered.includes('pass')) {
+      status = 'passed';
+    } else if (lowered.includes('fail')) {
+      status = 'failed';
+    }
+
+    return { command: line, status };
+  });
+
+  const status = classifyRooRunStatus({
+    rawOutput: raw,
+    validation,
+    blockers,
+  });
+
+  return {
+    runId: input.runId,
+    status,
+    summary,
+    validation: {
+      passed: validation.length > 0 && validation.every((row) => row.status === 'passed'),
+      commands: validation,
+    },
+    changedFiles,
+    blockers,
+    rawOutput: raw,
+  };
+}
+
 function cleanList(values: unknown): string[] {
   if (!Array.isArray(values)) {
     return [];

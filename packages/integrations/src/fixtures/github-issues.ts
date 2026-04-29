@@ -219,3 +219,63 @@ orchestrator(ws15): add Roo executor handoff generator
   labels: [{ name: 'orchestrator' }, { name: 'ws15' }],
   assignees: [{ login: 'Deveadra' }],
 };
+
+export const WS17_ROO_OUTPUT_SUCCESS_FIXTURE = `files changed
+
+- packages/integrations/src/index.ts
+- packages/integrations/src/index.test.ts
+
+validation results
+
+- pnpm lint: passed
+- pnpm typecheck: passed
+- pnpm test: passed
+
+blockers, if any
+
+- None
+
+PR-ready summary: Implemented WS17 dispatch records and deterministic Roo result ingestion.
+
+Status: succeeded
+`;
+
+export const WS17_ROO_OUTPUT_FAILED_FIXTURE = `files changed
+
+- packages/integrations/src/index.ts
+
+validation results
+
+- pnpm lint: passed
+- pnpm typecheck: failed
+
+blockers, if any
+
+- None
+
+PR-ready summary: Type mismatch found in result ingestion parser path.
+
+Status: failed
+`;
+
+export const WS17_ROO_OUTPUT_BLOCKED_FIXTURE = `files changed
+
+- packages/integrations/src/index.ts
+
+validation results
+
+- pnpm lint: unknown
+
+blockers, if any
+
+- Missing required secret for downstream command.
+
+PR-ready summary: Execution blocked due to environment prerequisites.
+
+Status: blocked
+`;
+
+export const WS17_ROO_OUTPUT_INCOMPLETE_FIXTURE = `Unstructured executor output.
+No explicit sections were provided.
+Need human follow-up before merging.
+`;

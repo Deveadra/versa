@@ -1,6 +1,7 @@
 .coverage
 .venv/
 .venv.bak/
+.venv-ci/
 __pycache__/
 *.pyc
 *.pyo

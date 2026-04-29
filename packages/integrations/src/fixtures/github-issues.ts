@@ -310,3 +310,54 @@ PR-ready summary: Added WS18 result summary and PR packet generation with partia
 
 Status: partial
 `;
+
+export const WS21_ULTRON_HAPPY_PATH_ISSUE_FIXTURE: GitHubIssueRecord = {
+  number: 99,
+  title: '[Orchestrator][WS21] End-to-end Ultron happy path',
+  body: `Owner
+
+Parent epic: #98
+
+## Goal
+
+Implement a true end-to-end happy-path test suite that exercises Ultron’s full issue-to-execution automation chain from issue intake through post-run updates and blocker/follow-up draft generation.
+
+## Why
+
+The current tests prove important pieces, but they do not yet prove the full orchestrator chain.
+
+## Deliverables
+
+- end-to-end orchestrator happy-path test harness
+- deterministic seeded inputs / fixtures
+- assertions covering chain outputs and state transitions
+- docs describing what the happy-path suite proves and what it does not prove
+
+## Acceptance criteria
+
+- one happy-path suite exercises the full issue-to-execution chain end to end
+- the suite proves continuity across intake, handoff, sandbox prep, result ingestion, summary generation, workspace/memory update, and follow-up draft generation
+- generated artifacts and durable state changes are asserted at the correct boundaries
+- the suite is deterministic enough for CI use
+- docs clearly explain what is real vs simulated in the suite
+
+## Constraints
+
+- do not broaden this into new product features
+- do not rewrite orchestrator modules just to make tests easier
+- do not rewrite the legacy Python runtime
+- keep the work bounded to confidence for the existing orchestrator chain
+
+## Suggested branch
+
+orchestrator/ws21-ultron-happy-path-e2e
+
+## Suggested PR title
+
+orchestrator(ws21): add end-to-end Ultron happy-path test suite
+`,
+  state: 'OPEN',
+  url: 'https://github.com/Deveadra/versa/issues/99',
+  labels: [{ name: 'orchestrator' }, { name: 'ws21' }],
+  assignees: [{ login: 'Deveadra' }],
+};

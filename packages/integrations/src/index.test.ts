@@ -33,6 +33,7 @@ import {
   WS17_ROO_OUTPUT_INCOMPLETE_FIXTURE,
   WS17_ROO_OUTPUT_SUCCESS_FIXTURE,
   WS18_ROO_OUTPUT_PARTIAL_FIXTURE,
+  WS21_ULTRON_HAPPY_PATH_ISSUE_FIXTURE,
   WORKSTREAM_ISSUE_FIXTURE,
 } from './fixtures/github-issues';
 
@@ -790,5 +791,148 @@ PR-ready summary: Partial due to missing contract.`,
     expect(drafts[0].body).toContain('Task card: docs/task-cards/active/ws20-issue-88-blocker-followup-issues.md');
     expect(drafts[0].labels).toContain('blocker-follow-up');
     expect(drafts[0].linkage.originatingIssueNumber).toBe(88);
+  });
+});
+
+describe('ultron orchestrator happy-path end-to-end chain (WS21)', () => {
+  it('executes issue intake through post-run update and confirms deterministic chain continuity', () => {
+    const intake = normalizeGitHubIssue(WS21_ULTRON_HAPPY_PATH_ISSUE_FIXTURE);
+
+    const taskCardModel = createTaskCardRenderModel({
+      intake,
+      workstreamId: 'WS21',
+      taskCardName: 'ultron-happy-path-e2e',
+      baseBranch: 'main',
+      branch: 'orchestrator/ws21-ultron-happy-path-e2e',
+      prTitle: 'orchestrator(ws21): add end-to-end Ultron happy-path test suite',
+      dependsOn: ['#98', '#77', 'WS13', 'WS14', 'WS15', 'WS16', 'WS17', 'WS18', 'WS19', 'WS20'],
+      inScope: [
+        'Add orchestrator-level end-to-end happy-path chain test',
+        'Reuse WS13–WS20 contracts and artifact shapes',
+      ],
+      outOfScope: ['New product features', 'Legacy Python runtime rewrite'],
+      filesToInspectFirst: ['packages/integrations/src/index.ts', 'packages/integrations/src/index.test.ts'],
+      requiredApproach: ['Inspect current repo state before editing', 'Keep chain assertions deterministic and bounded'],
+      requiredValidation: ['pnpm install', 'pnpm lint', 'pnpm typecheck', 'pnpm test'],
+      noTouchConstraints: ['Do not delete the legacy Python runtime', 'Do not perform unrelated repo cleanup'],
+      notesForAgent: ['Use existing WS13–WS20 contracts as the continuity surface.'],
+    });
+    const taskCardMarkdown = renderTaskCardMarkdown(taskCardModel);
+
+    const handoffModel = createRooHandoffRenderModel({
+      intake,
+      executionModeName: 'Versa Executor',
+      repositoryName: 'versa',
+      taskCardPath: taskCardModel.taskCardPath,
+      baseBranch: taskCardModel.baseBranch,
+      branch: taskCardModel.branch,
+      objective: taskCardModel.objective,
+      inScope: [...taskCardModel.inScope],
+      outOfScope: [...taskCardModel.outOfScope],
+      filesToInspectFirst: [...taskCardModel.filesToInspectFirst],
+      requiredValidation: [...taskCardModel.requiredValidation],
+      noTouchConstraints: [...taskCardModel.noTouchConstraints],
+      expectedDeliverables: [...taskCardModel.deliverables],
+      blockerReportingRules: [
+        'Classify blockers explicitly when present',
+        'Do not silently broaden scope while resolving blockers',
+      ],
+      expectedFinalResponseFormat: [
+        'files changed',
+        'commands run',
+        'validation results',
+        'blockers, if any',
+        'PR-ready summary referencing issue #99',
+      ],
+    });
+    const handoffMarkdown = renderRooHandoffMarkdown(handoffModel);
+
+    const prep = prepareSandboxExecution({
+      issueUrl: intake.metadata.url,
+      issueNumber: intake.metadata.number,
+      taskCardPath: taskCardModel.taskCardPath,
+      repoPath: '/home/devaedra/projects/versa',
+      baseBranch: taskCardModel.baseBranch,
+      branch: taskCardModel.branch,
+      sandboxStrategy: 'git_worktree',
+      validationCommands: ['pnpm install', 'pnpm lint', 'pnpm typecheck', 'pnpm test'],
+      commandAllowlist: ['git status --short --branch', 'pnpm install', 'pnpm lint', 'pnpm typecheck', 'pnpm test'],
+      noTouchConstraints: [...taskCardModel.noTouchConstraints],
+      environmentTwinRequired: true,
+      environmentTwinSlug: 'local-dev-linux',
+      contextEmbedTargets: ['roo_handoff', 'run_record'],
+    });
+
+    const dispatch = createRooDispatchRunRecord({
+      issueUrl: intake.metadata.url,
+      issueNumber: intake.metadata.number,
+      taskCardPath: taskCardModel.taskCardPath,
+      baseBranch: taskCardModel.baseBranch,
+      branch: taskCardModel.branch,
+      handoffPath: 'artifacts/handoffs/ws21-issue-99.md',
+      dispatchedBy: 'ultron',
+      dispatchedAt: '2026-04-29T04:00:00.000Z',
+    });
+
+    const ingestion = ingestRooExecutionResult({
+      runId: dispatch.runId,
+      rawOutput: WS17_ROO_OUTPUT_SUCCESS_FIXTURE,
+    });
+
+    const summary = buildRooResultSummary({
+      ingestion,
+      issueUrl: intake.metadata.url,
+      taskCardPath: taskCardModel.taskCardPath,
+      branch: taskCardModel.branch,
+    });
+
+    const packet = buildRooPrReviewPacket({
+      summary,
+      issueTitle: intake.metadata.title,
+    });
+
+    const postRun = buildRooPostRunWorkspaceMemoryUpdate({
+      summary,
+      recordedAt: '2026-04-29T04:10:00.000Z',
+    });
+
+    const followUpDrafts = buildRooFollowUpIssueDrafts({
+      summary,
+      parentEpic: intake.requirements.parentEpic,
+    });
+
+    expect(intake.metadata.number).toBe(99);
+    expect(intake.requirements.parentEpic).toBe(98);
+
+    expect(taskCardMarkdown).toContain('- Issue: #99');
+    expect(taskCardMarkdown).toContain('- Branch: orchestrator/ws21-ultron-happy-path-e2e');
+
+    expect(handoffMarkdown).toContain('Issue: `https://github.com/Deveadra/versa/issues/99`');
+    expect(handoffMarkdown).toContain('- Base Branch: main');
+
+    expect(prep.status).toBe('ready');
+    expect(prep.plan.environmentTwin.compatible).toBe(true);
+    expect(prep.plan.contextEmbedTargets).toEqual(['roo_handoff', 'run_record']);
+
+    expect(dispatch.runId).toBe('run_99_20260429040000');
+    expect(dispatch.artifacts.outputPath).toBe('artifacts/runs/run_99_20260429040000/roo-output.md');
+
+    expect(ingestion.status).toBe('succeeded');
+    expect(ingestion.validation.passed).toBe(true);
+
+    expect(summary.status).toBe('succeeded');
+    expect(summary.issue.number).toBe(99);
+    expect(summary.validation.totals.failed).toBe(0);
+    expect(summary.changedFiles.files).toContain('packages/integrations/src/index.ts');
+
+    expect(packet.prTitle).toContain('(ws21)');
+    expect(packet.prBodyDraft).toContain('## Validation Results');
+
+    expect(postRun.runHistory.linkage.issueNumber).toBe(99);
+    expect(postRun.runHistory.validation.overall).toBe('passed');
+    expect(postRun.workspaceUpdate.activeBlockers).toEqual([]);
+    expect(postRun.memoryWriteback.tier).toBe('working');
+
+    expect(followUpDrafts).toEqual([]);
   });
 });

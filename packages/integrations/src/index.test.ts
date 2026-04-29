@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import {
+  buildRooFollowUpIssueDrafts,
   buildRooPostRunWorkspaceMemoryUpdate,
   buildRooPrReviewPacket,
   buildRooResultSummary,
@@ -13,6 +14,7 @@ import {
   createTaskCardRenderModel,
   extractIssueRequirements,
   GitHubIssueIntakeService,
+  classifyRooExecutionBlockers,
   ingestRooExecutionResult,
   normalizeGitHubIssue,
   prepareSandboxExecution,
@@ -667,5 +669,102 @@ describe('post-run workspace and memory update (WS19)', () => {
     expect(failed.runHistory.status).toBe('failed');
     expect(failed.runHistory.validation.overall).toBe('failed');
     expect(failed.memoryWriteback.tags).toContain('status-failed');
+  });
+});
+
+describe('blocker classification and follow-up issue drafting (WS20)', () => {
+  it('classifies dependency, missing-contract, environment, validation, and scope-expansion blockers', () => {
+    const summary = buildRooResultSummary({
+      ingestion: ingestRooExecutionResult({
+        runId: 'run_88_20260429030000',
+        rawOutput: `files changed
+- packages/integrations/src/index.ts
+
+validation results
+- pnpm lint: passed
+
+blockers, if any
+- Dependency blocked by #91 waiting on upstream merge.
+- Missing contract: interface field not yet defined.
+- Environment blocker: missing CI token secret.
+- Validation blocker: lint failed in generated packet.
+- Out-of-scope scope expansion request for WS21 automation.
+
+PR-ready summary: Blocked on multiple categories.`,
+      }),
+      issueUrl: 'https://github.com/Deveadra/versa/issues/88',
+      taskCardPath: 'docs/task-cards/active/ws20-issue-88-blocker-followup-issues.md',
+      branch: 'orchestrator/ws20-blocker-followup-issues',
+    });
+
+    const classifications = classifyRooExecutionBlockers({ summary });
+    const types = classifications.map((row) => row.type);
+
+    expect(types).toContain('dependency');
+    expect(types).toContain('missing-contract');
+    expect(types).toContain('environment');
+    expect(types).toContain('validation');
+    expect(types).toContain('scope-expansion');
+    expect(classifications.find((row) => row.type === 'scope-expansion')?.outOfScope).toBe(true);
+  });
+
+  it('derives validation blocker from failed validation commands when blocker list does not include one', () => {
+    const summary = buildRooResultSummary({
+      ingestion: ingestRooExecutionResult({
+        runId: 'run_88_20260429030100',
+        rawOutput: `files changed
+- packages/integrations/src/index.ts
+
+validation results
+- pnpm lint: failed
+
+blockers, if any
+- Environment blocker: missing repo secret.
+
+PR-ready summary: Validation failed.`,
+      }),
+      issueUrl: 'https://github.com/Deveadra/versa/issues/88',
+      taskCardPath: 'docs/task-cards/active/ws20-issue-88-blocker-followup-issues.md',
+      branch: 'orchestrator/ws20-blocker-followup-issues',
+    });
+
+    const classifications = classifyRooExecutionBlockers({ summary });
+    expect(classifications.some((row) => row.type === 'validation')).toBe(true);
+  });
+
+  it('generates linked follow-up issue drafts from blocked/partial summaries', () => {
+    const summary = buildRooResultSummary({
+      ingestion: ingestRooExecutionResult({
+        runId: 'run_88_20260429030200',
+        rawOutput: `status: partial
+
+files changed
+- packages/integrations/src/index.ts
+
+validation results
+- pnpm test: failed
+
+blockers, if any
+- Missing contract for Roo blocker linkage payload.
+
+PR-ready summary: Partial due to missing contract.`,
+      }),
+      issueUrl: 'https://github.com/Deveadra/versa/issues/88',
+      taskCardPath: 'docs/task-cards/active/ws20-issue-88-blocker-followup-issues.md',
+      branch: 'orchestrator/ws20-blocker-followup-issues',
+    });
+
+    const drafts = buildRooFollowUpIssueDrafts({
+      summary,
+      parentEpic: 77,
+    });
+
+    expect(drafts.length).toBeGreaterThan(0);
+    expect(drafts[0].title).toContain('#88');
+    expect(drafts[0].body).toContain('Parent epic: #77');
+    expect(drafts[0].body).toContain('Run ID: run_88_20260429030200');
+    expect(drafts[0].body).toContain('Task card: docs/task-cards/active/ws20-issue-88-blocker-followup-issues.md');
+    expect(drafts[0].labels).toContain('blocker-follow-up');
+    expect(drafts[0].linkage.originatingIssueNumber).toBe(88);
   });
 });

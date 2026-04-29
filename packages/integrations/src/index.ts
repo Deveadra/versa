@@ -561,6 +561,40 @@ export interface RooPostRunWorkspaceMemoryUpdate {
   memoryWriteback: RooPostRunMemoryWriteback;
 }
 
+export type RooBlockerType =
+  | 'dependency'
+  | 'missing-contract'
+  | 'environment'
+  | 'validation'
+  | 'scope-expansion'
+  | 'unknown';
+
+export interface RooBlockerClassification {
+  type: RooBlockerType;
+  summary: string;
+  outOfScope: boolean;
+  evidence: string[];
+  suggestedScope: string;
+  acceptanceCriteria: string[];
+  constraints: string[];
+}
+
+export interface RooFollowUpIssueDraft {
+  title: string;
+  body: string;
+  labels: string[];
+  linkage: {
+    parentEpic: number | null;
+    originatingIssueNumber: number | null;
+    originatingIssueUrl: string | null;
+    taskCardPath: string | null;
+    branch: string | null;
+    runId: string;
+    runStatus: RooRunStatus;
+    blockerType: RooBlockerType;
+  };
+}
+
 function buildRunId(issueNumber: number, dispatchedAt: string): string {
   return `run_${issueNumber}_${dispatchedAt.replace(/[^0-9]/g, '').slice(0, 14)}`;
 }
@@ -1000,6 +1034,175 @@ export function buildRooPostRunWorkspaceMemoryUpdate(input: {
     workspaceUpdate,
     memoryWriteback,
   };
+}
+
+function classifyBlockerType(description: string): RooBlockerType {
+  const normalized = description.toLowerCase();
+
+  if (/out[-\s]?of[-\s]?scope|scope\s+expansion|scope\s+creep|adjacent\s+workstream/.test(normalized)) {
+    return 'scope-expansion';
+  }
+
+  if (/dependenc|blocked\s+by\s+#|waiting\s+on|upstream/.test(normalized)) {
+    return 'dependency';
+  }
+
+  if (/contract|schema|interface|missing\s+type|missing\s+field/.test(normalized)) {
+    return 'missing-contract';
+  }
+
+  if (/validation|lint|typecheck|test\s+fail|tests?\s+failed|failed\s+test|failed\s+check/.test(normalized)) {
+    return 'validation';
+  }
+
+  if (/env|environment|secret|credential|token|network|\bci\b/.test(normalized)) {
+    return 'environment';
+  }
+
+  return 'unknown';
+}
+
+function blockerTypeScope(type: RooBlockerType): string {
+  switch (type) {
+    case 'dependency':
+      return 'Resolve upstream dependency and retry bounded task execution.';
+    case 'missing-contract':
+      return 'Define or align the missing contract used by the bounded workstream.';
+    case 'environment':
+      return 'Repair environment prerequisites without changing current task scope.';
+    case 'validation':
+      return 'Stabilize validation path for this workstream without broadening feature scope.';
+    case 'scope-expansion':
+      return 'Create a follow-up issue for out-of-scope work; keep current issue bounded.';
+    default:
+      return 'Triage blocker and create the smallest explicit follow-up issue.';
+  }
+}
+
+function blockerTypeAcceptanceCriteria(type: RooBlockerType): string[] {
+  switch (type) {
+    case 'dependency':
+      return ['Upstream dependency is resolved', 'Blocked run can be retried without manual workaround'];
+    case 'missing-contract':
+      return ['Missing contract is defined and documented', 'Consumers compile and tests pass'];
+    case 'environment':
+      return ['Required environment prerequisites are available', 'Validation commands run in a stable environment'];
+    case 'validation':
+      return ['Failing validation path is fixed or made deterministic', 'Required validation suite passes'];
+    case 'scope-expansion':
+      return ['Out-of-scope work is captured in a linked issue', 'Original task remains bounded to assigned scope'];
+    default:
+      return ['Blocker is classified with clear owner and next action'];
+  }
+}
+
+const FOLLOW_UP_CONSTRAINTS = [
+  'Do not silently expand original task scope',
+  'Do not delete or rewrite legacy Python runtime code',
+  'Do not auto-create GitHub issues without explicit approval path',
+];
+
+export function classifyRooExecutionBlockers(input: { summary: RooResultSummary }): RooBlockerClassification[] {
+  const classifications = input.summary.blockers.map((blocker): RooBlockerClassification => {
+    const type = classifyBlockerType(blocker);
+    const outOfScope = type === 'scope-expansion' || blocker.toLowerCase().includes('out-of-scope');
+
+    return {
+      type,
+      summary: blocker,
+      outOfScope,
+      evidence: [blocker],
+      suggestedScope: blockerTypeScope(type),
+      acceptanceCriteria: blockerTypeAcceptanceCriteria(type),
+      constraints: [...FOLLOW_UP_CONSTRAINTS],
+    };
+  });
+
+  const hasValidationBlocker = classifications.some((row) => row.type === 'validation');
+  const failedCommands = input.summary.validation.commands.filter((row) => row.status === 'failed');
+  if (!hasValidationBlocker && failedCommands.length > 0) {
+    classifications.push({
+      type: 'validation',
+      summary: `Validation commands failed (${failedCommands.length})`,
+      outOfScope: false,
+      evidence: failedCommands.map((row) => row.command),
+      suggestedScope: blockerTypeScope('validation'),
+      acceptanceCriteria: blockerTypeAcceptanceCriteria('validation'),
+      constraints: [...FOLLOW_UP_CONSTRAINTS],
+    });
+  }
+
+  return classifications;
+}
+
+function toFollowUpTitle(input: { type: RooBlockerType; issueNumber: number | null }): string {
+  const prefix = input.issueNumber ? `Follow-up for #${input.issueNumber}` : 'Follow-up issue';
+  return `${prefix}: ${input.type} blocker`;
+}
+
+function renderFollowUpBody(input: {
+  blocker: RooBlockerClassification;
+  summary: RooResultSummary;
+  parentEpic: number | null;
+}): string {
+  const issueRef = input.summary.issue.number ? `#${input.summary.issue.number}` : 'unknown';
+  const epicRef = input.parentEpic ? `#${input.parentEpic}` : 'unknown';
+
+  return [
+    '## Context Linkage',
+    `- Parent epic: ${epicRef}`,
+    `- Originating issue: ${issueRef}`,
+    `- Originating issue URL: ${input.summary.issue.url ?? 'unknown'}`,
+    `- Task card: ${input.summary.taskCardPath ?? 'unknown'}`,
+    `- Branch: ${input.summary.branch ?? 'unknown'}`,
+    `- Run ID: ${input.summary.runId}`,
+    `- Run status: ${input.summary.status}`,
+    '',
+    '## Blocker Summary',
+    `- Type: ${input.blocker.type}`,
+    `- Description: ${input.blocker.summary}`,
+    `- Out of scope for originating task: ${input.blocker.outOfScope ? 'yes' : 'no'}`,
+    '',
+    '## Suggested Scope',
+    `- ${input.blocker.suggestedScope}`,
+    '',
+    '## Acceptance Criteria',
+    ...input.blocker.acceptanceCriteria.map((line) => `- ${line}`),
+    '',
+    '## Constraints',
+    ...input.blocker.constraints.map((line) => `- ${line}`),
+    '',
+    '## Notes',
+    '- This issue body is a generated draft and should be reviewed before creation.',
+  ].join('\n');
+}
+
+export function buildRooFollowUpIssueDrafts(input: {
+  summary: RooResultSummary;
+  parentEpic?: number | null;
+}): RooFollowUpIssueDraft[] {
+  const parentEpic = input.parentEpic ?? null;
+  const blockers = classifyRooExecutionBlockers({ summary: input.summary });
+
+  return blockers.map((blocker) => ({
+    title: toFollowUpTitle({ type: blocker.type, issueNumber: input.summary.issue.number }),
+    body: renderFollowUpBody({
+      blocker,
+      summary: input.summary,
+      parentEpic,
+    }),
+    labels: ['orchestrator', 'blocker-follow-up', blocker.type],
+    linkage: {
+      parentEpic,
+      originatingIssueNumber: input.summary.issue.number,
+      originatingIssueUrl: input.summary.issue.url,
+      taskCardPath: input.summary.taskCardPath,
+      branch: input.summary.branch,
+      runId: input.summary.runId,
+      runStatus: input.summary.status,
+      blockerType: blocker.type,
+    },
+  }));
 }
 
 function cleanList(values: unknown): string[] {

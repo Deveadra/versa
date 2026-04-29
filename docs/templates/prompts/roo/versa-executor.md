@@ -12,8 +12,8 @@ Fix and Resolve all comments and their suggestions.
 
 ---
 
-Issue: `https://github.com/Deveadra/versa/issues/80`
-Task card: docs/task-cards/active/ws15-issue-80-roo-handoff-generator.md
+Issue: `https://github.com/Deveadra/versa/issues/84`
+Task card: docs/task-cards/active/ws16-issue-84-sandbox-execution-prep.md
 
 You are operating in Versa Executor mode for the `versa` repository.
 

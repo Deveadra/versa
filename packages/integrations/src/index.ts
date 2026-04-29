@@ -355,6 +355,127 @@ export interface RooHandoffRenderModel {
   expectedFinalResponseFormat: string[];
 }
 
+export type SandboxStrategy = 'in_place_branch' | 'git_worktree' | 'dry_run_only';
+
+export interface SandboxExecutionPrepInput {
+  issueUrl: string;
+  issueNumber: number;
+  taskCardPath: string;
+  repoPath: string;
+  baseBranch: string;
+  branch: string;
+  validationCommands: string[];
+  noTouchConstraints: string[];
+  commandAllowlist: string[];
+  sandboxStrategy?: SandboxStrategy;
+  environmentTwinSlug?: string | null;
+  environmentTwinRequired?: boolean;
+  contextEmbedTargets?: Array<'roo_handoff' | 'run_record'>;
+}
+
+export interface SandboxExecutionPrepResult {
+  status: 'ready' | 'blocked';
+  issues: string[];
+  plan: {
+    issueUrl: string;
+    issueNumber: number;
+    taskCardPath: string;
+    repoPath: string;
+    baseBranch: string;
+    branch: string;
+    sandboxStrategy: SandboxStrategy;
+    validationCommands: string[];
+    commandAllowlist: string[];
+    noTouchConstraints: string[];
+    environmentTwin: {
+      required: boolean;
+      compatible: boolean;
+      slug: string | null;
+    };
+    contextEmbedTargets: Array<'roo_handoff' | 'run_record'>;
+  };
+}
+
+function cleanList(values: string[]): string[] {
+  return values.map((value) => value.trim()).filter((value) => value.length > 0);
+}
+
+export function prepareSandboxExecution(input: SandboxExecutionPrepInput): SandboxExecutionPrepResult {
+  const issues: string[] = [];
+  const sandboxStrategy: SandboxStrategy = input.sandboxStrategy ?? 'in_place_branch';
+  const validationCommands = cleanList(input.validationCommands);
+  const commandAllowlist = cleanList(input.commandAllowlist);
+  const noTouchConstraints = cleanList(input.noTouchConstraints);
+  const contextEmbedTargets = input.contextEmbedTargets ?? ['roo_handoff', 'run_record'];
+  const environmentTwinRequired = input.environmentTwinRequired ?? false;
+  const environmentTwinSlug = input.environmentTwinSlug?.trim() || null;
+
+  if (input.issueUrl.trim().length === 0) {
+    issues.push('issueUrl is required');
+  }
+
+  if (input.issueNumber <= 0) {
+    issues.push('issueNumber must be a positive number');
+  }
+
+  if (input.taskCardPath.trim().length === 0) {
+    issues.push('taskCardPath is required');
+  }
+
+  if (input.repoPath.trim().length === 0) {
+    issues.push('repoPath is required');
+  }
+
+  if (input.baseBranch.trim().length === 0) {
+    issues.push('baseBranch is required');
+  }
+
+  if (input.branch.trim().length === 0) {
+    issues.push('branch is required');
+  }
+
+  if (validationCommands.length === 0) {
+    issues.push('validationCommands must include at least one command');
+  }
+
+  if (commandAllowlist.length === 0) {
+    issues.push('commandAllowlist must include at least one safe command');
+  }
+
+  if (noTouchConstraints.length === 0) {
+    issues.push('noTouchConstraints must include at least one boundary');
+  }
+
+  if (environmentTwinRequired && !environmentTwinSlug) {
+    issues.push('environmentTwinSlug is required when environmentTwinRequired is true');
+  }
+
+  const compatibleTwin = !environmentTwinRequired || environmentTwinSlug !== null;
+
+  return {
+    status: issues.length === 0 ? 'ready' : 'blocked',
+    issues,
+    plan: {
+      issueUrl: input.issueUrl,
+      issueNumber: input.issueNumber,
+      taskCardPath: input.taskCardPath,
+      repoPath: input.repoPath,
+      baseBranch: input.baseBranch,
+      branch: input.branch,
+      sandboxStrategy,
+      validationCommands,
+      commandAllowlist,
+      noTouchConstraints,
+      environmentTwin: {
+        required: environmentTwinRequired,
+        compatible: compatibleTwin,
+        slug: environmentTwinSlug,
+      },
+      contextEmbedTargets,
+    },
+  };
+}
+
 function toKebabCase(value: string): string {
   return value
     .trim()

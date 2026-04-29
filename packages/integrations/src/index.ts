@@ -734,6 +734,21 @@ function formatCommandRows(rows: RooValidationResult[]): string {
   return rows.map((row) => `- ${row.command} (${row.status})`).join('\n');
 }
 
+function deriveWorkstreamTag(input: { summary: RooResultSummary; issueTitle: string | null }): string | null {
+  const candidates = [input.summary.branch, input.summary.taskCardPath, input.issueTitle].filter(
+    (value): value is string => Boolean(value),
+  );
+
+  for (const candidate of candidates) {
+    const match = candidate.match(/\b(ws\d{1,2})\b/i);
+    if (match) {
+      return match[1].toLowerCase();
+    }
+  }
+
+  return null;
+}
+
 export function buildRooPrReviewPacket(input: {
   summary: RooResultSummary;
   issueTitle?: string | null;
@@ -744,7 +759,14 @@ export function buildRooPrReviewPacket(input: {
 
   let prTitle: string | null = null;
   if (issueNumber && issueTitle) {
-    prTitle = `orchestrator(ws18): ${issueTitle} (#${issueNumber})`;
+    const workstreamTag = deriveWorkstreamTag({
+      summary: input.summary,
+      issueTitle,
+    });
+
+    prTitle = workstreamTag
+      ? `orchestrator(${workstreamTag}): ${issueTitle} (#${issueNumber})`
+      : `orchestrator: ${issueTitle} (#${issueNumber})`;
   } else {
     if (!issueNumber) missingData.push('issue number for PR title');
     if (!issueTitle) missingData.push('issue title for PR title');

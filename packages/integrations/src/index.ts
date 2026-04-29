@@ -396,13 +396,25 @@ export interface SandboxExecutionPrepResult {
   };
 }
 
-function cleanList(values: string[]): string[] {
-  return values.map((value) => value.trim()).filter((value) => value.length > 0);
+function cleanList(values: unknown): string[] {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+
+  return values
+    .filter((value): value is string => typeof value === 'string')
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
 }
 
 export function prepareSandboxExecution(input: SandboxExecutionPrepInput): SandboxExecutionPrepResult {
   const issues: string[] = [];
   const sandboxStrategy: SandboxStrategy = input.sandboxStrategy ?? 'in_place_branch';
+  const issueUrl = input.issueUrl.trim();
+  const taskCardPath = input.taskCardPath.trim();
+  const repoPath = input.repoPath.trim();
+  const baseBranch = input.baseBranch.trim();
+  const branch = input.branch.trim();
   const validationCommands = cleanList(input.validationCommands);
   const commandAllowlist = cleanList(input.commandAllowlist);
   const noTouchConstraints = cleanList(input.noTouchConstraints);
@@ -410,27 +422,27 @@ export function prepareSandboxExecution(input: SandboxExecutionPrepInput): Sandb
   const environmentTwinRequired = input.environmentTwinRequired ?? false;
   const environmentTwinSlug = input.environmentTwinSlug?.trim() || null;
 
-  if (input.issueUrl.trim().length === 0) {
+  if (issueUrl.length === 0) {
     issues.push('issueUrl is required');
   }
 
-  if (input.issueNumber <= 0) {
-    issues.push('issueNumber must be a positive number');
+  if (!Number.isFinite(input.issueNumber) || !Number.isInteger(input.issueNumber) || input.issueNumber <= 0) {
+    issues.push('issueNumber must be a finite positive integer');
   }
 
-  if (input.taskCardPath.trim().length === 0) {
+  if (taskCardPath.length === 0) {
     issues.push('taskCardPath is required');
   }
 
-  if (input.repoPath.trim().length === 0) {
+  if (repoPath.length === 0) {
     issues.push('repoPath is required');
   }
 
-  if (input.baseBranch.trim().length === 0) {
+  if (baseBranch.length === 0) {
     issues.push('baseBranch is required');
   }
 
-  if (input.branch.trim().length === 0) {
+  if (branch.length === 0) {
     issues.push('branch is required');
   }
 
@@ -450,18 +462,18 @@ export function prepareSandboxExecution(input: SandboxExecutionPrepInput): Sandb
     issues.push('environmentTwinSlug is required when environmentTwinRequired is true');
   }
 
-  const compatibleTwin = !environmentTwinRequired || environmentTwinSlug !== null;
+  const compatibleTwin = !issues.includes('environmentTwinSlug is required when environmentTwinRequired is true');
 
   return {
     status: issues.length === 0 ? 'ready' : 'blocked',
     issues,
     plan: {
-      issueUrl: input.issueUrl,
+      issueUrl,
       issueNumber: input.issueNumber,
-      taskCardPath: input.taskCardPath,
-      repoPath: input.repoPath,
-      baseBranch: input.baseBranch,
-      branch: input.branch,
+      taskCardPath,
+      repoPath,
+      baseBranch,
+      branch,
       sandboxStrategy,
       validationCommands,
       commandAllowlist,

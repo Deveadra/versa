@@ -324,12 +324,12 @@ describe('roo handoff generation (WS15)', () => {
 describe('sandbox execution preparation (WS16)', () => {
   it('builds a ready execution prep plan with required bounded context', () => {
     const result = prepareSandboxExecution({
-      issueUrl: 'https://github.com/Deveadra/versa/issues/84',
+      issueUrl: ' https://github.com/Deveadra/versa/issues/84 ',
       issueNumber: 84,
-      taskCardPath: 'docs/task-cards/active/ws16-issue-84-sandbox-execution-prep.md',
-      repoPath: '/home/devaedra/projects/versa',
-      baseBranch: 'main',
-      branch: 'orchestrator/ws16-sandbox-execution-prep',
+      taskCardPath: ' docs/task-cards/active/ws16-issue-84-sandbox-execution-prep.md ',
+      repoPath: ' /home/devaedra/projects/versa ',
+      baseBranch: ' main ',
+      branch: ' orchestrator/ws16-sandbox-execution-prep ',
       sandboxStrategy: 'git_worktree',
       validationCommands: ['pnpm install', 'pnpm lint', 'pnpm typecheck', 'pnpm test'],
       commandAllowlist: ['git status --short --branch', 'pnpm lint', 'pnpm typecheck', 'pnpm test'],
@@ -344,6 +344,7 @@ describe('sandbox execution preparation (WS16)', () => {
 
     expect(result.status).toBe('ready');
     expect(result.issues).toEqual([]);
+    expect(result.plan.issueUrl).toBe('https://github.com/Deveadra/versa/issues/84');
     expect(result.plan.baseBranch).toBe('main');
     expect(result.plan.branch).toBe('orchestrator/ws16-sandbox-execution-prep');
     expect(result.plan.repoPath).toBe('/home/devaedra/projects/versa');
@@ -375,7 +376,7 @@ describe('sandbox execution preparation (WS16)', () => {
 
     expect(result.status).toBe('blocked');
     expect(result.issues).toContain('issueUrl is required');
-    expect(result.issues).toContain('issueNumber must be a positive number');
+    expect(result.issues).toContain('issueNumber must be a finite positive integer');
     expect(result.issues).toContain('taskCardPath is required');
     expect(result.issues).toContain('repoPath is required');
     expect(result.issues).toContain('baseBranch is required');
@@ -389,5 +390,41 @@ describe('sandbox execution preparation (WS16)', () => {
       compatible: false,
       slug: null,
     });
+  });
+
+  it('handles omitted required arrays and reports blocked readiness instead of throwing', () => {
+    const result = prepareSandboxExecution({
+      issueUrl: 'https://github.com/Deveadra/versa/issues/84',
+      issueNumber: 84,
+      taskCardPath: 'docs/task-cards/active/ws16-issue-84-sandbox-execution-prep.md',
+      repoPath: '/home/devaedra/projects/versa',
+      baseBranch: 'main',
+      branch: 'orchestrator/ws16-sandbox-execution-prep',
+      validationCommands: undefined as unknown as string[],
+      commandAllowlist: undefined as unknown as string[],
+      noTouchConstraints: undefined as unknown as string[],
+    });
+
+    expect(result.status).toBe('blocked');
+    expect(result.issues).toContain('validationCommands must include at least one command');
+    expect(result.issues).toContain('commandAllowlist must include at least one safe command');
+    expect(result.issues).toContain('noTouchConstraints must include at least one boundary');
+  });
+
+  it('rejects non-finite issue numbers', () => {
+    const result = prepareSandboxExecution({
+      issueUrl: 'https://github.com/Deveadra/versa/issues/84',
+      issueNumber: Number.NaN,
+      taskCardPath: 'docs/task-cards/active/ws16-issue-84-sandbox-execution-prep.md',
+      repoPath: '/home/devaedra/projects/versa',
+      baseBranch: 'main',
+      branch: 'orchestrator/ws16-sandbox-execution-prep',
+      validationCommands: ['pnpm test'],
+      commandAllowlist: ['pnpm test'],
+      noTouchConstraints: ['Do not delete or rewrite the legacy Python runtime'],
+    });
+
+    expect(result.status).toBe('blocked');
+    expect(result.issues).toContain('issueNumber must be a finite positive integer');
   });
 });

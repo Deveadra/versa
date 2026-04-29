@@ -487,6 +487,80 @@ export interface RooPrReviewPacket {
   missingData: string[];
 }
 
+export interface RooPostRunValidationOutcome {
+  overall: 'passed' | 'failed' | 'unknown';
+  passed: number;
+  failed: number;
+  unknown: number;
+  commands: RooValidationResult[];
+}
+
+export interface RooPostRunRepoObservation {
+  kind: 'changed_file' | 'review_note' | 'risk_note';
+  value: string;
+}
+
+export interface RooPostRunLinkage {
+  issueNumber: number | null;
+  issueUrl: string | null;
+  taskCardPath: string | null;
+  branch: string | null;
+}
+
+export interface RooPostRunHistoryRecord {
+  runId: string;
+  status: RooRunStatus;
+  linkage: RooPostRunLinkage;
+  summary: string;
+  validation: RooPostRunValidationOutcome;
+  blockers: string[];
+  followUps: string[];
+  observations: RooPostRunRepoObservation[];
+  recordedAt: string;
+}
+
+export interface RooPostRunWorkspaceUpdate {
+  currentObjective: string;
+  activeBlockers: Array<{
+    description: string;
+    status: 'active' | 'resolved';
+    notes?: string;
+  }>;
+  importantFiles: Array<{
+    path: string;
+    reason: string;
+  }>;
+  nextRecommendedActions: Array<{
+    action: string;
+    priority: 'low' | 'medium' | 'high';
+    rationale?: string;
+  }>;
+  recentDecisions: Array<{
+    summary: string;
+    rationale?: string;
+  }>;
+}
+
+export interface RooPostRunMemoryWriteback {
+  tier: 'working' | 'episodic';
+  summary: string;
+  content: {
+    runId: string;
+    status: RooRunStatus;
+    linkage: RooPostRunLinkage;
+    blockers: string[];
+    followUps: string[];
+    validation: RooPostRunValidationOutcome;
+  };
+  tags: string[];
+}
+
+export interface RooPostRunWorkspaceMemoryUpdate {
+  runHistory: RooPostRunHistoryRecord;
+  workspaceUpdate: RooPostRunWorkspaceUpdate;
+  memoryWriteback: RooPostRunMemoryWriteback;
+}
+
 function buildRunId(issueNumber: number, dispatchedAt: string): string {
   return `run_${issueNumber}_${dispatchedAt.replace(/[^0-9]/g, '').slice(0, 14)}`;
 }
@@ -814,6 +888,117 @@ export function buildRooPrReviewPacket(input: {
     prBodyDraft,
     summary: input.summary,
     missingData: Array.from(new Set(missingData)),
+  };
+}
+
+function deriveValidationOverall(summary: RooResultSummary): RooPostRunValidationOutcome['overall'] {
+  if (summary.validation.totals.failed > 0) return 'failed';
+  if (summary.validation.totals.passed > 0 && summary.validation.totals.unknown === 0) return 'passed';
+  return 'unknown';
+}
+
+function toPostRunObservations(summary: RooResultSummary): RooPostRunRepoObservation[] {
+  const changedFiles = summary.changedFiles.files.map((file) => ({
+    kind: 'changed_file' as const,
+    value: file,
+  }));
+  const reviewNotes = summary.reviewNotes.map((note) => ({
+    kind: 'review_note' as const,
+    value: note,
+  }));
+  const riskNotes = summary.riskMigrationNotes.map((note) => ({
+    kind: 'risk_note' as const,
+    value: note,
+  }));
+  return [...changedFiles, ...reviewNotes, ...riskNotes];
+}
+
+export function buildRooPostRunWorkspaceMemoryUpdate(input: {
+  summary: RooResultSummary;
+  recordedAt?: string;
+}): RooPostRunWorkspaceMemoryUpdate {
+  const recordedAt = input.recordedAt ?? new Date().toISOString();
+  const summary = input.summary;
+
+  const validation: RooPostRunValidationOutcome = {
+    overall: deriveValidationOverall(summary),
+    passed: summary.validation.totals.passed,
+    failed: summary.validation.totals.failed,
+    unknown: summary.validation.totals.unknown,
+    commands: [...summary.validation.commands],
+  };
+
+  const linkage: RooPostRunLinkage = {
+    issueNumber: summary.issue.number,
+    issueUrl: summary.issue.url,
+    taskCardPath: summary.taskCardPath,
+    branch: summary.branch,
+  };
+
+  const blockers = [...summary.blockers];
+  const followUps = [...summary.knownFollowUps];
+  const observations = toPostRunObservations(summary);
+
+  const runHistory: RooPostRunHistoryRecord = {
+    runId: summary.runId,
+    status: summary.status,
+    linkage,
+    summary: summary.prReadySummary,
+    validation,
+    blockers,
+    followUps,
+    observations,
+    recordedAt,
+  };
+
+  const workspaceUpdate: RooPostRunWorkspaceUpdate = {
+    currentObjective: `Post-run update for ${summary.runId} (${summary.status})`,
+    activeBlockers: blockers.map((description) => ({
+      description,
+      status: 'active' as const,
+      notes: 'Captured from executor post-run summary.',
+    })),
+    importantFiles: summary.changedFiles.files.map((path) => ({
+      path,
+      reason: 'Changed in associated run output.',
+    })),
+    nextRecommendedActions: followUps.map((action) => ({
+      action,
+      priority: 'medium' as const,
+      rationale: 'Captured from known follow-ups.',
+    })),
+    recentDecisions: [
+      {
+        summary: `Run ${summary.runId} classified as ${summary.status}`,
+        rationale: summary.prReadySummary,
+      },
+    ],
+  };
+
+  const memoryWriteback: RooPostRunMemoryWriteback = {
+    tier: summary.status === 'succeeded' ? 'working' : 'episodic',
+    summary: `Run ${summary.runId}: ${summary.status}`,
+    content: {
+      runId: summary.runId,
+      status: summary.status,
+      linkage,
+      blockers,
+      followUps,
+      validation,
+    },
+    tags: [
+      'orchestrator',
+      'post-run',
+      ...(summary.issue.number ? [`issue-${summary.issue.number}`] : []),
+      ...(summary.branch ? [summary.branch] : []),
+      `status-${summary.status}`,
+    ],
+  };
+
+  return {
+    runHistory,
+    workspaceUpdate,
+    memoryWriteback,
   };
 }
 

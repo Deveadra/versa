@@ -12,8 +12,8 @@ Fix and Resolve all comments and their suggestions.
 
 ---
 
-Issue: `https://github.com/Deveadra/versa/issues/86`
-Task card: docs/task-cards/active/ws18-issue-86-result-summary-pr-packet.md
+Issue: `https://github.com/Deveadra/versa/issues/87`
+Task card: docs/task-cards/active/ws19-issue-87-post-run-workspace-memory-update.md
 
 You are operating in Versa Executor mode for the `versa` repository.
 

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import {
+  buildRooPostRunWorkspaceMemoryUpdate,
   buildRooPrReviewPacket,
   buildRooResultSummary,
   buildTaskCardFileName,
@@ -589,5 +590,82 @@ describe('result summary and PR review packet (WS18)', () => {
     expect(blocked.blockers.length).toBeGreaterThan(0);
     expect(failed.status).toBe('failed');
     expect(failed.validation.passed).toBe(false);
+  });
+});
+
+describe('post-run workspace and memory update (WS19)', () => {
+  it('builds durable post-run update records for succeeded runs', () => {
+    const summary = buildRooResultSummary({
+      ingestion: ingestRooExecutionResult({
+        runId: 'run_87_20260429020000',
+        rawOutput: WS17_ROO_OUTPUT_SUCCESS_FIXTURE,
+      }),
+      issueUrl: 'https://github.com/Deveadra/versa/issues/87',
+      taskCardPath: 'docs/task-cards/active/ws19-issue-87-post-run-workspace-memory-update.md',
+      branch: 'orchestrator/ws19-post-run-workspace-memory-update',
+    });
+
+    const update = buildRooPostRunWorkspaceMemoryUpdate({
+      summary,
+      recordedAt: '2026-04-29T02:00:00.000Z',
+    });
+
+    expect(update.runHistory.runId).toBe('run_87_20260429020000');
+    expect(update.runHistory.linkage.issueNumber).toBe(87);
+    expect(update.runHistory.validation.overall).toBe('passed');
+    expect(update.workspaceUpdate.importantFiles.length).toBeGreaterThan(0);
+    expect(update.memoryWriteback.tags).toContain('status-succeeded');
+  });
+
+  it('records blockers and failed validation outcomes honestly', () => {
+    const summary = buildRooResultSummary({
+      ingestion: ingestRooExecutionResult({
+        runId: 'run_87_20260429021000',
+        rawOutput: WS17_ROO_OUTPUT_BLOCKED_FIXTURE,
+      }),
+      issueUrl: 'https://github.com/Deveadra/versa/issues/87',
+      taskCardPath: 'docs/task-cards/active/ws19-issue-87-post-run-workspace-memory-update.md',
+      branch: 'orchestrator/ws19-post-run-workspace-memory-update',
+    });
+
+    const update = buildRooPostRunWorkspaceMemoryUpdate({ summary });
+
+    expect(update.runHistory.status).toBe('blocked');
+    expect(update.runHistory.blockers.length).toBeGreaterThan(0);
+    expect(update.workspaceUpdate.activeBlockers.length).toBeGreaterThan(0);
+    expect(update.memoryWriteback.tier).toBe('episodic');
+  });
+
+  it('captures partial and failed runs without pretending success', () => {
+    const partial = buildRooPostRunWorkspaceMemoryUpdate({
+      summary: buildRooResultSummary({
+        ingestion: ingestRooExecutionResult({
+          runId: 'run_87_20260429022000',
+          rawOutput: WS18_ROO_OUTPUT_PARTIAL_FIXTURE,
+        }),
+        issueUrl: 'https://github.com/Deveadra/versa/issues/87',
+        taskCardPath: 'docs/task-cards/active/ws19-issue-87-post-run-workspace-memory-update.md',
+        branch: 'orchestrator/ws19-post-run-workspace-memory-update',
+      }),
+    });
+
+    const failed = buildRooPostRunWorkspaceMemoryUpdate({
+      summary: buildRooResultSummary({
+        ingestion: ingestRooExecutionResult({
+          runId: 'run_87_20260429023000',
+          rawOutput: WS17_ROO_OUTPUT_FAILED_FIXTURE,
+        }),
+        issueUrl: 'https://github.com/Deveadra/versa/issues/87',
+        taskCardPath: 'docs/task-cards/active/ws19-issue-87-post-run-workspace-memory-update.md',
+        branch: 'orchestrator/ws19-post-run-workspace-memory-update',
+      }),
+    });
+
+    expect(partial.runHistory.status).toBe('partial');
+    expect(partial.runHistory.validation.overall).toBe('failed');
+    expect(partial.runHistory.followUps).toContain('Re-run flaky integration snapshot test in CI.');
+    expect(failed.runHistory.status).toBe('failed');
+    expect(failed.runHistory.validation.overall).toBe('failed');
+    expect(failed.memoryWriteback.tags).toContain('status-failed');
   });
 });

@@ -317,6 +317,40 @@ export interface TaskCardRefreshOptions {
   overwriteNotesForAgent?: boolean;
 }
 
+export interface RooHandoffGeneratorInput {
+  intake: IssueIntake;
+  taskCardPath: string;
+  baseBranch: string;
+  branch: string;
+  objective: string;
+  inScope: string[];
+  outOfScope: string[];
+  filesToInspectFirst: string[];
+  requiredValidation: string[];
+  noTouchConstraints: string[];
+  expectedDeliverables: string[];
+  blockerReportingRules: string[];
+  expectedFinalResponseFormat: string[];
+}
+
+export interface RooHandoffRenderModel {
+  issueUrl: string;
+  issueNumber: number;
+  issueTitle: string;
+  taskCardPath: string;
+  baseBranch: string;
+  branch: string;
+  objective: string;
+  inScope: string[];
+  outOfScope: string[];
+  filesToInspectFirst: string[];
+  requiredValidation: string[];
+  noTouchConstraints: string[];
+  expectedDeliverables: string[];
+  blockerReportingRules: string[];
+  expectedFinalResponseFormat: string[];
+}
+
 function toKebabCase(value: string): string {
   return value
     .trim()
@@ -405,6 +439,110 @@ function renderQuotedPaths(values: string[]): string {
   }
 
   return values.map((entry) => `- \`${entry}\``).join('\n');
+}
+
+export function createRooHandoffRenderModel(input: RooHandoffGeneratorInput): RooHandoffRenderModel {
+  return {
+    issueUrl: input.intake.metadata.url,
+    issueNumber: input.intake.metadata.number,
+    issueTitle: input.intake.metadata.title,
+    taskCardPath: input.taskCardPath,
+    baseBranch: input.baseBranch,
+    branch: input.branch,
+    objective: input.objective,
+    inScope: input.inScope,
+    outOfScope: input.outOfScope,
+    filesToInspectFirst: input.filesToInspectFirst,
+    requiredValidation: input.requiredValidation,
+    noTouchConstraints: input.noTouchConstraints,
+    expectedDeliverables: input.expectedDeliverables,
+    blockerReportingRules: input.blockerReportingRules,
+    expectedFinalResponseFormat: input.expectedFinalResponseFormat,
+  };
+}
+
+export function renderRooHandoffMarkdown(model: RooHandoffRenderModel): string {
+  return `Issue: \`${model.issueUrl}\`
+Task card: ${model.taskCardPath}
+
+You are operating in Versa Executor mode for the \`versa\` repository.
+
+Required workflow:
+
+1. Read the GitHub issue first.
+2. Read the task card second.
+3. Extract from the task card:
+   - Base Branch
+   - Branch
+4. Inspect the relevant repo files before making any edits.
+5. Switch to the Base Branch first.
+6. If needed, update the Base Branch from its remote tracking branch.
+7. If the target Branch does not exist locally, create it from the Base Branch and switch to it.
+8. If the target Branch already exists locally, switch to it.
+9. Summarize the minimal implementation plan before editing.
+10. Execute only the assigned task card.
+11. Stay strictly within scope.
+12. Run every validation command listed in the task card before declaring completion.
+13. Report:
+
+- files changed
+- commands run
+- validation results
+- blockers, if any
+- a PR-ready summary referencing the issue
+
+Authority order:
+
+1. explicit user instruction
+2. linked GitHub issue
+3. active task card
+4. repo-local conventions
+
+Issue context:
+
+- Issue URL: ${model.issueUrl}
+- Issue: #${model.issueNumber}
+- Issue Title: ${model.issueTitle}
+- Task Card Path: ${model.taskCardPath}
+- Base Branch: ${model.baseBranch}
+- Branch: ${model.branch}
+
+Objective:
+
+${model.objective}
+
+In Scope:
+
+${renderBulletLines(model.inScope)}
+
+Out of Scope:
+
+${renderBulletLines(model.outOfScope)}
+
+Files/Areas to Inspect First:
+
+${renderQuotedPaths(model.filesToInspectFirst)}
+
+Required Validation:
+
+${renderBulletLines(model.requiredValidation)}
+
+No-Touch Constraints:
+
+${renderBulletLines(model.noTouchConstraints)}
+
+Expected Deliverables:
+
+${renderBulletLines(model.expectedDeliverables)}
+
+Blocker Reporting Rules:
+
+${renderBulletLines(model.blockerReportingRules)}
+
+Expected Final Response Format:
+
+${renderBulletLines(model.expectedFinalResponseFormat)}
+`;
 }
 
 export function renderTaskCardMarkdown(model: TaskCardRenderModel): string {

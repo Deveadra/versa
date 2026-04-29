@@ -3,10 +3,12 @@ import { describe, expect, it } from 'vitest';
 import {
   buildTaskCardFileName,
   buildTaskCardPath,
+  createRooHandoffRenderModel,
   createTaskCardRenderModel,
   extractIssueRequirements,
   GitHubIssueIntakeService,
   normalizeGitHubIssue,
+  renderRooHandoffMarkdown,
   refreshTaskCardMarkdown,
   renderTaskCardMarkdown,
   type GitHubIssueReader,
@@ -15,6 +17,7 @@ import {
   EPIC_ISSUE_FIXTURE,
   MINIMAL_ISSUE_FIXTURE,
   WS14_TASK_CARD_ISSUE_FIXTURE,
+  WS15_ROO_HANDOFF_ISSUE_FIXTURE,
   WORKSTREAM_ISSUE_FIXTURE,
 } from './fixtures/github-issues';
 
@@ -237,5 +240,71 @@ describe('task-card generation (WS14)', () => {
 
     expect(refreshed).toContain('Generated replacement notes');
     expect(refreshed).not.toContain('Human note: keep this context.');
+  });
+});
+
+describe('roo handoff generation (WS15)', () => {
+  const intake = normalizeGitHubIssue(WS15_ROO_HANDOFF_ISSUE_FIXTURE);
+
+  const handoffModel = createRooHandoffRenderModel({
+    intake,
+    taskCardPath: 'docs/task-cards/active/ws15-issue-80-roo-handoff-generator.md',
+    baseBranch: 'main',
+    branch: 'orchestrator/ws15-roo-handoff-generator',
+    objective:
+      'Implement the Roo executor handoff generator so Ultron can convert a GitHub issue plus active task card into a precise Roo-ready execution prompt.',
+    inScope: [
+      'Add a Roo handoff contract',
+      'Render a Roo-ready handoff from issue intake data and task-card data',
+      'Add tests for generated handoff content',
+    ],
+    outOfScope: ['Live Roo dispatch', 'Result ingestion', 'Sandbox worktree creation'],
+    filesToInspectFirst: [
+      'docs/templates/agent-task-card.md',
+      'docs/task-cards/active/',
+      'packages/shared/',
+      'apps/core/src/',
+      'apps/ai/src/',
+    ],
+    requiredValidation: ['pnpm install', 'pnpm lint', 'pnpm typecheck', 'pnpm test'],
+    noTouchConstraints: [
+      'Do not delete or rewrite the legacy Python runtime',
+      'Do not implement actual Roo dispatch in this workstream',
+    ],
+    expectedDeliverables: [
+      'Roo handoff contract',
+      'handoff renderer',
+      'tests for required prompt sections',
+    ],
+    blockerReportingRules: [
+      'Report blockers explicitly when validation fails',
+      'Do not expand scope silently to fix unrelated failures',
+    ],
+    expectedFinalResponseFormat: [
+      'files changed',
+      'commands run',
+      'validation results',
+      'blockers, if any',
+      'PR-ready summary referencing issue #80',
+    ],
+  });
+
+  it('renders required Roo handoff sections from issue intake + task-card data', () => {
+    const markdown = renderRooHandoffMarkdown(handoffModel);
+
+    expect(markdown).toContain('Issue: `https://github.com/Deveadra/versa/issues/80`');
+    expect(markdown).toContain('Task card: docs/task-cards/active/ws15-issue-80-roo-handoff-generator.md');
+    expect(markdown).toContain('Authority order:');
+    expect(markdown).toContain('1. explicit user instruction');
+    expect(markdown).toContain('Issue context:');
+    expect(markdown).toContain('- Base Branch: main');
+    expect(markdown).toContain('- Branch: orchestrator/ws15-roo-handoff-generator');
+    expect(markdown).toContain('Files/Areas to Inspect First:');
+    expect(markdown).toContain('Required Validation:');
+    expect(markdown).toContain('- pnpm test');
+    expect(markdown).toContain('No-Touch Constraints:');
+    expect(markdown).toContain('Expected Deliverables:');
+    expect(markdown).toContain('Blocker Reporting Rules:');
+    expect(markdown).toContain('Expected Final Response Format:');
   });
 });

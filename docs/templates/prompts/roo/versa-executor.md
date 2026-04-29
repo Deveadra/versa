@@ -12,8 +12,8 @@ Fix and Resolve all comments and their suggestions.
 
 ---
 
-Issue: `https://github.com/Deveadra/versa/issues/79`
-Task card: docs/task-cards/active/ws14-issue-79-task-card-generator.md
+Issue: `https://github.com/Deveadra/versa/issues/80`
+Task card: docs/task-cards/active/ws15-issue-80-roo-handoff-generator.md
 
 You are operating in Versa Executor mode for the `versa` repository.
 

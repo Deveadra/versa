@@ -158,3 +158,64 @@ orchestrator(ws14): add task-card generator and refresh workflow
   labels: [{ name: 'orchestrator' }, { name: 'ws14' }],
   assignees: [{ login: 'Deveadra' }],
 };
+
+export const WS15_ROO_HANDOFF_ISSUE_FIXTURE: GitHubIssueRecord = {
+  number: 80,
+  title: '[Orchestrator][WS15] Roo executor handoff generator',
+  body: `Owner
+
+Parent epic: #77
+
+## Goal
+
+Create the Roo executor handoff generator that converts an issue plus task card into a precise Roo-ready implementation prompt.
+
+## Why
+
+Roo needs a bounded execution packet that includes authority order, branch rules, files to inspect first, required validation, no-touch constraints, and expected output format.
+
+## Deliverables
+
+- Roo handoff contract
+- Roo handoff Markdown renderer
+- authority-order and scope-boundary section generator
+- branch/setup instruction generator
+- validation and final-report instruction generator
+- tests covering handoff generation from reference task cards
+
+## Expected code changes
+
+- new handoff generation module/package
+- shared handoff schemas/contracts
+- Roo-specific renderer/template
+- tests for deterministic handoff output
+- docs describing Roo handoff expectations
+
+## Acceptance criteria
+
+- a task card and issue intake object can produce a Roo-ready handoff
+- handoff clearly instructs Roo to inspect the repo before editing
+- handoff includes base branch, work branch, task-card path, issue URL, validation commands, no-touch constraints, and final response format
+- handoff preserves issue/task-card scope without adding speculative work
+- tests cover the reference Roo handoff format
+
+## Constraints
+
+- do not dispatch Roo automatically in this workstream
+- do not parse Roo results in this workstream
+- do not implement broad multi-agent routing yet
+- keep implementation additive and Roo-focused
+
+## Suggested branch
+
+orchestrator/ws15-roo-handoff-generator
+
+## Suggested PR title
+
+orchestrator(ws15): add Roo executor handoff generator
+`,
+  state: 'OPEN',
+  url: 'https://github.com/Deveadra/versa/issues/80',
+  labels: [{ name: 'orchestrator' }, { name: 'ws15' }],
+  assignees: [{ login: 'Deveadra' }],
+};

@@ -291,6 +291,7 @@ export interface TaskCardRenderModel {
   workstreamId: string;
   taskCardId: string;
   taskCardName: string;
+  taskCardSlug: string;
   taskCardFileName: string;
   taskCardPath: string;
   status: string;
@@ -334,9 +335,18 @@ function normalizeWorkstreamId(value: string): string {
   return `WS${match[1].padStart(2, '0')}`;
 }
 
+function toTaskCardSlug(taskCardName: string): string {
+  const slug = toKebabCase(taskCardName);
+  if (slug.length === 0) {
+    throw new Error(`Invalid taskCardName: ${taskCardName}. Could not derive a non-empty slug.`);
+  }
+
+  return slug;
+}
+
 export function buildTaskCardFileName(workstreamId: string, issueNumber: number, taskCardName: string): string {
   const normalizedWs = normalizeWorkstreamId(workstreamId).toLowerCase();
-  const slug = toKebabCase(taskCardName);
+  const slug = toTaskCardSlug(taskCardName);
   return `${normalizedWs}-issue-${issueNumber}-${slug}.md`;
 }
 
@@ -347,6 +357,7 @@ export function buildTaskCardPath(workstreamId: string, issueNumber: number, tas
 export function createTaskCardRenderModel(input: TaskCardGeneratorInput): TaskCardRenderModel {
   const workstreamId = normalizeWorkstreamId(input.workstreamId);
   const issueNumber = input.intake.metadata.number;
+  const taskCardSlug = toTaskCardSlug(input.taskCardName);
   const fileName = buildTaskCardFileName(workstreamId, issueNumber, input.taskCardName);
 
   return {
@@ -356,7 +367,8 @@ export function createTaskCardRenderModel(input: TaskCardGeneratorInput): TaskCa
     parentEpic: input.intake.requirements.parentEpic,
     workstreamId,
     taskCardId: `${workstreamId}-ISSUE${issueNumber}`,
-    taskCardName: toKebabCase(input.taskCardName),
+    taskCardName: input.taskCardName.trim(),
+    taskCardSlug,
     taskCardFileName: fileName,
     taskCardPath: `docs/task-cards/active/${fileName}`,
     status: input.status ?? 'Active',
@@ -409,6 +421,7 @@ export function renderTaskCardMarkdown(model: TaskCardRenderModel): string {
 
 - Task Card ID: ${model.taskCardId}
 - Task Card Name: ${model.taskCardName}
+- Task Card Slug: ${model.taskCardSlug}
 - Task Card File Name: ${model.taskCardFileName}
 - Task Card Path: ${model.taskCardPath}
 
@@ -440,7 +453,7 @@ ${renderQuotedPaths(model.filesToInspectFirst)}
 
 ## Required Approach
 
-${model.requiredApproach.map((entry, index) => `${index + 1}. ${entry}`).join('\n')}
+${renderBulletLines(model.requiredApproach)}
 
 ## Required Validation
 
@@ -454,19 +467,28 @@ ${renderBulletLines(model.deliverables)}
 
 ${renderBulletLines(model.noTouchConstraints)}
 
-## Acceptance Criteria
+## ${TASK_SECTION_HEADINGS.acceptanceCriteria}
 
 ${renderBulletLines(model.acceptanceCriteria)}
 
-## Notes for Agent
+## ${TASK_SECTION_HEADINGS.notesForAgent}
 
 ${model.notesForAgent.join('\n\n')}
 `;
 }
 
-function extractSection(markdown: string, heading: string): string | null {
+const TASK_SECTION_HEADINGS = {
+  acceptanceCriteria: 'Acceptance Criteria',
+  notesForAgent: 'Notes for Agent',
+} as const;
+
+function buildSectionPattern(heading: string): RegExp {
   const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const pattern = new RegExp(`## ${escaped}\\n\\n([\\s\\S]*?)(?=\\n## |$)`);
+  return new RegExp(`^##\\s+${escaped}\\r?\\n\\r?\\n([\\s\\S]*?)(?=^##\\s+|$)`, 'm');
+}
+
+function extractSection(markdown: string, heading: string): string | null {
+  const pattern = buildSectionPattern(heading);
   const match = markdown.match(pattern);
   if (!match || !match[1]) {
     return null;
@@ -476,8 +498,7 @@ function extractSection(markdown: string, heading: string): string | null {
 }
 
 function replaceSection(markdown: string, heading: string, content: string): string {
-  const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const pattern = new RegExp(`## ${escaped}\\n\\n([\\s\\S]*?)(?=\\n## |$)`);
+  const pattern = buildSectionPattern(heading);
   return markdown.replace(pattern, `## ${heading}\n\n${content}\n`);
 }
 
@@ -492,10 +513,10 @@ export function refreshTaskCardMarkdown(
     return rendered;
   }
 
-  const existingNotes = extractSection(existingMarkdown, 'Notes for Agent');
+  const existingNotes = extractSection(existingMarkdown, TASK_SECTION_HEADINGS.notesForAgent);
   if (!existingNotes) {
     return rendered;
   }
 
-  return replaceSection(rendered, 'Notes for Agent', existingNotes);
+  return replaceSection(rendered, TASK_SECTION_HEADINGS.notesForAgent, existingNotes);
 }

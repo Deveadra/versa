@@ -111,7 +111,7 @@ describe('GitHubIssueIntakeService', () => {
 describe('task-card generation (WS14)', () => {
   const intake = normalizeGitHubIssue(WS14_TASK_CARD_ISSUE_FIXTURE);
 
-  const model = createTaskCardRenderModel({
+  const generatorInput = {
     intake,
     workstreamId: 'WS14',
     taskCardName: 'task-card-generator',
@@ -126,7 +126,9 @@ describe('task-card generation (WS14)', () => {
     requiredValidation: ['pnpm install', 'pnpm lint', 'pnpm typecheck', 'pnpm test'],
     noTouchConstraints: ['Do not delete or rewrite the legacy Python runtime'],
     notesForAgent: ['This workstream is bounded to task-card generation and refresh only.'],
-  });
+  };
+
+  const model = createTaskCardRenderModel(generatorInput);
 
   it('builds canonical task-card filename and path', () => {
     expect(buildTaskCardFileName('WS14', 79, 'task-card-generator')).toBe(
@@ -134,6 +136,12 @@ describe('task-card generation (WS14)', () => {
     );
     expect(buildTaskCardPath('WS14', 79, 'task-card-generator')).toBe(
       'docs/task-cards/active/ws14-issue-79-task-card-generator.md',
+    );
+  });
+
+  it('throws when task-card slug cannot be derived', () => {
+    expect(() => buildTaskCardFileName('WS14', 79, '!!!')).toThrow(
+      'Could not derive a non-empty slug',
     );
   });
 
@@ -145,6 +153,8 @@ describe('task-card generation (WS14)', () => {
     expect(markdown).toContain('- Base Branch: main');
     expect(markdown).toContain('- Branch: orchestrator/ws14-task-card-generator');
     expect(markdown).toContain('- PR Title: orchestrator(ws14): add task-card generation and refresh workflow');
+    expect(markdown).toContain('- Task Card Name: task-card-generator');
+    expect(markdown).toContain('- Task Card Slug: task-card-generator');
     expect(markdown).toContain('## Objective');
     expect(markdown).toContain('## In Scope');
     expect(markdown).toContain('## Required Validation');
@@ -168,6 +178,46 @@ describe('task-card generation (WS14)', () => {
     expect(refreshed).toContain('Updated objective text');
     expect(refreshed).toContain('Human note: keep this context.');
     expect(refreshed).not.toContain('Generated replacement notes');
+  });
+
+  it('refresh preserves manual notes for CRLF-authored cards', () => {
+    const existing = renderTaskCardMarkdown(model)
+      .replace(/\n/g, '\r\n')
+      .replace(
+        /## Notes for Agent\r\n\r\n[\s\S]*$/,
+        '## Notes for Agent\r\n\r\nHuman note: keep this CRLF context.\r\n',
+      );
+
+    const refreshed = refreshTaskCardMarkdown(existing, {
+      ...model,
+      objective: 'Updated objective text',
+      notesForAgent: ['Generated replacement notes'],
+    });
+
+    expect(refreshed).toContain('Updated objective text');
+    expect(refreshed).toContain('Human note: keep this CRLF context.');
+    expect(refreshed).not.toContain('Generated replacement notes');
+  });
+
+  it('renders required approach as non-empty placeholder when empty', () => {
+    const markdown = renderTaskCardMarkdown({
+      ...model,
+      requiredApproach: [],
+    });
+
+    expect(markdown).toContain('## Required Approach');
+    expect(markdown).toContain('## Required Approach\n\n- None');
+  });
+
+  it('keeps human-readable task card name and explicit slug in model', () => {
+    const readableModel = createTaskCardRenderModel({
+      ...generatorInput,
+      taskCardName: 'Task Card Generator',
+    });
+
+    expect(readableModel.taskCardName).toBe('Task Card Generator');
+    expect(readableModel.taskCardSlug).toBe('task-card-generator');
+    expect(readableModel.taskCardFileName).toBe('ws14-issue-79-task-card-generator.md');
   });
 
   it('refresh can overwrite notes when explicitly requested', () => {

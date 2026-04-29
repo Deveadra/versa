@@ -445,6 +445,48 @@ export interface RooResultIngestion {
   rawOutput: string;
 }
 
+export interface RooChangedFilesSummary {
+  total: number;
+  files: string[];
+}
+
+export interface RooValidationSummary {
+  passed: boolean;
+  totals: {
+    passed: number;
+    failed: number;
+    unknown: number;
+  };
+  commands: RooValidationResult[];
+}
+
+export interface RooResultSummary {
+  runId: string;
+  status: RooRunStatus;
+  issue: {
+    url: string | null;
+    number: number | null;
+  };
+  taskCardPath: string | null;
+  branch: string | null;
+  changedFiles: RooChangedFilesSummary;
+  validation: RooValidationSummary;
+  blockers: string[];
+  knownFollowUps: string[];
+  reviewNotes: string[];
+  riskMigrationNotes: string[];
+  missingData: string[];
+  prReadySummary: string;
+}
+
+export interface RooPrReviewPacket {
+  status: RooRunStatus;
+  prTitle: string | null;
+  prBodyDraft: string | null;
+  summary: RooResultSummary;
+  missingData: string[];
+}
+
 function buildRunId(issueNumber: number, dispatchedAt: string): string {
   return `run_${issueNumber}_${dispatchedAt.replace(/[^0-9]/g, '').slice(0, 14)}`;
 }
@@ -607,6 +649,171 @@ export function ingestRooExecutionResult(input: { runId: string; rawOutput: stri
     changedFiles,
     blockers,
     rawOutput: raw,
+  };
+}
+
+function parseIssueNumberFromUrl(url: string | null): number | null {
+  if (!url) return null;
+  const match = url.match(/\/issues\/(\d+)/i);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isInteger(parsed) ? parsed : null;
+}
+
+function parseOptionalBulletedSection(source: string, heading: string): string[] {
+  return parseBulletedSection(source, heading);
+}
+
+function toValidationSummary(validation: RooResultIngestion['validation']): RooValidationSummary {
+  const totals = validation.commands.reduce(
+    (acc, row) => {
+      if (row.status === 'passed') acc.passed += 1;
+      if (row.status === 'failed') acc.failed += 1;
+      if (row.status === 'unknown') acc.unknown += 1;
+      return acc;
+    },
+    { passed: 0, failed: 0, unknown: 0 },
+  );
+
+  return {
+    passed: validation.passed,
+    totals,
+    commands: validation.commands,
+  };
+}
+
+export function buildRooResultSummary(input: {
+  ingestion: RooResultIngestion;
+  issueUrl?: string | null;
+  taskCardPath?: string | null;
+  branch?: string | null;
+}): RooResultSummary {
+  const issueUrl = input.issueUrl?.trim() || null;
+  const taskCardPath = input.taskCardPath?.trim() || null;
+  const branch = input.branch?.trim() || null;
+
+  const knownFollowUps = parseOptionalBulletedSection(input.ingestion.rawOutput, 'known follow-ups');
+  const reviewNotes = parseOptionalBulletedSection(input.ingestion.rawOutput, 'review notes');
+  const riskMigrationNotes = parseOptionalBulletedSection(input.ingestion.rawOutput, 'risk/migration notes');
+
+  const missingData: string[] = [];
+  if (!issueUrl) missingData.push('issueUrl');
+  if (!taskCardPath) missingData.push('taskCardPath');
+  if (!branch) missingData.push('branch');
+  if (input.ingestion.validation.commands.length === 0) missingData.push('validation results');
+  if (input.ingestion.changedFiles.length === 0) missingData.push('changed files');
+
+  return {
+    runId: input.ingestion.runId,
+    status: input.ingestion.status,
+    issue: {
+      url: issueUrl,
+      number: parseIssueNumberFromUrl(issueUrl),
+    },
+    taskCardPath,
+    branch,
+    changedFiles: {
+      total: input.ingestion.changedFiles.length,
+      files: [...input.ingestion.changedFiles],
+    },
+    validation: toValidationSummary(input.ingestion.validation),
+    blockers: [...input.ingestion.blockers],
+    knownFollowUps,
+    reviewNotes,
+    riskMigrationNotes,
+    missingData,
+    prReadySummary: input.ingestion.summary,
+  };
+}
+
+function formatCommandRows(rows: RooValidationResult[]): string {
+  if (rows.length === 0) {
+    return '- none';
+  }
+
+  return rows.map((row) => `- ${row.command} (${row.status})`).join('\n');
+}
+
+function deriveWorkstreamTag(input: { summary: RooResultSummary; issueTitle: string | null }): string | null {
+  const candidates = [input.summary.branch, input.summary.taskCardPath, input.issueTitle].filter(
+    (value): value is string => Boolean(value),
+  );
+
+  for (const candidate of candidates) {
+    const match = candidate.match(/\b(ws\d{1,2})\b/i);
+    if (match) {
+      return match[1].toLowerCase();
+    }
+  }
+
+  return null;
+}
+
+export function buildRooPrReviewPacket(input: {
+  summary: RooResultSummary;
+  issueTitle?: string | null;
+}): RooPrReviewPacket {
+  const missingData = [...input.summary.missingData];
+  const issueNumber = input.summary.issue.number;
+  const issueTitle = input.issueTitle?.trim() || null;
+
+  let prTitle: string | null = null;
+  if (issueNumber && issueTitle) {
+    const workstreamTag = deriveWorkstreamTag({
+      summary: input.summary,
+      issueTitle,
+    });
+
+    prTitle = workstreamTag
+      ? `orchestrator(${workstreamTag}): ${issueTitle} (#${issueNumber})`
+      : `orchestrator: ${issueTitle} (#${issueNumber})`;
+  } else {
+    if (!issueNumber) missingData.push('issue number for PR title');
+    if (!issueTitle) missingData.push('issue title for PR title');
+  }
+
+  const canDraftBody = Boolean(input.summary.issue.url && input.summary.taskCardPath && input.summary.branch);
+  if (!canDraftBody) {
+    missingData.push('insufficient metadata for PR body draft');
+  }
+
+  const prBodyDraft = canDraftBody
+    ? [
+        `## Summary`,
+        input.summary.prReadySummary,
+        ``,
+        `## Issue / Task Card`,
+        `- Issue: ${input.summary.issue.url}`,
+        `- Task Card: ${input.summary.taskCardPath}`,
+        `- Branch: ${input.summary.branch}`,
+        ``,
+        `## Changed Files`,
+        ...input.summary.changedFiles.files.map((file) => `- ${file}`),
+        ``,
+        `## Validation Results`,
+        formatCommandRows(input.summary.validation.commands),
+        ``,
+        `## Blockers`,
+        ...(input.summary.blockers.length > 0 ? input.summary.blockers.map((line) => `- ${line}`) : ['- none']),
+        ``,
+        `## Known Follow-ups`,
+        ...(input.summary.knownFollowUps.length > 0
+          ? input.summary.knownFollowUps.map((line) => `- ${line}`)
+          : ['- none']),
+        ``,
+        `## Risk / Migration Notes`,
+        ...(input.summary.riskMigrationNotes.length > 0
+          ? input.summary.riskMigrationNotes.map((line) => `- ${line}`)
+          : ['- none']),
+      ].join('\n')
+    : null;
+
+  return {
+    status: input.summary.status,
+    prTitle,
+    prBodyDraft,
+    summary: input.summary,
+    missingData: Array.from(new Set(missingData)),
   };
 }
 

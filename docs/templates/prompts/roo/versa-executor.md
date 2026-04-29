@@ -12,8 +12,8 @@ Fix and Resolve all comments and their suggestions.
 
 ---
 
-Issue: `https://github.com/Deveadra/versa/issues/84`
-Task card: docs/task-cards/active/ws16-issue-84-sandbox-execution-prep.md
+Issue: `https://github.com/Deveadra/versa/issues/85`
+Task card: docs/task-cards/active/ws17-issue-85-roo-dispatch-result-ingestion.md
 
 You are operating in Versa Executor mode for the `versa` repository.
 

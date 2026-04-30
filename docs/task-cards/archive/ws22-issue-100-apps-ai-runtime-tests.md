@@ -6,10 +6,10 @@
 - Parent Epic: #98
 - Workstream: WS22
 
-- Task Card ID: WS22-ISSUE-TBD
+- Task Card ID: WS22-ISSUE-100
 - Task Card Name: apps-ai-runtime-tests
-- Task Card File Name: ws22-issue-tbd-apps-ai-runtime-tests.md
-- Task Card Path: docs/task-cards/active/ws22-issue-tbd-apps-ai-runtime-tests.md
+- Task Card File Name: ws22-issue-100-apps-ai-runtime-tests.md
+- Task Card Path: docs/task-cards/active/ws22-issue-100-apps-ai-runtime-tests.md
 
 - Status: Draft
 - Priority: Critical

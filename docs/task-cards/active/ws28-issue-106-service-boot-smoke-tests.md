@@ -6,10 +6,10 @@
 - Parent Epic: #98
 - Workstream: WS28
 
-- Task Card ID: WS28-ISSUE-TBD
+- Task Card ID: WS28-ISSUE-106
 - Task Card Name: service-boot-smoke-tests
-- Task Card File Name: ws28-issue-tbd-service-boot-smoke-tests.md
-- Task Card Path: docs/task-cards/active/ws28-issue-tbd-service-boot-smoke-tests.md
+- Task Card File Name: ws28-issue-106-service-boot-smoke-tests.md
+- Task Card Path: docs/task-cards/active/ws28-issue-106-service-boot-smoke-tests.md
 
 - Status: Draft
 - Priority: Medium

@@ -6,10 +6,10 @@
 - Parent Epic: #98
 - Workstream: WS25
 
-- Task Card ID: WS25-ISSUE-TBD
+- Task Card ID: WS25-ISSUE-103
 - Task Card Name: memory-boundary-enforcement-tests
-- Task Card File Name: ws25-issue-tbd-memory-boundary-enforcement-tests.md
-- Task Card Path: docs/task-cards/active/ws25-issue-tbd-memory-boundary-enforcement-tests.md
+- Task Card File Name: ws25-issue-103-memory-boundary-enforcement-tests.md
+- Task Card Path: docs/task-cards/active/ws25-issue-103-memory-boundary-enforcement-tests.md
 
 - Status: Draft
 - Priority: High

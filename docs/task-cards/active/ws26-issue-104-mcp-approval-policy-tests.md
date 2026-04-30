@@ -6,10 +6,10 @@
 - Parent Epic: #98
 - Workstream: WS26
 
-- Task Card ID: WS26-ISSUE-TBD
+- Task Card ID: WS26-ISSUE-104
 - Task Card Name: mcp-approval-policy-tests
-- Task Card File Name: ws26-issue-tbd-mcp-approval-policy-tests.md
-- Task Card Path: docs/task-cards/active/ws26-issue-tbd-mcp-approval-policy-tests.md
+- Task Card File Name: ws26-issue-104-mcp-approval-policy-tests.md
+- Task Card Path: docs/task-cards/active/ws26-issue-104-mcp-approval-policy-tests.md
 
 - Status: Draft
 - Priority: High

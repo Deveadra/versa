@@ -29,6 +29,22 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+      - name: TypeScript coverage with thresholds (WS24)
+        run: |
+          mkdir -p reports/coverage/ts
+          pnpm test:coverage:ts
+      - name: Upload TypeScript coverage artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ts-coverage-${{ github.run_id }}
+          path: |
+            apps/ai/coverage/ws24-ts/**
+            packages/integrations/coverage/ws24-ts/**
+            packages/memory/coverage/ws24-ts/**
+            packages/workspaces/coverage/ws24-ts/**
+            packages/approvals/coverage/ws24-ts/**
+            packages/environment/coverage/ws24-ts/**
 
   python-lint:
     runs-on: ubuntu-latest
@@ -135,9 +151,22 @@ jobs:
         run: |
           mkdir -p reports/pytest
           python -m pytest -q --junitxml=reports/pytest/junit.xml
+      - name: Python coverage with threshold (WS24)
+        env:
+          OPENAI_API_KEY: sk-test-dummy-key-for-ci
+        run: |
+          mkdir -p reports/pytest
+          pnpm test:coverage:python
       - name: Upload junit
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: junit-${{ github.run_id }}
           path: reports/pytest/junit.xml
+      - name: Upload python coverage artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: py-coverage-${{ github.run_id }}
+          path: |
+            reports/pytest/coverage.xml

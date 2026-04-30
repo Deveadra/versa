@@ -12,8 +12,8 @@ Fix and Resolve all comments and their suggestions.
 
 ---
 
-Issue: `https://github.com/Deveadra/versa/issues/100`
-Task card: docs/task-cards/active/ws22-issue-100-apps-ai-runtime-tests.md
+Issue: `https://github.com/Deveadra/versa/issues/102`
+Task card: docs/task-cards/active/ws24-issue-102-ci-coverage-thresholds.md
 
 You are operating in Versa Executor mode for the `versa` repository.
 
@@ -52,9 +52,3 @@ Hard constraints:
 - Do not commit, push, or open a PR unless I explicitly ask.
 
 Begin now by reading the issue and task card, extracting Base Branch and Branch from the task card, switching to the correct base, and then giving the minimal plan before editing.
-
----
----
----
----
----

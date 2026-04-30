@@ -6,10 +6,10 @@
 - Parent Epic: #98
 - Workstream: WS27
 
-- Task Card ID: WS27-ISSUE-TBD
+- Task Card ID: WS27-ISSUE-105
 - Task Card Name: replay-fixtures-mixed-outcomes
-- Task Card File Name: ws27-issue-tbd-replay-fixtures-mixed-outcomes.md
-- Task Card Path: docs/task-cards/active/ws27-issue-tbd-replay-fixtures-mixed-outcomes.md
+- Task Card File Name: ws27-issue-105-replay-fixtures-mixed-outcomes.md
+- Task Card Path: docs/task-cards/active/ws27-issue-105-replay-fixtures-mixed-outcomes.md
 
 - Status: Draft
 - Priority: Medium

@@ -6,10 +6,10 @@
 - Parent Epic: #98
 - Workstream: WS24
 
-- Task Card ID: WS24-ISSUE-TBD
+- Task Card ID: WS24-ISSUE-102
 - Task Card Name: ci-coverage-thresholds
-- Task Card File Name: ws24-issue-tbd-ci-coverage-thresholds.md
-- Task Card Path: docs/task-cards/active/ws24-issue-tbd-ci-coverage-thresholds.md
+- Task Card File Name: ws24-issue-102-ci-coverage-thresholds.md
+- Task Card Path: docs/task-cards/active/ws24-issue-102-ci-coverage-thresholds.md
 
 - Status: Draft
 - Priority: High

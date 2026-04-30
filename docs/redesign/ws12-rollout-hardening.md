@@ -120,6 +120,45 @@ If post-change validation fails or local state becomes inconsistent:
 - Top-level `README.md` still contains substantial legacy Python-first guidance; redesign hardening guidance is additive rather than a full documentation rewrite.
 - WS12 does not implement new runtime features; it formalizes validation and operational safety guidance for already-delivered workstreams.
 
+## WS24 coverage reporting and thresholds
+
+Issue: `https://github.com/Deveadra/versa/issues/102`
+
+WS24 extends CI confidence so "green" includes explicit coverage signals and threshold enforcement for runtime-critical surfaces.
+
+### TypeScript coverage (CI)
+
+- CI job: `node-quality` in [`ci.yml`](../../.github/workflows/ci.yml)
+- Command: `pnpm test:coverage:ts`
+- Artifact upload: `ts-coverage-<run_id>`
+- Provider/reporting: Vitest v8 provider with `text-summary`, `json-summary`, and `lcov` outputs.
+
+Threshold source of truth is [`vitest.config.ts`](../../vitest.config.ts), with per-surface minimums:
+
+| Surface | Lines/Statements | Functions | Branches |
+| --- | --- | --- | --- |
+| `packages/integrations/src/index.ts` | 95 | 100 | 83 |
+| `packages/memory/src/index.ts` | 70 | 63 | 38 |
+| `packages/workspaces/src/index.ts` | 70 | 60 | 35 |
+| `packages/approvals/src/index.ts` | 84 | 80 | 86 |
+| `packages/environment/src/index.ts` | 91 | 80 | 55 |
+| `apps/ai/src/server.ts` | 87 | 25 | 56 |
+
+### Python coverage (CI)
+
+- CI job: `python-test` in [`ci.yml`](../../.github/workflows/ci.yml)
+- Command: `pnpm test:coverage:python`
+- Artifact upload: `py-coverage-<run_id>` (`reports/pytest/coverage.xml`)
+- Current enforced gate: `--cov-fail-under=45` on `--cov=src/base`.
+
+### How to safely maintain thresholds
+
+1. Run baseline coverage locally for the impacted surface(s).
+2. If a threshold fails, prefer adding/strengthening tests over lowering thresholds.
+3. Lower a threshold only with explicit rationale tied to code reality (not to mask regressions).
+4. Keep thresholds in [`vitest.config.ts`](../../vitest.config.ts) and coverage commands in [`package.json`](../../package.json) aligned with CI.
+5. Verify artifact publication remains intact after changes to workflows.
+
 ## Bounded-scope statement
 
 WS12 is a hardening/documentation/validation slice. It does not authorize unfinished feature work from prior workstreams or broad subsystem rewrites.

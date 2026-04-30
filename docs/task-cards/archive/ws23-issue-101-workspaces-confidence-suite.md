@@ -6,10 +6,10 @@
 - Parent Epic: #98
 - Workstream: WS23
 
-- Task Card ID: WS23-ISSUE-TBD
+- Task Card ID: WS23-ISSUE-101
 - Task Card Name: workspaces-confidence-suite
-- Task Card File Name: ws23-issue-tbd-workspaces-confidence-suite.md
-- Task Card Path: docs/task-cards/active/ws23-issue-tbd-workspaces-confidence-suite.md
+- Task Card File Name: ws23-issue-101-workspaces-confidence-suite.md
+- Task Card Path: docs/task-cards/active/ws23-issue-101-workspaces-confidence-suite.md
 
 - Status: Draft
 - Priority: High

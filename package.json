@@ -10,21 +10,24 @@
     "format:write": "prettier --write .",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
+    "test:coverage:ts": "pnpm --filter @versa/integrations --filter @versa/memory --filter @versa/workspaces --filter @versa/approvals --filter @versa/environment --filter @versa/ai test -- --coverage.enabled --config ../../vitest.config.ts",
+    "test:coverage:python": "python -m pytest -q --cov=src/base --cov-report=term-missing --cov-report=xml:reports/pytest/coverage.xml --cov-fail-under=45",
     "db:migrate": "pnpm --filter @versa/database migrate",
     "db:seed": "pnpm --filter @versa/database seed",
     "db:reset": "pnpm --filter @versa/database reset"
   },
   "devDependencies": {
+    "@eslint/js": "^9.22.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.1",
     "@types/node": "^22.13.10",
+    "@vitest/coverage-v8": "^3.2.4",
     "eslint": "^9.22.0",
     "prettier": "^3.5.3",
-    "turbo": "^2.4.4",
     "tsx": "^4.19.3",
+    "turbo": "^2.4.4",
     "typescript": "^5.8.2",
-    "vitest": "^3.0.9",
-    "@eslint/js": "^9.22.0",
-    "@types/express": "^5.0.1",
-    "@types/cors": "^2.8.17",
-    "@types/better-sqlite3": "^7.6.13"
+    "vitest": "^3.0.9"
   }
 }

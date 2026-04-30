@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { Server } from 'node:http';
 import express, { Request, Response } from 'express';
 import { createBridgeAdapter } from '@versa/bridge';
 import { loadConfig } from '@versa/config';
@@ -18,31 +19,6 @@ import {
   TrustLevelEnum,
 } from '@versa/shared';
 
-const app = express();
-const cfg = loadConfig();
-
-const telemetryFileSink = createNdjsonFileSink('artifacts/telemetry.ndjson');
-const skillRegistry = createFoundationalSkillRegistry();
-const approvalPolicy = createApprovalPolicyEngine();
-const bridge = createBridgeAdapter({
-  BRIDGE_ENABLED: cfg.BRIDGE_ENABLED,
-  BRIDGE_MODE: cfg.BRIDGE_MODE,
-  BRIDGE_LEGACY_RUNTIME_URL: cfg.BRIDGE_LEGACY_RUNTIME_URL,
-  BRIDGE_HEALTH_PATH: cfg.BRIDGE_HEALTH_PATH,
-  BRIDGE_CAPABILITIES_PATH: cfg.BRIDGE_CAPABILITIES_PATH,
-  BRIDGE_INVOKE_PATH: cfg.BRIDGE_INVOKE_PATH,
-});
-const logger = createLogger({
-  actor: {
-    service: 'ai',
-    source: 'http',
-  },
-  sink: createTelemetrySink({
-    consoleEnabled: cfg.TELEMETRY_CONSOLE_ENABLED,
-    sinks: cfg.TELEMETRY_ENABLED ? [telemetryFileSink] : [],
-  }),
-});
-
 const capabilities = {
   summarize_day: () => ({ summary: 'placeholder summary' }),
   generate_study_plan: () => ({ plan: [] }),
@@ -56,23 +32,50 @@ const shouldUseLegacyBridge = (capabilityId: string, requestedTarget?: string) =
 
 const bridgeInvocationTrustLevel = TrustLevelEnum.parse('safe-act');
 
-app.use(express.json());
-app.use(createRequestTelemetryMiddleware(logger));
+export const createAiApp = () => {
+  const app = express();
+  const cfg = loadConfig();
+  const telemetryFileSink = createNdjsonFileSink('artifacts/telemetry.ndjson');
+  const skillRegistry = createFoundationalSkillRegistry();
+  const approvalPolicy = createApprovalPolicyEngine();
+  const bridge = createBridgeAdapter({
+    BRIDGE_ENABLED: cfg.BRIDGE_ENABLED,
+    BRIDGE_MODE: cfg.BRIDGE_MODE,
+    BRIDGE_LEGACY_RUNTIME_URL: cfg.BRIDGE_LEGACY_RUNTIME_URL,
+    BRIDGE_HEALTH_PATH: cfg.BRIDGE_HEALTH_PATH,
+    BRIDGE_CAPABILITIES_PATH: cfg.BRIDGE_CAPABILITIES_PATH,
+    BRIDGE_INVOKE_PATH: cfg.BRIDGE_INVOKE_PATH,
+  });
+  const logger = createLogger({
+    actor: {
+      service: 'ai',
+      source: 'http',
+    },
+    sink: createTelemetrySink({
+      consoleEnabled: cfg.TELEMETRY_CONSOLE_ENABLED,
+      sinks: cfg.TELEMETRY_ENABLED ? [telemetryFileSink] : [],
+    }),
+  });
 
-app.get('/health', (_req: Request, res: Response) => res.json({ ok: true }));
-app.get('/capabilities', (_req: Request, res: Response) => res.json({ capabilities: Object.keys(capabilities) }));
+  app.use(express.json());
+  app.use(createRequestTelemetryMiddleware(logger));
 
-app.get('/bridge/health', (_req: Request, res: Response) => {
-  const data = bridge.health();
-  res.json({ data });
-});
+  app.get('/health', (_req: Request, res: Response) => res.json({ ok: true }));
+  app.get('/capabilities', (_req: Request, res: Response) =>
+    res.json({ capabilities: Object.keys(capabilities) }),
+  );
 
-app.get('/bridge/capabilities', (_req: Request, res: Response) => {
-  const data = bridge.capabilities();
-  res.json({ data });
-});
+  app.get('/bridge/health', (_req: Request, res: Response) => {
+    const data = bridge.health();
+    res.json({ data });
+  });
 
-app.post('/bridge/invoke', (req: Request, res: Response) => {
+  app.get('/bridge/capabilities', (_req: Request, res: Response) => {
+    const data = bridge.capabilities();
+    res.json({ data });
+  });
+
+  app.post('/bridge/invoke', (req: Request, res: Response) => {
   const requestId = randomUUID();
   const trace = getTelemetryContext(req);
 
@@ -168,9 +171,9 @@ app.post('/bridge/invoke', (req: Request, res: Response) => {
   if (!data.attempted) return res.status(503).json({ data });
   if (data.response?.status === 'error') return res.status(502).json({ data });
   return res.status(200).json({ data });
-});
+  });
 
-app.post('/ai/execute', (req: Request, res: Response) => {
+  app.post('/ai/execute', (req: Request, res: Response) => {
   const trace = getTelemetryContext(req);
 
   const aiRequest = AiServiceRequestSchema.parse({
@@ -256,18 +259,18 @@ app.post('/ai/execute', (req: Request, res: Response) => {
   const statusCode =
     response.status === 'succeeded' ? 200 : response.status === 'blocked' ? 409 : 422;
   return res.status(statusCode).json({ data: response });
-});
-app.get('/skills', (_req: Request, res: Response) =>
-  res.json({
-    data: skillRegistry.list().map((skill: SkillDefinition) => ({
-      id: skill.id,
-      name: skill.name,
-      metadata: skill.metadata,
-    })),
-  }),
-);
+  });
+  app.get('/skills', (_req: Request, res: Response) =>
+    res.json({
+      data: skillRegistry.list().map((skill: SkillDefinition) => ({
+        id: skill.id,
+        name: skill.name,
+        metadata: skill.metadata,
+      })),
+    }),
+  );
 
-app.post('/skills/execute', (req: Request, res: Response) => {
+  app.post('/skills/execute', (req: Request, res: Response) => {
   const requestId = randomUUID();
   const trace = getTelemetryContext(req);
 
@@ -353,18 +356,34 @@ app.post('/skills/execute', (req: Request, res: Response) => {
   if (result.error?.code === 'SKILL_NOT_FOUND') return res.status(404).json({ data: result });
   if (result.status === 'blocked') return res.status(409).json({ data: result });
   return res.status(500).json({ data: result });
-});
-
-const server = app.listen(cfg.AI_PORT, () => {
-  logger.info('app.started', 'ai server started', { port: cfg.AI_PORT });
-});
-
-const handleShutdown = (signal: string) => {
-  logger.info('app.shutdown.requested', 'ai shutdown requested', { signal });
-  server.close(() => {
-    logger.info('app.stopped', 'ai server stopped', { signal });
   });
+
+  return {
+    app,
+    cfg,
+    logger,
+  };
 };
 
-process.once('SIGINT', () => handleShutdown('SIGINT'));
-process.once('SIGTERM', () => handleShutdown('SIGTERM'));
+export const startAiServer = (): Server => {
+  const { app, cfg, logger } = createAiApp();
+  const server = app.listen(cfg.AI_PORT, () => {
+    logger.info('app.started', 'ai server started', { port: cfg.AI_PORT });
+  });
+
+  const handleShutdown = (signal: string) => {
+    logger.info('app.shutdown.requested', 'ai shutdown requested', { signal });
+    server.close(() => {
+      logger.info('app.stopped', 'ai server stopped', { signal });
+    });
+  };
+
+  process.once('SIGINT', () => handleShutdown('SIGINT'));
+  process.once('SIGTERM', () => handleShutdown('SIGTERM'));
+
+  return server;
+};
+
+if (process.env.NODE_ENV !== 'test') {
+  startAiServer();
+}

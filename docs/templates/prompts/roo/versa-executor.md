@@ -12,8 +12,8 @@ Fix and Resolve all comments and their suggestions.
 
 ---
 
-Issue: `https://github.com/Deveadra/versa/issues/99`
-Task card: docs/task-cards/active/ws21-issue-99-ultron-happy-path-e2e.md
+Issue: `https://github.com/Deveadra/versa/issues/100`
+Task card: docs/task-cards/active/ws22-issue-100-apps-ai-runtime-tests.md
 
 You are operating in Versa Executor mode for the `versa` repository.
 

@@ -71,3 +71,24 @@ This integration is additive and bounded to workspace-state foundations.
 - No MCP gateway implementation.
 - No unrelated memory refactors.
 - Existing non-workspace runtime behavior remains intact.
+
+## WS23 confidence suite status
+
+Issue: `https://github.com/Deveadra/versa/issues/101`
+
+WS23 strengthens confidence around currently implemented `@versa/workspaces` gateway behaviors for durable state continuity:
+
+- workspace create/list/get flows
+- state update behavior (including repeated updates and latest-value persistence)
+- activation metadata updates (`lastActivatedAt`, `updatedAt`)
+- checkpoint creation and recency ordering
+- context-bundle retrieval and checkpoint limit normalization
+- missing-workspace null-path behavior
+
+### Remaining confidence gaps
+
+The current confidence suite is scoped to in-memory gateway/repository behavior and contract enforcement already present in `@versa/shared`. Out of scope for WS23 and still open for future work:
+
+- durability/integration confidence against non-memory repositories beyond existing package-level coverage
+- broader orchestrator end-to-end continuity scenarios not specific to workspace package behavior
+- CI coverage-threshold policy changes

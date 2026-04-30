@@ -87,6 +87,43 @@ describe('apps/ai runtime boundary', () => {
     expect(json.data.mode).toBe('disabled');
   });
 
+  it('maps bridge invoke primary mode to successful proxied contract', async () => {
+    process.env.BRIDGE_ENABLED = 'true';
+    process.env.BRIDGE_MODE = 'primary';
+
+    const svc = await startTestServer();
+
+    const { response, json } = await svc.request('/bridge/invoke', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ capabilityId: 'legacy.summarize_day', payload: { topic: 'focus' } }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(json.data.attempted).toBe(true);
+    expect(json.data.mode).toBe('primary');
+    expect(json.data.response.status).toBe('ok');
+    expect(json.data.response.data.proxied).toBe(true);
+  });
+
+  it('denies medium-impact bridge invocation when approvals are enabled', async () => {
+    process.env.FEATURE_APPROVALS_ENABLED = 'true';
+    process.env.BRIDGE_ENABLED = 'true';
+    process.env.BRIDGE_MODE = 'primary';
+
+    const svc = await startTestServer();
+
+    const { response, json } = await svc.request('/bridge/invoke', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ capabilityId: 'legacy.summarize_day', payload: {} }),
+    });
+
+    expect(response.status).toBe(403);
+    expect(json.error).toContain('denied by approval policy');
+    expect(json.approval.outcome).toBe('deny');
+  });
+
   it('enforces approvals for risky bridge invocation when enabled', async () => {
     process.env.FEATURE_APPROVALS_ENABLED = 'true';
     process.env.BRIDGE_ENABLED = 'true';
@@ -122,6 +159,24 @@ describe('apps/ai runtime boundary', () => {
     expect(json.data.status).toBe('unavailable');
   });
 
+  it('routes enabled legacy ai/execute requests to successful legacy response contract', async () => {
+    process.env.BRIDGE_ENABLED = 'true';
+    process.env.BRIDGE_MODE = 'primary';
+
+    const svc = await startTestServer();
+
+    const { response, json } = await svc.request('/ai/execute', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ capabilityId: 'legacy.summarize_day', input: { day: 'monday' } }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(json.data.target).toBe('legacy_python_runtime');
+    expect(json.data.status).toBe('succeeded');
+    expect(json.data.output.proxied).toBe(true);
+  });
+
   it('maps missing skills on ai/execute to failed contract response', async () => {
     const svc = await startTestServer();
 
@@ -148,6 +203,23 @@ describe('apps/ai runtime boundary', () => {
 
     expect(response.status).toBe(404);
     expect(json.data.error.code).toBe('SKILL_NOT_FOUND');
+  });
+
+  it('returns 200 for successful local skill execution endpoint requests', async () => {
+    const svc = await startTestServer();
+
+    const { response, json } = await svc.request('/skills/execute', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        skillId: 'repo-inspection',
+        input: { files: ['README.md'] },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(json.data.status).toBe('succeeded');
+    expect(json.data.output).toBeTruthy();
   });
 
   it('requires approval for medium-risk skill execution below safe-act trust', async () => {
